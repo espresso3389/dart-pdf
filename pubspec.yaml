@@ -1,0 +1,12 @@
+name: dart_pdf_workspace
+description: Workspace for a pure-Dart PDF rendering and editing toolkit.
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+workspace:
+  - packages/pdf_cos
+  - packages/pdf_document
+  - packages/pdf_graphics
+  - packages/pdf_flutter

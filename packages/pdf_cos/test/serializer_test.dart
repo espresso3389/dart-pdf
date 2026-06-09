@@ -1,0 +1,75 @@
+import 'package:pdf_cos/pdf_cos.dart';
+import 'package:test/test.dart';
+
+import 'fixtures.dart';
+
+/// Serializes, reparses, and serializes again: both byte runs must agree.
+void expectRoundTrip(CosObject object) {
+  final first = CosSerializer.serialize(object);
+  final reparsed = CosParser(first).parseObject();
+  expect(CosSerializer.serialize(reparsed), first);
+}
+
+void main() {
+  test('scalars serialize to PDF syntax', () {
+    expect(String.fromCharCodes(CosSerializer.serialize(CosNull.instance)),
+        'null');
+    expect(
+        String.fromCharCodes(
+            CosSerializer.serialize(const CosBoolean(true))),
+        'true');
+    expect(String.fromCharCodes(CosSerializer.serialize(const CosInteger(42))),
+        '42');
+    expect(String.fromCharCodes(CosSerializer.serialize(const CosReal(1.5))),
+        '1.5');
+    expect(String.fromCharCodes(CosSerializer.serialize(const CosReal(2))),
+        '2.0');
+    expect(
+        String.fromCharCodes(CosSerializer.serialize(const CosName('Type'))),
+        '/Type');
+  });
+
+  test('reals never use exponent notation', () {
+    expect(CosSerializer.formatReal(0.0000001), isNot(contains('e')));
+    expect(CosSerializer.formatReal(1e20), isNot(contains('e')));
+  });
+
+  test('strings escape delimiters', () {
+    final out = String.fromCharCodes(
+        CosSerializer.serialize(CosString.fromText(r'a(b)c\d')));
+    expect(out, r'(a\(b\)c\\d)');
+  });
+
+  test('names escape special characters', () {
+    final out = String.fromCharCodes(
+        CosSerializer.serialize(const CosName('Lime Green')));
+    expect(out, '/Lime#20Green');
+  });
+
+  test('round trips', () {
+    expectRoundTrip(const CosInteger(-7));
+    expectRoundTrip(const CosReal(3.25));
+    expectRoundTrip(CosString.fromText('with (parens) and \\ slash'));
+    expectRoundTrip(CosString(ascii('CAFE'), isHex: true));
+    expectRoundTrip(const CosReference(12, 3));
+    expectRoundTrip(CosArray([
+      const CosInteger(1),
+      CosArray([const CosName('Nested')]),
+      const CosBoolean(false),
+    ]));
+    expectRoundTrip(CosDictionary({
+      'Type': const CosName('Page'),
+      'Parent': const CosReference(2, 0),
+      'MediaBox': CosArray([
+        const CosInteger(0),
+        const CosInteger(0),
+        const CosReal(612.5),
+        const CosInteger(792),
+      ]),
+    }));
+    expectRoundTrip(CosStream(
+      CosDictionary({'Length': const CosInteger(5)}),
+      ascii('Hello'),
+    ));
+  });
+}

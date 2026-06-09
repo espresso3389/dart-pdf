@@ -1,0 +1,17 @@
+name: pdf_cos
+description: >-
+  COS object layer for PDF: tokenizer, parser, filters, cross-reference
+  machinery, and serializer. Pure Dart, no dart:io.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  archive: ^4.0.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

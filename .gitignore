@@ -1,0 +1,7 @@
+.dart_tool/
+build/
+coverage/
+doc/api/
+.fvm/
+.idea/
+*.iml

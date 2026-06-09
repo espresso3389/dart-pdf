@@ -1,0 +1,233 @@
+import 'dart:typed_data';
+
+import 'package:pdf_cos/pdf_cos.dart';
+import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_graphics/pdf_graphics.dart';
+import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
+import 'package:test/test.dart';
+
+class RecordingDevice implements PdfDevice {
+  final calls = <String>[];
+  final fills = <(PdfPath, PdfColor, PdfFillRule, double)>[];
+  final strokes = <(PdfPath, PdfColor, PdfStroke, double)>[];
+  final clips = <(PdfPath, PdfFillRule)>[];
+  final texts = <PdfTextRun>[];
+  final images = <PdfImageRequest>[];
+
+  @override
+  void save() => calls.add('save');
+
+  @override
+  void restore() => calls.add('restore');
+
+  @override
+  void fillPath(PdfPath path, PdfColor color, PdfFillRule rule, double alpha) {
+    calls.add('fill');
+    fills.add((path, color, rule, alpha));
+  }
+
+  @override
+  void strokePath(
+      PdfPath path, PdfColor color, PdfStroke stroke, double alpha) {
+    calls.add('stroke');
+    strokes.add((path, color, stroke, alpha));
+  }
+
+  @override
+  void clipPath(PdfPath path, PdfFillRule rule) {
+    calls.add('clip');
+    clips.add((path, rule));
+  }
+
+  @override
+  void drawText(PdfTextRun run) {
+    calls.add('text');
+    texts.add(run);
+  }
+
+  @override
+  void drawImage(PdfImageRequest request) {
+    calls.add('image');
+    images.add(request);
+  }
+}
+
+RecordingDevice interpret(String content) {
+  final doc = CosDocument.open(buildClassicPdf());
+  final device = RecordingDevice();
+  PdfInterpreter(cos: doc, device: device).run(
+    ContentStreamParser.parse(Uint8List.fromList(content.codeUnits)),
+    CosDictionary(),
+  );
+  return device;
+}
+
+void main() {
+  test('fills a rectangle transformed by cm', () {
+    final device =
+        interpret('q 2 0 0 2 10 10 cm 0 0 1 rg 5 5 20 30 re f Q');
+    final (path, color, rule, alpha) = device.fills.single;
+    expect(color, const PdfColor(0, 0, 1));
+    expect(rule, PdfFillRule.nonzero);
+    expect(alpha, 1);
+    final move = path.segments.first as PdfMoveTo;
+    expect(move.x, 20); // 2*5 + 10
+    expect(move.y, 20);
+    final corner = path.segments[2] as PdfLineTo;
+    expect(corner.x, 60); // 2*(5+20) + 10
+    expect(corner.y, 80); // 2*(5+30) + 10
+  });
+
+  test('stroke width scales with the CTM', () {
+    final device = interpret('4 w 2 0 0 2 0 0 cm 0 0 10 10 re S');
+    expect(device.strokes.single.$3.width, 8);
+  });
+
+  test('q/Q restores color state', () {
+    final device = interpret('q 1 0 0 rg 0 0 1 1 re f Q 0 0 2 2 re f');
+    expect(device.fills[0].$2, const PdfColor(1, 0, 0));
+    expect(device.fills[1].$2, PdfColor.black);
+  });
+
+  test('clip applies after painting, with the same path', () {
+    final device = interpret('0 0 5 5 re W n 0 0 10 10 re f');
+    expect(device.calls, ['clip', 'fill']);
+    expect(device.clips.single.$2, PdfFillRule.nonzero);
+  });
+
+  test('CMYK and gray color operators convert to RGB', () {
+    final device = interpret('0 0 0 1 k 0 0 1 1 re f 0.5 g 0 0 1 1 re f');
+    expect(device.fills[0].$2, PdfColor.black);
+    expect(device.fills[1].$2, const PdfColor.gray(0.5));
+  });
+
+  test('ExtGState alpha applies to fills', () {
+    final doc = CosDocument.open(buildClassicPdf());
+    final device = RecordingDevice();
+    final resources = CosDictionary({
+      'ExtGState': CosDictionary({
+        'GS1': CosDictionary({'ca': const CosReal(0.25)}),
+      }),
+    });
+    PdfInterpreter(cos: doc, device: device).run(
+      ContentStreamParser.parse(
+          Uint8List.fromList('/GS1 gs 0 0 1 1 re f'.codeUnits)),
+      resources,
+    );
+    expect(device.fills.single.$4, 0.25);
+  });
+
+  group('text', () {
+    test('renders the fixture page text with correct placement', () {
+      final doc = PdfDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc.cos, device: device).drawPage(doc.page(0));
+
+      final run = device.texts.single;
+      expect(run.text, 'Hello, world!');
+      expect(run.fontName, 'Helvetica');
+      expect(run.transform.e, 72); // Td x
+      expect(run.transform.f, 720); // Td y
+      expect(run.transform.a, 24); // font size on the x axis
+      expect(run.transform.d, 24);
+      // 13 chars at the 0.5 em default width
+      expect(run.width, closeTo(6.5, 1e-9));
+    });
+
+    test('TJ adjustments shift subsequent runs', () {
+      final doc = PdfDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      final page = doc.page(0);
+      PdfInterpreter(cos: doc.cos, device: device).run(
+        ContentStreamParser.parse(Uint8List.fromList(
+            'BT /F1 10 Tf [(A) -500 (B)] TJ ET'.codeUnits)),
+        page.resources,
+      );
+      expect(device.texts, hasLength(2));
+      expect(device.texts[0].transform.e, 0);
+      // A advances 0.5 em * 10 = 5; adjustment -500/1000 * 10 = 5 more
+      expect(device.texts[1].transform.e, 10);
+    });
+
+    test('invisible text (Tr 3) advances but does not draw', () {
+      final doc = PdfDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      final page = doc.page(0);
+      PdfInterpreter(cos: doc.cos, device: device).run(
+        ContentStreamParser.parse(Uint8List.fromList(
+            'BT /F1 10 Tf 3 Tr (ghost) Tj 0 Tr (real) Tj ET'.codeUnits)),
+        page.resources,
+      );
+      final run = device.texts.single;
+      expect(run.text, 'real');
+      expect(run.transform.e, 25); // advanced past the 5 ghost glyphs
+    });
+  });
+
+  test('image XObjects reach the device with the CTM', () {
+    final doc = CosDocument.open(buildClassicPdf());
+    final device = RecordingDevice();
+    final image = CosStream(
+      CosDictionary({
+        'Subtype': const CosName('Image'),
+        'Width': const CosInteger(1),
+        'Height': const CosInteger(1),
+      }),
+      Uint8List.fromList([0]),
+    );
+    final resources = CosDictionary({
+      'XObject': CosDictionary({'Im0': image}),
+    });
+    PdfInterpreter(cos: doc, device: device).run(
+      ContentStreamParser.parse(
+          Uint8List.fromList('q 100 0 0 50 20 30 cm /Im0 Do Q'.codeUnits)),
+      resources,
+    );
+    final request = device.images.single;
+    expect(request.stream, same(image));
+    expect(request.transform.a, 100);
+    expect(request.transform.d, 50);
+    expect(request.transform.e, 20);
+    expect(request.transform.f, 30);
+  });
+
+  test('form XObjects run with their matrix and clipped bbox', () {
+    final doc = CosDocument.open(buildClassicPdf());
+    final device = RecordingDevice();
+    final form = CosStream(
+      CosDictionary({
+        'Subtype': const CosName('Form'),
+        'BBox': CosArray([
+          const CosInteger(0),
+          const CosInteger(0),
+          const CosInteger(10),
+          const CosInteger(10),
+        ]),
+        'Matrix': CosArray([
+          const CosInteger(2),
+          const CosInteger(0),
+          const CosInteger(0),
+          const CosInteger(2),
+          const CosInteger(0),
+          const CosInteger(0),
+        ]),
+        'Length': CosInteger('0 0 4 4 re f'.length),
+      }),
+      Uint8List.fromList('0 0 4 4 re f'.codeUnits),
+    );
+    final resources = CosDictionary({
+      'XObject': CosDictionary({'Fm0': form}),
+    });
+    PdfInterpreter(cos: doc, device: device).run(
+      ContentStreamParser.parse(
+          Uint8List.fromList('q 1 0 0 1 100 0 cm /Fm0 Do Q'.codeUnits)),
+      resources,
+    );
+    // bbox clip arrives, then the inner fill, doubly transformed
+    expect(device.calls, contains('clip'));
+    final fill = device.fills.single;
+    final corner = fill.$1.segments[2] as PdfLineTo;
+    expect(corner.x, 108); // 2*4 + 100
+    expect(corner.y, 8);
+  });
+}

@@ -1,0 +1,615 @@
+import 'dart:typed_data';
+
+import 'package:pdf_cos/pdf_cos.dart';
+import 'package:pdf_document/pdf_document.dart';
+
+import 'color.dart';
+import 'content_parser.dart';
+import 'device.dart';
+import 'font_info.dart';
+import 'matrix.dart';
+import 'path.dart';
+
+/// Graphics state, mirroring §8.4. Text state parameters live here too
+/// because `Tf`, `Tc` etc. are saved and restored by `q`/`Q`.
+class _GraphicsState {
+  _GraphicsState()
+      : ctm = PdfMatrix.identity,
+        fillColor = PdfColor.black,
+        strokeColor = PdfColor.black,
+        fillAlpha = 1,
+        strokeAlpha = 1,
+        stroke = const PdfStroke(),
+        fillComponents = 1,
+        strokeComponents = 1,
+        font = null,
+        fontDict = null,
+        fontSize = 0,
+        charSpacing = 0,
+        wordSpacing = 0,
+        horizontalScale = 1,
+        leading = 0,
+        rise = 0,
+        renderMode = 0;
+
+  _GraphicsState.from(_GraphicsState other)
+      : ctm = other.ctm,
+        fillColor = other.fillColor,
+        strokeColor = other.strokeColor,
+        fillAlpha = other.fillAlpha,
+        strokeAlpha = other.strokeAlpha,
+        stroke = other.stroke,
+        fillComponents = other.fillComponents,
+        strokeComponents = other.strokeComponents,
+        font = other.font,
+        fontDict = other.fontDict,
+        fontSize = other.fontSize,
+        charSpacing = other.charSpacing,
+        wordSpacing = other.wordSpacing,
+        horizontalScale = other.horizontalScale,
+        leading = other.leading,
+        rise = other.rise,
+        renderMode = other.renderMode;
+
+  PdfMatrix ctm;
+  PdfColor fillColor;
+  PdfColor strokeColor;
+  double fillAlpha;
+  double strokeAlpha;
+  PdfStroke stroke;
+
+  /// Component counts of the active /Fill and /Stroke color spaces, used to
+  /// interpret bare `sc`/`scn` operands.
+  int fillComponents;
+  int strokeComponents;
+
+  PdfFontInfo? font;
+  CosDictionary? fontDict;
+  double fontSize;
+  double charSpacing;
+  double wordSpacing;
+  double horizontalScale; // Tz / 100
+  double leading;
+  double rise;
+  int renderMode;
+}
+
+/// Executes page content streams against a [PdfDevice].
+///
+/// Coverage: paths, transforms, device color spaces, clipping, text
+/// positioning/showing (with metric-accurate advances), form XObjects,
+/// image XObjects and inline images (decoding delegated to the device).
+/// TODO: shadings (sh), patterns, soft masks, Type3 fonts.
+class PdfInterpreter {
+  PdfInterpreter({required this.cos, required this.device});
+
+  final CosDocument cos;
+  final PdfDevice device;
+
+  static const _maxFormDepth = 16;
+
+  var _state = _GraphicsState();
+  final List<_GraphicsState> _stateStack = [];
+  final Map<CosDictionary, PdfFontInfo> _fontCache = {};
+
+  // current path, built in page space
+  List<PdfPathSegment> _segments = [];
+  double _currentX = 0, _currentY = 0; // user-space current point
+  double _startX = 0, _startY = 0;
+  PdfFillRule? _pendingClip;
+
+  // text matrices
+  PdfMatrix _textMatrix = PdfMatrix.identity;
+  PdfMatrix _lineMatrix = PdfMatrix.identity;
+
+  void drawPage(PdfPage page) {
+    _state = _GraphicsState();
+    device.save();
+    try {
+      _run(ContentStreamParser.parse(page.contentBytes()), page.resources, 0);
+    } finally {
+      device.restore();
+    }
+  }
+
+  /// Runs a parsed content stream against [resources] (used by tests and,
+  /// later, annotation appearance streams).
+  void run(List<ContentOperation> operations, CosDictionary resources) {
+    _run(operations, resources, 0);
+  }
+
+  void _run(
+      List<ContentOperation> ops, CosDictionary resources, int formDepth) {
+    for (final op in ops) {
+      final o = op.operands;
+      switch (op.operator) {
+        // --- graphics state ---
+        case 'q':
+          _stateStack.add(_GraphicsState.from(_state));
+          device.save();
+        case 'Q':
+          if (_stateStack.isNotEmpty) {
+            _state = _stateStack.removeLast();
+            device.restore();
+          }
+        case 'cm':
+          _state.ctm = _matrixFrom(o).concat(_state.ctm);
+        case 'w':
+          _state.stroke = _state.stroke.copyWith(width: _num(o, 0));
+        case 'J':
+          _state.stroke = _state.stroke.copyWith(cap: _num(o, 0).toInt());
+        case 'j':
+          _state.stroke = _state.stroke.copyWith(join: _num(o, 0).toInt());
+        case 'M':
+          _state.stroke = _state.stroke.copyWith(miterLimit: _num(o, 0));
+        case 'd':
+          _state.stroke = _state.stroke.copyWith(
+            dashArray: o.isNotEmpty && o[0] is CosArray
+                ? [for (final v in (o[0] as CosArray).items) _numOf(v)]
+                : const [],
+            dashPhase: _num(o, 1),
+          );
+        case 'gs':
+          _applyExtGState(_dictResource(resources, 'ExtGState', o));
+        case 'ri' || 'i':
+          break;
+
+        // --- path construction ---
+        case 'm':
+          _moveTo(_num(o, 0), _num(o, 1));
+        case 'l':
+          _lineTo(_num(o, 0), _num(o, 1));
+        case 'c':
+          _curveTo(_num(o, 0), _num(o, 1), _num(o, 2), _num(o, 3), _num(o, 4),
+              _num(o, 5));
+        case 'v':
+          _curveTo(_currentX, _currentY, _num(o, 0), _num(o, 1), _num(o, 2),
+              _num(o, 3));
+        case 'y':
+          _curveTo(_num(o, 0), _num(o, 1), _num(o, 2), _num(o, 3), _num(o, 2),
+              _num(o, 3));
+        case 'h':
+          _closePath();
+        case 're':
+          final x = _num(o, 0), y = _num(o, 1);
+          final w = _num(o, 2), h = _num(o, 3);
+          _moveTo(x, y);
+          _lineTo(x + w, y);
+          _lineTo(x + w, y + h);
+          _lineTo(x, y + h);
+          _closePath();
+
+        // --- path painting ---
+        case 'S':
+          _paint(stroke: true);
+        case 's':
+          _closePath();
+          _paint(stroke: true);
+        case 'f' || 'F':
+          _paint(fill: PdfFillRule.nonzero);
+        case 'f*':
+          _paint(fill: PdfFillRule.evenOdd);
+        case 'B':
+          _paint(fill: PdfFillRule.nonzero, stroke: true);
+        case 'B*':
+          _paint(fill: PdfFillRule.evenOdd, stroke: true);
+        case 'b':
+          _closePath();
+          _paint(fill: PdfFillRule.nonzero, stroke: true);
+        case 'b*':
+          _closePath();
+          _paint(fill: PdfFillRule.evenOdd, stroke: true);
+        case 'n':
+          _paint();
+        case 'W':
+          _pendingClip = PdfFillRule.nonzero;
+        case 'W*':
+          _pendingClip = PdfFillRule.evenOdd;
+
+        // --- color ---
+        case 'g':
+          _state.fillColor = PdfColor.gray(_num(o, 0));
+        case 'G':
+          _state.strokeColor = PdfColor.gray(_num(o, 0));
+        case 'rg':
+          _state.fillColor = PdfColor(_num(o, 0), _num(o, 1), _num(o, 2));
+        case 'RG':
+          _state.strokeColor = PdfColor(_num(o, 0), _num(o, 1), _num(o, 2));
+        case 'k':
+          _state.fillColor =
+              PdfColor.cmyk(_num(o, 0), _num(o, 1), _num(o, 2), _num(o, 3));
+        case 'K':
+          _state.strokeColor =
+              PdfColor.cmyk(_num(o, 0), _num(o, 1), _num(o, 2), _num(o, 3));
+        case 'cs':
+          _state.fillComponents = _componentsOf(resources, o);
+        case 'CS':
+          _state.strokeComponents = _componentsOf(resources, o);
+        case 'sc' || 'scn':
+          _state.fillColor = _colorFromComponents(o, _state.fillColor);
+        case 'SC' || 'SCN':
+          _state.strokeColor = _colorFromComponents(o, _state.strokeColor);
+
+        // --- text ---
+        case 'BT':
+          _textMatrix = PdfMatrix.identity;
+          _lineMatrix = PdfMatrix.identity;
+        case 'ET':
+          break;
+        case 'Tf':
+          _setFont(resources, o);
+        case 'Td':
+          _textLineMove(_num(o, 0), _num(o, 1));
+        case 'TD':
+          _state.leading = -_num(o, 1);
+          _textLineMove(_num(o, 0), _num(o, 1));
+        case 'Tm':
+          _lineMatrix = _matrixFrom(o);
+          _textMatrix = _lineMatrix;
+        case 'T*':
+          _textLineMove(0, -_state.leading);
+        case 'TL':
+          _state.leading = _num(o, 0);
+        case 'Tc':
+          _state.charSpacing = _num(o, 0);
+        case 'Tw':
+          _state.wordSpacing = _num(o, 0);
+        case 'Tz':
+          _state.horizontalScale = _num(o, 0) / 100;
+        case 'Ts':
+          _state.rise = _num(o, 0);
+        case 'Tr':
+          _state.renderMode = _num(o, 0).toInt();
+        case 'Tj':
+          if (o.isNotEmpty && o[0] is CosString) {
+            _showText((o[0] as CosString).bytes);
+          }
+        case "'":
+          _textLineMove(0, -_state.leading);
+          if (o.isNotEmpty && o[0] is CosString) {
+            _showText((o[0] as CosString).bytes);
+          }
+        case '"':
+          _state.wordSpacing = _num(o, 0);
+          _state.charSpacing = _num(o, 1);
+          _textLineMove(0, -_state.leading);
+          if (o.length > 2 && o[2] is CosString) {
+            _showText((o[2] as CosString).bytes);
+          }
+        case 'TJ':
+          if (o.isNotEmpty && o[0] is CosArray) {
+            for (final item in (o[0] as CosArray).items) {
+              if (item is CosString) {
+                _showText(item.bytes);
+              } else {
+                final shift = -_numOf(item) /
+                    1000 *
+                    _state.fontSize *
+                    _state.horizontalScale;
+                _textMatrix =
+                    PdfMatrix.translation(shift, 0).concat(_textMatrix);
+              }
+            }
+          }
+
+        // --- XObjects and inline images ---
+        case 'Do':
+          _doXObject(resources, o, formDepth);
+        case 'BI':
+          _drawInlineImage(o);
+
+        // --- marked content, compatibility, Type3 metrics: no-ops ---
+        case 'BMC' || 'BDC' || 'EMC' || 'MP' || 'DP':
+        case 'BX' || 'EX':
+        case 'd0' || 'd1':
+        case 'sh': // TODO: shading patterns
+          break;
+
+        default:
+          // unknown operator: PDF says ignore (in compatibility sections);
+          // we ignore everywhere and rely on corpus testing to find gaps
+          break;
+      }
+    }
+  }
+
+  // ---------- paths ----------
+
+  void _addPoint(double x, double y, void Function(double, double) emit) {
+    emit(_state.ctm.transformX(x, y), _state.ctm.transformY(x, y));
+  }
+
+  void _moveTo(double x, double y) {
+    _currentX = _startX = x;
+    _currentY = _startY = y;
+    _addPoint(x, y, (px, py) => _segments.add(PdfMoveTo(px, py)));
+  }
+
+  void _lineTo(double x, double y) {
+    _currentX = x;
+    _currentY = y;
+    _addPoint(x, y, (px, py) => _segments.add(PdfLineTo(px, py)));
+  }
+
+  void _curveTo(
+      double x1, double y1, double x2, double y2, double x3, double y3) {
+    final m = _state.ctm;
+    _segments.add(PdfCubicTo(
+      m.transformX(x1, y1), m.transformY(x1, y1),
+      m.transformX(x2, y2), m.transformY(x2, y2),
+      m.transformX(x3, y3), m.transformY(x3, y3),
+    ));
+    _currentX = x3;
+    _currentY = y3;
+  }
+
+  void _closePath() {
+    _segments.add(const PdfClosePath());
+    _currentX = _startX;
+    _currentY = _startY;
+  }
+
+  void _paint({PdfFillRule? fill, bool stroke = false}) {
+    final path = PdfPath(_segments);
+    if (!path.isEmpty) {
+      if (fill != null) {
+        device.fillPath(path, _state.fillColor, fill, _state.fillAlpha);
+      }
+      if (stroke) {
+        final scaled = _state.stroke.copyWith(
+            width: _state.stroke.width <= 0
+                ? _state.ctm.scaleFactor // zero width = thinnest line
+                : _state.stroke.width * _state.ctm.scaleFactor);
+        device.strokePath(path, _state.strokeColor, scaled, _state.strokeAlpha);
+      }
+      if (_pendingClip != null) {
+        device.clipPath(path, _pendingClip!);
+      }
+    }
+    _pendingClip = null;
+    _segments = [];
+  }
+
+  // ---------- color ----------
+
+  int _componentsOf(CosDictionary resources, List<CosObject> o) {
+    if (o.isEmpty || o[0] is! CosName) return 1;
+    final name = (o[0] as CosName).value;
+    switch (name) {
+      case 'DeviceGray' || 'CalGray' || 'G':
+        return 1;
+      case 'DeviceRGB' || 'CalRGB' || 'Lab' || 'RGB':
+        return 3;
+      case 'DeviceCMYK' || 'CMYK':
+        return 4;
+      case 'Pattern':
+        return 0;
+    }
+    // named space in resources: ICCBased /N, or fall back to 3
+    final spaces = cos.resolve(resources['ColorSpace']);
+    if (spaces is CosDictionary) {
+      final space = cos.resolve(spaces[name]);
+      if (space is CosArray && space.length > 0) {
+        final family = cos.resolve(space[0]);
+        if (family is CosName && family.value == 'ICCBased' &&
+            space.length > 1) {
+          final profile = cos.resolve(space[1]);
+          if (profile is CosStream) {
+            final n = cos.resolve(profile.dictionary['N']);
+            if (n is CosInteger) return n.value;
+          }
+        }
+        if (family is CosName && family.value == 'Indexed') return 1;
+        if (family is CosName && family.value == 'Separation') return 1;
+      }
+    }
+    return 3;
+  }
+
+  PdfColor _colorFromComponents(List<CosObject> o, PdfColor current) {
+    final values = [
+      for (final item in o)
+        if (item is CosInteger || item is CosReal) _numOf(item),
+    ];
+    switch (values.length) {
+      case 1:
+        return PdfColor.gray(values[0]);
+      case 3:
+        return PdfColor(values[0], values[1], values[2]);
+      case 4:
+        return PdfColor.cmyk(values[0], values[1], values[2], values[3]);
+    }
+    // pattern or unsupported: keep something visible
+    return current;
+  }
+
+  void _applyExtGState(CosDictionary? gs) {
+    if (gs == null) return;
+    final ca = cos.resolve(gs['ca']);
+    if (ca is CosInteger || ca is CosReal) _state.fillAlpha = _numOf(ca);
+    final caStroke = cos.resolve(gs['CA']);
+    if (caStroke is CosInteger || caStroke is CosReal) {
+      _state.strokeAlpha = _numOf(caStroke);
+    }
+    final lw = cos.resolve(gs['LW']);
+    if (lw is CosInteger || lw is CosReal) {
+      _state.stroke = _state.stroke.copyWith(width: _numOf(lw));
+    }
+  }
+
+  // ---------- text ----------
+
+  void _setFont(CosDictionary resources, List<CosObject> o) {
+    _state.fontSize = _num(o, 1);
+    final fonts = cos.resolve(resources['Font']);
+    if (o.isEmpty || o[0] is! CosName || fonts is! CosDictionary) return;
+    final dict = cos.resolve(fonts[(o[0] as CosName).value]);
+    if (dict is! CosDictionary) return;
+    _state.fontDict = dict;
+    _state.font =
+        _fontCache.putIfAbsent(dict, () => PdfFontInfo.load(cos, dict));
+  }
+
+  void _textLineMove(double tx, double ty) {
+    _lineMatrix = PdfMatrix.translation(tx, ty).concat(_lineMatrix);
+    _textMatrix = _lineMatrix;
+  }
+
+  void _showText(Uint8List bytes) {
+    final font = _state.font;
+    final size = _state.fontSize;
+    if (font == null) return;
+
+    final codes = font.codesOf(bytes);
+    final buffer = StringBuffer();
+    var advance = 0.0; // in unscaled text-space units
+    for (final code in codes) {
+      buffer.write(font.charFor(code));
+      var tx = font.widthOf(code) * size + _state.charSpacing;
+      if (!font.isCid && code == 0x20) tx += _state.wordSpacing;
+      advance += tx * _state.horizontalScale;
+    }
+
+    if (_state.renderMode != 3 && size != 0) {
+      // text rendering matrix: em space → page space (§9.4.4)
+      final transform = PdfMatrix(
+        size * _state.horizontalScale, 0, //
+        0, size, //
+        0, _state.rise,
+      ).concat(_textMatrix).concat(_state.ctm);
+      final text = buffer.toString();
+      if (text.trim().isNotEmpty) {
+        device.drawText(PdfTextRun(
+          text: text,
+          transform: transform,
+          color: _state.renderMode == 1 || _state.renderMode == 5
+              ? _state.strokeColor
+              : _state.fillColor,
+          width: advance / (size * _state.horizontalScale),
+          fontName: font.baseFont,
+          fontSize: size,
+        ));
+      }
+    }
+    _textMatrix = PdfMatrix.translation(advance, 0).concat(_textMatrix);
+  }
+
+  // ---------- XObjects ----------
+
+  CosDictionary? _dictResource(
+      CosDictionary resources, String category, List<CosObject> o) {
+    if (o.isEmpty || o[0] is! CosName) return null;
+    final group = cos.resolve(resources[category]);
+    if (group is! CosDictionary) return null;
+    final value = cos.resolve(group[(o[0] as CosName).value]);
+    return value is CosDictionary ? value : null;
+  }
+
+  void _doXObject(CosDictionary resources, List<CosObject> o, int formDepth) {
+    if (o.isEmpty || o[0] is! CosName) return;
+    final group = cos.resolve(resources['XObject']);
+    if (group is! CosDictionary) return;
+    final xobject = cos.resolve(group[(o[0] as CosName).value]);
+    if (xobject is! CosStream) return;
+
+    final subtype = xobject.dictionary['Subtype'];
+    final name = subtype is CosName ? subtype.value : '';
+    if (name == 'Image') {
+      device.drawImage(PdfImageRequest(
+        stream: xobject,
+        transform: _state.ctm,
+        alpha: _state.fillAlpha,
+      ));
+      return;
+    }
+    if (name != 'Form' || formDepth >= _maxFormDepth) return;
+
+    _stateStack.add(_GraphicsState.from(_state));
+    device.save();
+    try {
+      final matrix = cos.resolve(xobject.dictionary['Matrix']);
+      if (matrix is CosArray && matrix.length >= 6) {
+        _state.ctm = _matrixFrom(matrix.items).concat(_state.ctm);
+      }
+      final bbox = cos.resolve(xobject.dictionary['BBox']);
+      if (bbox is CosArray && bbox.length >= 4) {
+        _clipToBox([for (var i = 0; i < 4; i++) _numOf(cos.resolve(bbox[i]))]);
+      }
+      final innerResources = cos.resolve(xobject.dictionary['Resources']);
+      final Uint8List content;
+      try {
+        content = cos.decodeStreamData(xobject);
+      } on Exception {
+        return;
+      }
+      _run(
+        ContentStreamParser.parse(content),
+        innerResources is CosDictionary ? innerResources : resources,
+        formDepth + 1,
+      );
+    } finally {
+      _state = _stateStack.removeLast();
+      device.restore();
+    }
+  }
+
+  void _clipToBox(List<double> box) {
+    final m = _state.ctm;
+    final corners = [
+      (box[0], box[1]),
+      (box[2], box[1]),
+      (box[2], box[3]),
+      (box[0], box[3]),
+    ];
+    final segments = <PdfPathSegment>[
+      for (var i = 0; i < corners.length; i++)
+        i == 0
+            ? PdfMoveTo(m.transformX(corners[i].$1, corners[i].$2),
+                m.transformY(corners[i].$1, corners[i].$2))
+            : PdfLineTo(m.transformX(corners[i].$1, corners[i].$2),
+                m.transformY(corners[i].$1, corners[i].$2)),
+      const PdfClosePath(),
+    ];
+    device.clipPath(PdfPath(segments), PdfFillRule.nonzero);
+  }
+
+  void _drawInlineImage(List<CosObject> o) {
+    if (o.length < 2 || o[0] is! CosDictionary || o[1] is! CosString) return;
+    final abbreviated = o[0] as CosDictionary;
+    // inline image dictionaries use abbreviated keys (§8.9.7, table 91)
+    const expansions = {
+      'W': 'Width',
+      'H': 'Height',
+      'BPC': 'BitsPerComponent',
+      'CS': 'ColorSpace',
+      'F': 'Filter',
+      'D': 'Decode',
+      'DP': 'DecodeParms',
+      'IM': 'ImageMask',
+      'I': 'Interpolate',
+    };
+    final dict = CosDictionary();
+    abbreviated.entries.forEach((key, value) {
+      dict[expansions[key] ?? key] = value;
+    });
+    device.drawImage(PdfImageRequest(
+      stream: CosStream(dict, (o[1] as CosString).bytes),
+      transform: _state.ctm,
+      alpha: _state.fillAlpha,
+    ));
+  }
+
+  // ---------- helpers ----------
+
+  static double _numOf(CosObject? value) {
+    if (value is CosInteger) return value.value.toDouble();
+    if (value is CosReal) return value.value;
+    return 0;
+  }
+
+  static double _num(List<CosObject> operands, int index) =>
+      index < operands.length ? _numOf(operands[index]) : 0;
+
+  static PdfMatrix _matrixFrom(List<CosObject> o) => PdfMatrix(
+      _num(o, 0), _num(o, 1), _num(o, 2), _num(o, 3), _num(o, 4), _num(o, 5));
+}

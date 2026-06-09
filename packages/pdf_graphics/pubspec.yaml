@@ -11,6 +11,7 @@ environment:
 
 dependencies:
   pdf_cos: ^0.1.0
+  pdf_document: ^0.1.0
 
 dev_dependencies:
   pdf_test_fixtures: ^0.1.0

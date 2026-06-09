@@ -1,5 +1,12 @@
-/// Content-stream parsing for PDF pages. The interpreter, device interface,
-/// and font engine will live here as they are built.
+/// Content-stream parsing and interpretation for PDF pages: the interpreter
+/// walks page content and emits drawing callbacks into a [PdfDevice]
+/// implementation (Flutter Canvas, text extraction, test recorders).
 library;
 
+export 'src/color.dart';
 export 'src/content_parser.dart';
+export 'src/device.dart';
+export 'src/font_info.dart';
+export 'src/interpreter.dart';
+export 'src/matrix.dart';
+export 'src/path.dart';

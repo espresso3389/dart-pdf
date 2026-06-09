@@ -10,3 +10,4 @@ export 'src/font_info.dart';
 export 'src/interpreter.dart';
 export 'src/matrix.dart';
 export 'src/path.dart';
+export 'src/text_extraction.dart';

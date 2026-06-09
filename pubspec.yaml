@@ -10,4 +10,5 @@ workspace:
   - packages/pdf_document
   - packages/pdf_graphics
   - packages/pdf_flutter
+  - packages/pdf_flutter/example
   - packages/pdf_test_fixtures

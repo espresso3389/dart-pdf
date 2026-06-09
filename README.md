@@ -3,9 +3,14 @@
 A PDF renderer and editor written entirely in Dart, for use in Flutter apps —
 no PDFium, no platform channels.
 
-> Status: early development. The COS object layer works (parse real PDF files,
-> including cross-reference streams and object streams); rendering and editing
-> are in progress.
+**End goal:** a PSPDFKit/Nutrient-class SDK — fast viewer, full annotation
+suite with appearance-stream generation, AcroForm filling, page manipulation,
+and digital-signature-safe editing — built natively for Flutter.
+
+> Status: early development. The COS object layer works (parses real PDF
+> files, including cross-reference streams and object streams), and the
+> incremental-update writer supports metadata and page-level edits that
+> preserve digital signatures. Rendering is the current frontier.
 
 ## Architecture
 
@@ -23,12 +28,19 @@ core runs on servers and in plain Dart tests.
 
 1. ✅ COS reader: lexer, parser, FlateDecode + predictors, xref tables,
    xref streams, object streams
-2. Incremental-update writer; document-level editing (merge, split, rotate,
-   metadata, form filling)
-3. Content-stream interpreter with an abstract device interface
-4. Font engine: TrueType/CFF glyph outlines, CID fonts, CMaps, ToUnicode
-5. Flutter rendering device + viewer widget (tiling, zoom, selection, search)
-6. Content editing tiers: stamping → element deletion → text editing
+2. ✅ Incremental-update writer (signature-preserving); first edits:
+   metadata, page rotation
+3. Encryption (RC4/AES-128/AES-256) — required for business documents
+4. Content-stream interpreter with an abstract device interface
+5. Font engine: TrueType/CFF glyph outlines, CID fonts, CMaps, ToUnicode
+6. Flutter rendering device + viewer widget (tiling, zoom, page cache)
+7. Text extraction with positions → selection and search
+8. Annotations: model, rendering, **appearance-stream generation**
+   (ink, highlight, shapes, free text, notes, stamps), flattening
+9. AcroForm: field model, filling, appearance regeneration
+10. Page manipulation: reorder, merge, split (cross-document object copying)
+11. Digital signatures: signing and validation
+12. Content editing tiers: stamping → element deletion → text editing
 
 ## Development
 

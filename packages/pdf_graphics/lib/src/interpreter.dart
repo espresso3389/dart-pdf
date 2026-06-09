@@ -519,6 +519,9 @@ class PdfInterpreter {
         stream: xobject,
         transform: _state.ctm,
         alpha: _state.fillAlpha,
+        isStencil: cos.resolve(xobject.dictionary['ImageMask']) ==
+            const CosBoolean(true),
+        stencilColor: _state.fillColor,
       ));
       return;
     }
@@ -596,6 +599,8 @@ class PdfInterpreter {
       stream: CosStream(dict, (o[1] as CosString).bytes),
       transform: _state.ctm,
       alpha: _state.fillAlpha,
+      isStencil: dict['ImageMask'] == const CosBoolean(true),
+      stencilColor: _state.fillColor,
     ));
   }
 

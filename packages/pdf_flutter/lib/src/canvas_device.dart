@@ -91,6 +91,15 @@ class CanvasPdfDevice implements PdfDevice {
   void drawImage(PdfImageRequest request) {
     final image = images[request.stream];
     if (image == null) return; // not decodable (yet): skip silently
+    final paint = Paint()..filterQuality = FilterQuality.medium;
+    if (request.isStencil) {
+      // stencil masks paint the fill color through the mask's alpha
+      paint.colorFilter = ColorFilter.mode(
+          _toColor(request.stencilColor, request.alpha), BlendMode.srcIn);
+    } else {
+      paint.color =
+          Color.from(alpha: request.alpha, red: 0, green: 0, blue: 0);
+    }
     canvas.save();
     canvas.transform(_toFloat64(request.transform));
     // image space: unit square, y-up; image pixels: y-down from the top
@@ -100,10 +109,7 @@ class CanvasPdfDevice implements PdfDevice {
       image,
       Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
       const Rect.fromLTWH(0, 0, 1, 1),
-      Paint()
-        ..filterQuality = FilterQuality.medium
-        ..color = Color.from(
-            alpha: request.alpha, red: 0, green: 0, blue: 0),
+      paint,
     );
     canvas.restore();
   }

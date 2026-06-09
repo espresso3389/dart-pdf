@@ -42,6 +42,8 @@ class PdfImageRequest {
     required this.stream,
     required this.transform,
     this.alpha = 1,
+    this.isStencil = false,
+    this.stencilColor = PdfColor.black,
   });
 
   final CosStream stream;
@@ -50,6 +52,13 @@ class PdfImageRequest {
   final PdfMatrix transform;
 
   final double alpha;
+
+  /// True for /ImageMask stencils, which paint [stencilColor] through the
+  /// mask instead of carrying their own colors (§8.9.6.2).
+  final bool isStencil;
+
+  /// The fill color in effect when a stencil mask is drawn.
+  final PdfColor stencilColor;
 }
 
 /// Rendering target. The interpreter walks a content stream and emits these

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:pdf_cos/pdf_cos.dart';
@@ -9,6 +10,7 @@ import 'device.dart';
 import 'font_info.dart';
 import 'matrix.dart';
 import 'path.dart';
+import 'shading.dart';
 
 /// Graphics state, mirroring §8.4. Text state parameters live here too
 /// because `Tf`, `Tc` etc. are saved and restored by `q`/`Q`.
@@ -22,6 +24,8 @@ class _GraphicsState {
         stroke = const PdfStroke(),
         fillComponents = 1,
         strokeComponents = 1,
+        fillPattern = null,
+        fillPatternComponents = const [],
         font = null,
         fontDict = null,
         fontSize = 0,
@@ -41,6 +45,8 @@ class _GraphicsState {
         stroke = other.stroke,
         fillComponents = other.fillComponents,
         strokeComponents = other.strokeComponents,
+        fillPattern = other.fillPattern,
+        fillPatternComponents = other.fillPatternComponents,
         font = other.font,
         fontDict = other.fontDict,
         fontSize = other.fontSize,
@@ -62,6 +68,12 @@ class _GraphicsState {
   /// interpret bare `sc`/`scn` operands.
   int fillComponents;
   int strokeComponents;
+
+  /// The active fill pattern (stream for tiling, dictionary for shading)
+  /// when the fill space is /Pattern, plus the underlying color components
+  /// for uncolored (PaintType 2) tiling patterns.
+  CosObject? fillPattern;
+  List<double> fillPatternComponents;
 
   PdfFontInfo? font;
   CosDictionary? fontDict;
@@ -91,6 +103,9 @@ class PdfInterpreter {
   var _state = _GraphicsState();
   final List<_GraphicsState> _stateStack = [];
   final Map<CosDictionary, PdfFontInfo> _fontCache = {};
+  final Map<CosStream, List<ContentOperation>> _patternOpsCache = {};
+  int _currentFormDepth = 0;
+  PdfRect? _pageBox;
 
   // current path, built in page space
   List<PdfPathSegment> _segments = [];
@@ -104,6 +119,7 @@ class PdfInterpreter {
 
   void drawPage(PdfPage page) {
     _state = _GraphicsState();
+    _pageBox = page.mediaBox;
     device.save();
     try {
       _run(ContentStreamParser.parse(page.contentBytes()), page.resources, 0);
@@ -119,6 +135,17 @@ class PdfInterpreter {
   }
 
   void _run(
+      List<ContentOperation> ops, CosDictionary resources, int formDepth) {
+    final previousDepth = _currentFormDepth;
+    _currentFormDepth = formDepth;
+    try {
+      _runOps(ops, resources, formDepth);
+    } finally {
+      _currentFormDepth = previousDepth;
+    }
+  }
+
+  void _runOps(
       List<ContentOperation> ops, CosDictionary resources, int formDepth) {
     for (final op in ops) {
       final o = op.operands;
@@ -223,12 +250,30 @@ class PdfInterpreter {
               PdfColor.cmyk(_num(o, 0), _num(o, 1), _num(o, 2), _num(o, 3));
         case 'cs':
           _state.fillComponents = _componentsOf(resources, o);
+          _state.fillPattern = null;
         case 'CS':
           _state.strokeComponents = _componentsOf(resources, o);
         case 'sc' || 'scn':
-          _state.fillColor = _colorFromComponents(o, _state.fillColor);
+          _state.fillPattern = null;
+          if (o.isNotEmpty && o.last is CosName) {
+            _state.fillPattern =
+                _resource(resources, 'Pattern', o.last as CosName);
+            _state.fillPatternComponents = [
+              for (final v in o)
+                if (v is CosInteger || v is CosReal) _numOf(v),
+            ];
+          } else {
+            _state.fillColor = _colorFromComponents(o, _state.fillColor);
+          }
         case 'SC' || 'SCN':
-          _state.strokeColor = _colorFromComponents(o, _state.strokeColor);
+          if (o.isNotEmpty && o.last is CosName) {
+            // stroke patterns: approximate with the pattern's average color
+            final color =
+                _patternAverageColor(_resource(resources, 'Pattern', o.last as CosName));
+            if (color != null) _state.strokeColor = color;
+          } else {
+            _state.strokeColor = _colorFromComponents(o, _state.strokeColor);
+          }
 
         // --- text ---
         case 'BT':
@@ -298,11 +343,13 @@ class PdfInterpreter {
         case 'BI':
           _drawInlineImage(o);
 
+        case 'sh':
+          _applyShading(resources, o);
+
         // --- marked content, compatibility, Type3 metrics: no-ops ---
         case 'BMC' || 'BDC' || 'EMC' || 'MP' || 'DP':
         case 'BX' || 'EX':
         case 'd0' || 'd1':
-        case 'sh': // TODO: shading patterns
           break;
 
         default:
@@ -353,7 +400,12 @@ class PdfInterpreter {
     final path = PdfPath(_segments);
     if (!path.isEmpty) {
       if (fill != null) {
-        device.fillPath(path, _state.fillColor, fill, _state.fillAlpha);
+        final pattern = _state.fillPattern;
+        if (pattern != null) {
+          _fillWithPattern(path, fill, pattern);
+        } else {
+          device.fillPath(path, _state.fillColor, fill, _state.fillAlpha);
+        }
       }
       if (stroke) {
         final scaled = _state.stroke.copyWith(
@@ -492,6 +544,186 @@ class PdfInterpreter {
       }
     }
     _textMatrix = PdfMatrix.translation(advance, 0).concat(_textMatrix);
+  }
+
+  // ---------- patterns and shadings ----------
+
+  /// Looks up a named resource and resolves it (dictionary or stream).
+  CosObject? _resource(
+      CosDictionary resources, String category, CosName name) {
+    final group = cos.resolve(resources[category]);
+    if (group is! CosDictionary) return null;
+    final value = cos.resolve(group[name.value]);
+    return value is CosNull ? null : value;
+  }
+
+  CosDictionary? _patternDict(CosObject? pattern) {
+    if (pattern is CosStream) return pattern.dictionary;
+    if (pattern is CosDictionary) return pattern;
+    return null;
+  }
+
+  PdfMatrix _patternMatrix(CosDictionary dict) {
+    final matrix = cos.resolve(dict['Matrix']);
+    return matrix is CosArray && matrix.length >= 6
+        ? _matrixFrom(matrix.items)
+        : PdfMatrix.identity;
+  }
+
+  PdfColor? _patternAverageColor(CosObject? pattern) {
+    final dict = _patternDict(pattern);
+    if (dict == null) return null;
+    final shading = PdfShading.parse(cos, dict['Shading']);
+    return shading?.toGradient(PdfMatrix.identity)?.averageColor;
+  }
+
+  void _fillWithPattern(PdfPath path, PdfFillRule rule, CosObject pattern) {
+    final dict = _patternDict(pattern);
+    if (dict == null) return;
+    final type = cos.resolve(dict['PatternType']);
+    final patternType = type is CosInteger ? type.value : 0;
+
+    if (patternType == 2) {
+      // shading pattern: the matrix maps pattern space to page space
+      final shading = PdfShading.parse(cos, dict['Shading']);
+      final gradient = shading?.toGradient(_patternMatrix(dict));
+      if (gradient != null) {
+        device.fillPathGradient(path, rule, gradient, _state.fillAlpha);
+      }
+      // unsupported shading types: skip rather than paint a wrong solid
+      return;
+    }
+    if (patternType == 1 && pattern is CosStream) {
+      _fillWithTilingPattern(path, rule, pattern);
+    }
+  }
+
+  /// Runs a tiling pattern's cell content once per tile across the fill
+  /// area, clipped to the fill path (§8.7.3).
+  void _fillWithTilingPattern(
+      PdfPath path, PdfFillRule rule, CosStream pattern) {
+    if (_currentFormDepth >= _maxFormDepth) return;
+    final dict = pattern.dictionary;
+    final matrix = _patternMatrix(dict);
+    final inverse = matrix.inverted();
+    if (inverse == null) return;
+
+    final ops = _patternOpsCache.putIfAbsent(pattern, () {
+      try {
+        return ContentStreamParser.parse(cos.decodeStreamData(pattern));
+      } on Exception {
+        return const [];
+      }
+    });
+    if (ops.isEmpty) return;
+
+    final bbox = _numbersOf(dict['BBox']);
+    if (bbox.length < 4) return;
+    var xStep = _numOf(cos.resolve(dict['XStep']));
+    var yStep = _numOf(cos.resolve(dict['YStep']));
+    if (xStep == 0) xStep = (bbox[2] - bbox[0]).abs();
+    if (yStep == 0) yStep = (bbox[3] - bbox[1]).abs();
+    if (xStep == 0 || yStep == 0) return;
+    xStep = xStep.abs();
+    yStep = yStep.abs();
+
+    final paintTypeObj = cos.resolve(dict['PaintType']);
+    final uncolored = paintTypeObj is CosInteger && paintTypeObj.value == 2;
+    final resourcesObj = cos.resolve(dict['Resources']);
+    final patternResources =
+        resourcesObj is CosDictionary ? resourcesObj : CosDictionary();
+
+    // fill-area bounds in pattern space decide which tiles to run
+    var minX = double.infinity, minY = double.infinity;
+    var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    for (final segment in path.segments) {
+      for (final (x, y) in _segmentPoints(segment)) {
+        minX = math.min(minX, inverse.transformX(x, y));
+        minY = math.min(minY, inverse.transformY(x, y));
+        maxX = math.max(maxX, inverse.transformX(x, y));
+        maxY = math.max(maxY, inverse.transformY(x, y));
+      }
+    }
+    if (minX > maxX) return;
+    final i0 = ((minX - bbox[0]) / xStep).floor() - 1;
+    final i1 = ((maxX - bbox[0]) / xStep).ceil();
+    final j0 = ((minY - bbox[1]) / yStep).floor() - 1;
+    final j1 = ((maxY - bbox[1]) / yStep).ceil();
+    const maxTiles = 4096;
+    if ((i1 - i0 + 1) * (j1 - j0 + 1) > maxTiles) return;
+
+    device.save();
+    device.clipPath(path, rule);
+    final savedState = _state;
+    final savedStackDepth = _stateStack.length;
+    final patternColor = uncolored
+        ? colorFromComponents(_state.fillPatternComponents)
+        : null;
+    try {
+      for (var j = j0; j <= j1; j++) {
+        for (var i = i0; i <= i1; i++) {
+          _state = _GraphicsState()
+            ..ctm =
+                PdfMatrix.translation(i * xStep, j * yStep).concat(matrix);
+          if (patternColor != null) {
+            _state.fillColor = patternColor;
+            _state.strokeColor = patternColor;
+          }
+          device.save();
+          try {
+            _run(ops, patternResources, _currentFormDepth + 1);
+          } finally {
+            device.restore();
+          }
+        }
+      }
+    } finally {
+      while (_stateStack.length > savedStackDepth) {
+        _stateStack.removeLast();
+      }
+      _state = savedState;
+      device.restore();
+    }
+  }
+
+  void _applyShading(CosDictionary resources, List<CosObject> o) {
+    if (o.isEmpty || o[0] is! CosName) return;
+    final shading =
+        PdfShading.parse(cos, _resource(resources, 'Shading', o[0] as CosName));
+    // sh geometry lives in the current user space (§8.7.4.2)
+    final gradient = shading?.toGradient(_state.ctm);
+    if (gradient == null) return;
+    // paint across the page; the active canvas clip bounds it
+    final box = _pageBox ?? const PdfRect(-1e5, -1e5, 1e5, 1e5);
+    final area = PdfPath([
+      PdfMoveTo(box.left, box.bottom),
+      PdfLineTo(box.right, box.bottom),
+      PdfLineTo(box.right, box.top),
+      PdfLineTo(box.left, box.top),
+      const PdfClosePath(),
+    ]);
+    device.fillPathGradient(area, PdfFillRule.nonzero, gradient,
+        _state.fillAlpha);
+  }
+
+  List<double> _numbersOf(CosObject? object) {
+    final v = cos.resolve(object);
+    if (v is! CosArray) return const [];
+    return [for (final item in v.items) _numOf(cos.resolve(item))];
+  }
+
+  static Iterable<(double, double)> _segmentPoints(
+      PdfPathSegment segment) sync* {
+    switch (segment) {
+      case PdfMoveTo(:final x, :final y) || PdfLineTo(:final x, :final y):
+        yield (x, y);
+      case PdfCubicTo():
+        yield (segment.x1, segment.y1);
+        yield (segment.x2, segment.y2);
+        yield (segment.x3, segment.y3);
+      case PdfClosePath():
+        break;
+    }
   }
 
   // ---------- XObjects ----------

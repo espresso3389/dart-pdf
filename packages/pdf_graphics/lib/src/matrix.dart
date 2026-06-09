@@ -33,6 +33,17 @@ class PdfMatrix {
 
   double transformY(double x, double y) => b * x + d * y + f;
 
+  /// The inverse transform, or null when this matrix is degenerate.
+  PdfMatrix? inverted() {
+    final det = a * d - b * c;
+    if (det.abs() < 1e-12) return null;
+    final ia = d / det;
+    final ib = -b / det;
+    final ic = -c / det;
+    final id = a / det;
+    return PdfMatrix(ia, ib, ic, id, -(e * ia + f * ic), -(e * ib + f * id));
+  }
+
   /// Average scale factor: how much this transform magnifies lengths.
   double get scaleFactor => math.sqrt((a * d - b * c).abs());
 

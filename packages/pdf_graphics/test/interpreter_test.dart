@@ -20,10 +20,19 @@ class RecordingDevice implements PdfDevice {
   @override
   void restore() => calls.add('restore');
 
+  final gradients = <(PdfPath, PdfGradient)>[];
+
   @override
   void fillPath(PdfPath path, PdfColor color, PdfFillRule rule, double alpha) {
     calls.add('fill');
     fills.add((path, color, rule, alpha));
+  }
+
+  @override
+  void fillPathGradient(
+      PdfPath path, PdfFillRule rule, PdfGradient gradient, double alpha) {
+    calls.add('gradient');
+    gradients.add((path, gradient));
   }
 
   @override
@@ -161,6 +170,105 @@ void main() {
       final run = device.texts.single;
       expect(run.text, 'real');
       expect(run.transform.e, 25); // advanced past the 5 ghost glyphs
+    });
+  });
+
+  group('patterns', () {
+    CosDictionary shadingPatternResources() => CosDictionary({
+          'Pattern': CosDictionary({
+            'P0': CosDictionary({
+              'PatternType': const CosInteger(2),
+              'Shading': CosDictionary({
+                'ShadingType': const CosInteger(2),
+                'ColorSpace': const CosName('DeviceRGB'),
+                'Coords': CosArray([
+                  const CosInteger(0),
+                  const CosInteger(0),
+                  const CosInteger(10),
+                  const CosInteger(0),
+                ]),
+                'Function': CosDictionary({
+                  'FunctionType': const CosInteger(2),
+                  'C0': CosArray([
+                    const CosInteger(1),
+                    const CosInteger(0),
+                    const CosInteger(0),
+                  ]),
+                  'C1': CosArray([
+                    const CosInteger(0),
+                    const CosInteger(0),
+                    const CosInteger(1),
+                  ]),
+                  'N': const CosInteger(1),
+                }),
+              }),
+            }),
+          }),
+        });
+
+    test('shading pattern fills become gradients, not solid color', () {
+      final doc = CosDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc, device: device).run(
+        ContentStreamParser.parse(Uint8List.fromList(
+            '0 0 0 rg /Pattern cs /P0 scn 0 0 10 10 re f'.codeUnits)),
+        shadingPatternResources(),
+      );
+      // regression: this used to paint solid black (the last set color)
+      expect(device.fills, isEmpty);
+      expect(device.gradients, hasLength(1));
+      final gradient = device.gradients.single.$2;
+      expect(gradient.colors.first, const PdfColor(1, 0, 0));
+    });
+
+    test('tiling patterns run their cell content per tile, clipped', () {
+      final doc = CosDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      const cell = '1 0 0 rg 0 0 1 1 re f';
+      final resources = CosDictionary({
+        'Pattern': CosDictionary({
+          'P1': CosStream(
+            CosDictionary({
+              'PatternType': const CosInteger(1),
+              'PaintType': const CosInteger(1),
+              'BBox': CosArray([
+                const CosInteger(0),
+                const CosInteger(0),
+                const CosInteger(4),
+                const CosInteger(4),
+              ]),
+              'XStep': const CosInteger(4),
+              'YStep': const CosInteger(4),
+              'Length': CosInteger(cell.length),
+            }),
+            Uint8List.fromList(cell.codeUnits),
+          ),
+        }),
+      });
+      PdfInterpreter(cos: doc, device: device).run(
+        ContentStreamParser.parse(Uint8List.fromList(
+            '/Pattern cs /P1 scn 0 0 8 8 re f'.codeUnits)),
+        resources,
+      );
+      expect(device.clips, isNotEmpty);
+      // 8x8 area on a 4pt grid: at least 4 cells painted in the cell color
+      expect(device.fills.length, greaterThanOrEqualTo(4));
+      expect(device.fills.first.$2, const PdfColor(1, 0, 0));
+    });
+
+    test('sh paints a gradient across the page area', () {
+      final doc = CosDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      final pattern = (shadingPatternResources()['Pattern']
+          as CosDictionary)['P0'] as CosDictionary;
+      final resources = CosDictionary({
+        'Shading': CosDictionary({'S0': pattern['Shading']!}),
+      });
+      PdfInterpreter(cos: doc, device: device).run(
+        ContentStreamParser.parse(Uint8List.fromList('/S0 sh'.codeUnits)),
+        resources,
+      );
+      expect(device.gradients, hasLength(1));
     });
   });
 

@@ -35,6 +35,26 @@ class CanvasPdfDevice implements PdfDevice {
   }
 
   @override
+  void fillPathGradient(
+      PdfPath path, PdfFillRule rule, PdfGradient gradient, double alpha) {
+    final colors = [for (final c in gradient.colors) _toColor(c, 1)];
+    final matrix = _toFloat64(gradient.transform);
+    final c = gradient.coords;
+    final ui.Shader shader = gradient.isRadial
+        ? ui.Gradient.radial(Offset(c[3], c[4]), c[5], colors, gradient.stops,
+            TileMode.clamp, matrix, Offset(c[0], c[1]), c[2])
+        : ui.Gradient.linear(Offset(c[0], c[1]), Offset(c[2], c[3]), colors,
+            gradient.stops, TileMode.clamp, matrix);
+    canvas.drawPath(
+      _toUiPath(path, rule),
+      Paint()
+        ..shader = shader
+        ..color = Color.from(
+            alpha: alpha.clamp(0, 1), red: 0, green: 0, blue: 0),
+    );
+  }
+
+  @override
   void strokePath(
       PdfPath path, PdfColor color, PdfStroke stroke, double alpha) {
     // TODO: dash patterns need a path-measuring dasher; drawn solid for now
@@ -91,7 +111,11 @@ class CanvasPdfDevice implements PdfDevice {
   void drawImage(PdfImageRequest request) {
     final image = images[request.stream];
     if (image == null) return; // not decodable (yet): skip silently
-    final paint = Paint()..filterQuality = FilterQuality.medium;
+    // antialiased edges leave hairline seams between abutting image slices
+    // (PowerPoint and scanners split large images into strips)
+    final paint = Paint()
+      ..filterQuality = FilterQuality.medium
+      ..isAntiAlias = false;
     if (request.isStencil) {
       // stencil masks paint the fill color through the mask's alpha
       paint.colorFilter = ColorFilter.mode(

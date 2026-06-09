@@ -19,6 +19,9 @@ class ImageCollector implements PdfDevice {
   @override
   void fillPath(PdfPath path, PdfColor color, PdfFillRule rule, double a) {}
   @override
+  void fillPathGradient(
+      PdfPath path, PdfFillRule rule, PdfGradient gradient, double a) {}
+  @override
   void strokePath(PdfPath path, PdfColor color, PdfStroke stroke, double a) {}
   @override
   void clipPath(PdfPath path, PdfFillRule rule) {}

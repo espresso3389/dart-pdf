@@ -7,6 +7,7 @@ import 'device.dart';
 import 'interpreter.dart';
 import 'matrix.dart';
 import 'path.dart';
+import 'shading.dart';
 
 /// One positioned run of text on a page, in page space.
 class PdfExtractedRun {
@@ -184,6 +185,9 @@ class _ExtractionDevice implements PdfDevice {
   void restore() {}
   @override
   void fillPath(PdfPath path, PdfColor color, PdfFillRule rule, double a) {}
+  @override
+  void fillPathGradient(
+      PdfPath path, PdfFillRule rule, PdfGradient gradient, double a) {}
   @override
   void strokePath(PdfPath path, PdfColor color, PdfStroke stroke, double a) {}
   @override

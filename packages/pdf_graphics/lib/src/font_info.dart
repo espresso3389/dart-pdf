@@ -29,9 +29,21 @@ class PdfFontInfo {
 
   static PdfFontInfo load(CosDocument cos, CosDictionary font) {
     final subtype = font['Subtype'];
+    final subtypeName = subtype is CosName ? subtype.value : '';
     final baseFontObj = cos.resolve(font['BaseFont']);
     final baseFont = baseFontObj is CosName ? baseFontObj.value : null;
-    final isCid = subtype is CosName && subtype.value == 'Type0';
+    final isCid = subtypeName == 'Type0';
+
+    // Widths are in thousandths of an em — except for Type3 fonts, whose
+    // glyph space is defined by /FontMatrix (§9.6.5).
+    var widthScale = 0.001;
+    if (subtypeName == 'Type3') {
+      final matrix = cos.resolve(font['FontMatrix']);
+      if (matrix is CosArray && matrix.length >= 6) {
+        final a = _toNum(cos.resolve(matrix[0]));
+        if (a != 0) widthScale = a.abs();
+      }
+    }
 
     final widths = <int, double>{};
     var defaultWidth = 0.5;
@@ -58,13 +70,15 @@ class PdfFontInfo {
       if (w is CosArray) {
         for (var i = 0; i < w.length; i++) {
           final value = cos.resolve(w[i]);
-          widths[firstChar + i] = _toNum(value) / 1000;
+          widths[firstChar + i] = _toNum(value) * widthScale;
         }
       }
       final descriptor = cos.resolve(font['FontDescriptor']);
       if (descriptor is CosDictionary) {
         final missing = cos.resolve(descriptor['MissingWidth']);
-        if (missing is CosInteger) defaultWidth = missing.value / 1000;
+        if (missing is CosInteger) {
+          defaultWidth = missing.value * widthScale;
+        }
       }
     }
 

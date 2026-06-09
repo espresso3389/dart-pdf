@@ -3,6 +3,7 @@ import 'package:pdf_cos/pdf_cos.dart';
 import 'color.dart';
 import 'matrix.dart';
 import 'path.dart';
+import 'shading.dart';
 
 /// One run of text from a single show-text operator.
 class PdfTextRun {
@@ -72,6 +73,12 @@ abstract interface class PdfDevice {
   void restore();
 
   void fillPath(PdfPath path, PdfColor color, PdfFillRule rule, double alpha);
+
+  /// Fills with a gradient (axial/radial shading patterns and `sh`).
+  /// Non-painting devices can ignore it; simple devices may fall back to
+  /// `fillPath` with [PdfGradient.averageColor].
+  void fillPathGradient(
+      PdfPath path, PdfFillRule rule, PdfGradient gradient, double alpha);
 
   void strokePath(PdfPath path, PdfColor color, PdfStroke stroke, double alpha);
 

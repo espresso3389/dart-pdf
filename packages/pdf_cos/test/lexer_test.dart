@@ -1,7 +1,6 @@
 import 'package:pdf_cos/pdf_cos.dart';
+import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 import 'package:test/test.dart';
-
-import 'fixtures.dart';
 
 CosToken lex(String source) => CosLexer(ascii(source)).nextToken();
 

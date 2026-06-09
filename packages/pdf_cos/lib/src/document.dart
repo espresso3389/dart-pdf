@@ -11,7 +11,8 @@ import 'xref.dart';
 /// A parsed PDF file at the COS level: header, cross-reference machinery, and
 /// on-demand object loading. Page-level semantics live in `pdf_document`.
 class CosDocument {
-  CosDocument._(this.bytes, this._offsetShift, this._xref, this.trailer);
+  CosDocument._(
+      this.bytes, this._offsetShift, this._xref, this.trailer, this.startXref);
 
   final Uint8List bytes;
 
@@ -22,18 +23,23 @@ class CosDocument {
   final Map<int, CosXrefEntry> _xref;
   final CosDictionary trailer;
 
+  /// The newest cross-reference section's offset, as declared after the
+  /// `startxref` keyword. An incremental update points /Prev here.
+  final int startXref;
+
   final Map<CosReference, CosObject> _cache = {};
   final Map<int, _ObjectStream> _objectStreams = {};
 
   static CosDocument open(Uint8List bytes) {
     final shift = _findHeader(bytes);
+    final startXref = _findStartXref(bytes);
     final entries = <int, CosXrefEntry>{};
     CosDictionary trailer = CosDictionary();
     var isNewest = true;
 
     // Walk the xref chain newest-to-oldest; the first entry seen for an
     // object number wins. Hybrid files queue /XRefStm before /Prev.
-    final pending = <int>[_findStartXref(bytes) + shift];
+    final pending = <int>[startXref + shift];
     final visited = <int>{};
     while (pending.isNotEmpty) {
       final offset = pending.removeAt(0);
@@ -51,7 +57,7 @@ class CosDocument {
       final prev = section.trailer['Prev'];
       if (prev is CosInteger) pending.add(prev.value + shift);
     }
-    return CosDocument._(bytes, shift, entries, trailer);
+    return CosDocument._(bytes, shift, entries, trailer, startXref);
   }
 
   /// The version from the file header, e.g. `1.7`. The catalog's /Version
@@ -75,6 +81,27 @@ class CosDocument {
 
   /// Object numbers known to the cross-reference machinery.
   Iterable<int> get objectNumbers => _xref.keys;
+
+  /// Offset of the `%PDF-` header; xref offsets are relative to it.
+  int get headerOffset => _offsetShift;
+
+  CosXrefEntry? xrefEntry(int objectNumber) => _xref[objectNumber];
+
+  /// The trailer's declared /Size (one past the highest object number).
+  int get declaredSize {
+    final size = resolve(trailer['Size']);
+    return size is CosInteger ? size.value : 0;
+  }
+
+  /// Finds the reference under which [object] was loaded, or null if it is
+  /// not an already-loaded indirect object. Identity-based; used by editing
+  /// code to map a mutated object back to its number.
+  CosReference? referenceTo(CosObject object) {
+    for (final entry in _cache.entries) {
+      if (identical(entry.value, object)) return entry.key;
+    }
+    return null;
+  }
 
   /// Loads an object by number, parsing it on first access.
   CosObject getObject(int objectNumber, int generation) {

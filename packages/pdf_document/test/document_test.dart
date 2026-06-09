@@ -1,7 +1,6 @@
 import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 import 'package:test/test.dart';
-
-import 'fixtures.dart';
 
 void main() {
   group('classic one-page document', () {

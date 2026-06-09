@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.0
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: dart analyze --fatal-infos
+      - run: dart test
+        working-directory: packages/pdf_cos
+      - run: dart test
+        working-directory: packages/pdf_document
+      - run: dart test
+        working-directory: packages/pdf_graphics
+      - run: flutter test
+        working-directory: packages/pdf_flutter

@@ -10,4 +10,5 @@ export 'src/objects.dart';
 export 'src/parser.dart';
 export 'src/serializer.dart';
 export 'src/token.dart';
+export 'src/updater.dart';
 export 'src/xref.dart';

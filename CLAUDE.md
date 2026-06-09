@@ -32,6 +32,15 @@ Monorepo using **pub workspaces** (root `pubspec.yaml` lists members under
 - Test fixtures are built programmatically in `test/fixtures.dart` so byte
   offsets are always correct — don't hand-edit offsets.
 
+## Test corpus
+
+`corpus/` (git-ignored) holds ~50 real-world PDFs copied from Ben's local
+folders and OneDrive — CAD drawings, scanned docs, reports, forms. Use them
+to validate changes:
+
+- Parse check: `cd packages/pdf_document && fvm dart tool/inspect.dart ../../corpus/*.pdf`
+- Render check: `cd packages/pdf_flutter && PDF_PATH=../../corpus/<file>.pdf PDF_PAGE=0 fvm flutter test test/render_smoke_test.dart` (writes /tmp/dart_pdf_render.png)
+
 ## Roadmap context
 
 See README.md. Current frontier: incremental-update writer, then the

@@ -155,7 +155,11 @@ class _ViewerScreenState extends State<ViewerScreen> {
     // open a file straight away with:
     //   flutter run -d macos --dart-define=PDF=/path/to/file.pdf
     const preset = String.fromEnvironment('PDF');
-    if (preset.isNotEmpty) _openPath(preset);
+    if (preset.isNotEmpty) {
+      _openPath(preset);
+    } else {
+      _openDemo();
+    }
   }
 
   @override

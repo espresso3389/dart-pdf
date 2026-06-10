@@ -4,9 +4,9 @@ import 'package:pdf_flutter/pdf_flutter.dart';
 import 'package:pdf_viewer_example/main.dart';
 
 void main() {
+  // the app opens the interactive demo on launch
   Future<void> openDemo(WidgetTester tester) async {
     await tester.pumpWidget(const ViewerApp());
-    await tester.tap(find.text('Try the interactive demo'));
     await tester.pump();
   }
 

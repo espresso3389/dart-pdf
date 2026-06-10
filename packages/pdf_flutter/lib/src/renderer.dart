@@ -26,7 +26,7 @@ class PdfPageRenderer {
     final images = await decodeImages(cos, collector.streams);
 
     final box = page.cropBox;
-    final size = _rotatedSize(page);
+    final size = pageSize(page);
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
 
@@ -59,7 +59,18 @@ class PdfPageRenderer {
   static Future<ui.Image> renderImage(PdfPage page,
       {double pixelRatio = 1}) async {
     final picture = await renderPicture(page);
-    final size = _rotatedSize(page);
+    try {
+      return await rasterize(picture, pageSize(page), pixelRatio);
+    } finally {
+      picture.dispose();
+    }
+  }
+
+  /// Rasterizes an already-recorded page [picture] (sized [size] points) —
+  /// re-rasterizing a cached picture at a new zoom skips re-interpreting
+  /// the page entirely.
+  static Future<ui.Image> rasterize(
+      ui.Picture picture, Size size, double pixelRatio) async {
     final recorder = ui.PictureRecorder();
     Canvas(recorder)
       ..scale(pixelRatio)
@@ -72,12 +83,11 @@ class PdfPageRenderer {
       );
     } finally {
       scaled.dispose();
-      picture.dispose();
     }
   }
 
   /// Page size in points after applying /Rotate.
-  static Size _rotatedSize(PdfPage page) {
+  static Size pageSize(PdfPage page) {
     final box = page.cropBox;
     final swap = page.rotation == 90 || page.rotation == 270;
     return swap ? Size(box.height, box.width) : Size(box.width, box.height);

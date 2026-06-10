@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -164,6 +165,11 @@ class _PdfViewerState extends State<PdfViewer>
   TapDownDetails? _doubleTapDetails;
   bool _zoomed = false;
 
+  /// Resolution multiplier pages render at; follows the zoom level once it
+  /// settles (pinch end, wheel pause, double-tap animation end).
+  double _renderScale = 1;
+  Timer? _settleTimer;
+
   late List<PdfPage> _pages;
   late List<double> _aspects; // height / width, after /Rotate
   final Map<int, PdfPageText> _textCache = {};
@@ -189,6 +195,23 @@ class _PdfViewerState extends State<PdfViewer>
           });
     _loadPages();
     _scroll.addListener(_onScroll);
+    _transform.addListener(_onTransformChanged);
+  }
+
+  /// During a gesture the existing rasters scale under the transform
+  /// (cheap, momentarily blurry); once the matrix stops changing for a
+  /// beat, visible pages re-rasterize sharp at the new zoom. A matrix
+  /// listener (rather than onInteractionEnd) also catches wheel zoom and
+  /// the double-tap animation.
+  void _onTransformChanged() {
+    _settleTimer?.cancel();
+    _settleTimer = Timer(const Duration(milliseconds: 200), () {
+      if (!mounted) return;
+      final target = math.max(1.0, _transform.value.getMaxScaleOnAxis());
+      if ((target - _renderScale).abs() > 0.1 * _renderScale) {
+        setState(() => _renderScale = target);
+      }
+    });
   }
 
   @override
@@ -222,6 +245,7 @@ class _PdfViewerState extends State<PdfViewer>
 
   @override
   void dispose() {
+    _settleTimer?.cancel();
     _controller._state = null;
     if (_ownsController) _controller.dispose();
     _scroll.dispose();
@@ -420,6 +444,7 @@ class _PdfViewerState extends State<PdfViewer>
           padding: EdgeInsets.only(top: index == 0 ? 0 : widget.pageSpacing),
           child: _PdfViewerPage(
             page: _pages[index],
+            scale: _renderScale,
             matches: _controller._matchesOn(index),
             currentMatch: _controller._currentMatch >= 0
                 ? _controller._matches[_controller._currentMatch]
@@ -475,19 +500,21 @@ class _PdfViewerState extends State<PdfViewer>
 class _PdfViewerPage extends StatelessWidget {
   const _PdfViewerPage({
     required this.page,
+    required this.scale,
     required this.matches,
     required this.currentMatch,
     required this.selection,
   });
 
   final PdfPage page;
+  final double scale;
   final List<PdfTextMatch> matches;
   final PdfTextMatch? currentMatch;
   final List<PdfRect> selection;
 
   @override
   Widget build(BuildContext context) {
-    final view = PdfPageView(page: page);
+    final view = PdfPageView(page: page, scale: scale);
     if (matches.isEmpty && selection.isEmpty) return view;
     return Stack(children: [
       view,

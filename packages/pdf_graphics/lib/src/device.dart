@@ -135,6 +135,16 @@ abstract interface class PdfDevice {
   /// devices can ignore it.
   void setBlendMode(PdfBlendMode mode);
 
+  /// Brackets a transparency-group form (§11.6.6) whose composite result
+  /// paints at [alpha]. Inside the group, alpha starts over at 1.0; the
+  /// group then blends as one object. Non-compositing devices can treat
+  /// the pair as a no-op — the group's content still arrives through the
+  /// normal callbacks in between.
+  void beginGroup(double alpha);
+
+  /// Composites the group opened by [beginGroup].
+  void endGroup();
+
   /// Starts capturing painted content that an ExtGState /SMask will mask.
   /// Visual devices open an offscreen layer; others can ignore the pair.
   void beginSoftMasked();

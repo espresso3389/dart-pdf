@@ -31,6 +31,10 @@ class ImageCollector implements PdfDevice {
   @override
   void setBlendMode(PdfBlendMode mode) {}
   @override
+  void beginGroup(double alpha) {}
+  @override
+  void endGroup() {}
+  @override
   void beginSoftMasked() {}
   @override
   void endSoftMasked(

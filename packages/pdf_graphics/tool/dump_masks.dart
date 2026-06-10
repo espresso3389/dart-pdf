@@ -23,6 +23,10 @@ class _MaskDevice implements PdfDevice {
   int _maskDepth = 0;
 
   @override
+  void beginGroup(double alpha) {}
+  @override
+  void endGroup() {}
+  @override
   void beginSoftMasked() {
     begins++;
     _maskDepth++;

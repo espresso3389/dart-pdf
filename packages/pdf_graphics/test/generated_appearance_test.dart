@@ -44,6 +44,10 @@ class CountingDevice implements PdfDevice {
   @override
   void drawImage(PdfImageRequest request) {}
   @override
+  void beginGroup(double alpha) {}
+  @override
+  void endGroup() {}
+  @override
   void beginSoftMasked() {}
   @override
   void endSoftMasked(

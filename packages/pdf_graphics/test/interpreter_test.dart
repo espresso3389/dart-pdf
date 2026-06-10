@@ -70,6 +70,10 @@ class RecordingDevice implements PdfDevice {
   }
 
   @override
+  void beginGroup(double alpha) => calls.add('beginGroup($alpha)');
+  @override
+  void endGroup() => calls.add('endGroup');
+  @override
   void beginSoftMasked() => calls.add('beginSoftMasked');
 
   @override

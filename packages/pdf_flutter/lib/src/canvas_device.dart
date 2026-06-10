@@ -59,6 +59,19 @@ class CanvasPdfDevice implements PdfDevice {
   }
 
   @override
+  void beginGroup(double alpha) {
+    canvas.saveLayer(
+      null,
+      Paint()
+        ..color = Color.from(alpha: alpha.clamp(0, 1), red: 0, green: 0, blue: 0)
+        ..blendMode = _blend,
+    );
+  }
+
+  @override
+  void endGroup() => canvas.restore();
+
+  @override
   void beginSoftMasked() {
     canvas.saveLayer(null, Paint());
   }

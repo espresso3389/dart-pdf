@@ -1034,9 +1034,22 @@ class PdfInterpreter {
     }
     if (name != 'Form' || formDepth >= _maxFormDepth) return;
 
+    // a transparency group composites as one object: the alpha in effect
+    // at Do applies to the group's result, and resets inside (§11.6.6) —
+    // otherwise an inner `gs` back to ca 1.0 would erase the group alpha
+    final groupAlpha = _state.fillAlpha;
+    final isGroup =
+        cos.resolve(xobject.dictionary['Group']) is CosDictionary;
+    final groupLayer = isGroup && groupAlpha < 1;
+
     final outerMask = _state.softMask;
     _stateStack.add(_GraphicsState.from(_state));
     device.save();
+    if (groupLayer) {
+      device.beginGroup(groupAlpha);
+      _state.fillAlpha = 1;
+      _state.strokeAlpha = 1;
+    }
     try {
       final matrix = cos.resolve(xobject.dictionary['Matrix']);
       if (matrix is CosArray && matrix.length >= 6) {
@@ -1064,6 +1077,7 @@ class PdfInterpreter {
       if (mask != null && !identical(mask, outerMask)) {
         _finalizeSoftMask(mask);
       }
+      if (groupLayer) device.endGroup();
       _state = _stateStack.removeLast();
       device.restore();
     }

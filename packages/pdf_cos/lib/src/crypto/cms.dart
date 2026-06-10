@@ -1,7 +1,7 @@
 /// CMS / PKCS#7 SignedData (RFC 5652) — the container inside a PDF
-/// signature's /Contents — plus the minimal X.509 reading it needs.
-/// Verification checks the cryptography against the embedded certificate;
-/// chain-of-trust evaluation against a root store is out of scope.
+/// signature's /Contents — plus the X.509 reading it needs and
+/// certificate-chain verification against caller-supplied trust anchors
+/// ([verifyCertificateChain]; no revocation or policy processing).
 library;
 
 import 'dart:typed_data';
@@ -55,6 +55,9 @@ class X509Certificate {
   factory X509Certificate.parse(Uint8List der) {
     final cert = X509Certificate._(der);
     final top = DerObject.parse(der).children;
+    cert.tbsDer = top[0].encoded;
+    cert.signatureAlgorithmOid = top[1].children[0].asOid;
+    cert.signatureValue = top[2].asBitString;
     final tbs = top[0].children;
     var i = 0;
     if (tbs[0].tag == DerTag.context(0)) i = 1; // explicit version
@@ -89,6 +92,28 @@ class X509Certificate {
   late final DateTime notBefore;
   late final DateTime notAfter;
   late final String publicKeyAlgorithmOid;
+
+  /// The to-be-signed portion, what the issuer's signature covers.
+  late final Uint8List tbsDer;
+  late final String signatureAlgorithmOid;
+  late final Uint8List signatureValue;
+
+  /// Whether this certificate's signature verifies with [issuer]'s key.
+  /// False for unsupported algorithms (e.g. RSASSA-PSS) or missing keys.
+  bool isSignedBy(X509Certificate issuer) {
+    final hash = _hashFor(signatureAlgorithmOid);
+    if (hash == null) return false;
+    final digest = hash.convert(tbsDer).bytes;
+    switch (issuer.publicKey) {
+      case final RsaPublicKey key:
+        final digestOid = _digestOidFor(hash)!;
+        return rsaVerify(key, digestOid, digest, signatureValue);
+      case final EcPublicKey key:
+        return ecdsaVerify(key, digest, signatureValue);
+      default:
+        return false;
+    }
+  }
 
   /// [RsaPublicKey], [EcPublicKey], or null for unsupported algorithms.
   Object? publicKey;
@@ -359,4 +384,120 @@ Uint8List cmsSignDetached({
     derOid(_Oid.signedData),
     derContext(0, signedData),
   ]);
+}
+
+/// The outcome of X.509 path building and verification.
+///
+/// Scope: signature verification up the chain, issuer/subject matching,
+/// validity windows, and anchoring in caller-supplied roots. Revocation
+/// (CRL/OCSP), name constraints, key usage, and policy processing are
+/// not evaluated.
+class CertificateChainResult {
+  const CertificateChainResult({
+    required this.trusted,
+    required this.chain,
+    required this.problems,
+  });
+
+  /// The chain ends at (or the leaf itself is) a trust anchor.
+  final bool trusted;
+
+  /// The path that was built, leaf first.
+  final List<X509Certificate> chain;
+
+  /// Why the chain is untrusted, when it is.
+  final List<String> problems;
+}
+
+bool _sameDer(Uint8List a, Uint8List b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+X509Certificate? _findIssuer(
+    X509Certificate of, List<X509Certificate> candidates) {
+  for (final candidate in candidates) {
+    if (_sameDer(candidate.subjectDer, of.issuerDer) &&
+        of.isSignedBy(candidate)) {
+      return candidate;
+    }
+  }
+  // fall back to name match alone so the problem reported is "bad
+  // signature" rather than "issuer not found"
+  for (final candidate in candidates) {
+    if (_sameDer(candidate.subjectDer, of.issuerDer)) return candidate;
+  }
+  return null;
+}
+
+/// Builds and verifies the path from [leaf] to one of [trustAnchors],
+/// using [intermediates] (typically the other certificates shipped in
+/// the CMS container) to fill the middle. [at] is the moment each
+/// certificate must be valid — pass the signing time; null skips the
+/// validity-window check.
+CertificateChainResult verifyCertificateChain({
+  required X509Certificate leaf,
+  List<X509Certificate> intermediates = const [],
+  required List<X509Certificate> trustAnchors,
+  DateTime? at,
+}) {
+  final problems = <String>[];
+  final chain = <X509Certificate>[leaf];
+  var trusted = false;
+  var current = leaf;
+
+  String nameOf(X509Certificate cert) =>
+      cert.subjectCommonName ?? 'serial ${cert.serial}';
+
+  while (true) {
+    if (trustAnchors.any((a) => _sameDer(a.der, current.der))) {
+      trusted = true;
+      break;
+    }
+    if (chain.length > 10) {
+      problems.add('certificate chain is longer than 10 links');
+      break;
+    }
+    final issuer =
+        _findIssuer(current, [...trustAnchors, ...intermediates]);
+    if (issuer == null) {
+      final selfSigned = _sameDer(current.subjectDer, current.issuerDer);
+      problems.add(selfSigned
+          ? 'self-signed certificate "${nameOf(current)}" is not a '
+              'trust anchor'
+          : 'no certificate found for issuer of "${nameOf(current)}"');
+      break;
+    }
+    if (!current.isSignedBy(issuer)) {
+      problems.add('signature on "${nameOf(current)}" does not verify '
+          'against its issuer "${nameOf(issuer)}"');
+      break;
+    }
+    if (_sameDer(issuer.der, current.der)) {
+      problems.add('self-signed certificate "${nameOf(current)}" is not '
+          'a trust anchor');
+      break;
+    }
+    chain.add(issuer);
+    if (trustAnchors.any((a) => _sameDer(a.der, issuer.der))) {
+      trusted = true;
+      break;
+    }
+    current = issuer;
+  }
+
+  if (at != null) {
+    for (final cert in chain) {
+      if (at.isBefore(cert.notBefore) || at.isAfter(cert.notAfter)) {
+        problems.add('certificate "${nameOf(cert)}" is not valid at '
+            '${at.toIso8601String()}');
+        trusted = false;
+      }
+    }
+  }
+  return CertificateChainResult(
+      trusted: trusted && problems.isEmpty, chain: chain, problems: problems);
 }

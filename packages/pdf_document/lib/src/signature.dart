@@ -86,8 +86,22 @@ class PdfSignature {
 
   /// Checks the signature against the document bytes: range coverage,
   /// digest, and the cryptographic signature against the embedded
-  /// certificate. Chain-of-trust against a root store is not evaluated.
-  PdfSignatureValidation validate() {
+  /// certificate.
+  ///
+  /// With a [trustStore], the signer's certificate chain is also built
+  /// and verified up to one of the store's anchors (signatures up the
+  /// chain, issuer matching, validity windows at the signing time;
+  /// revocation is not checked) — see [PdfSignatureValidation.chainTrusted].
+  /// Without one, [PdfSignatureValidation.chainTrusted] stays null.
+  PdfSignatureValidation validate({PdfTrustStore? trustStore}) {
+    var result = _validateSignature();
+    if (trustStore != null) {
+      result = result._withChain(trustStore, result.signedAt ?? signingTime);
+    }
+    return result;
+  }
+
+  PdfSignatureValidation _validateSignature() {
     final bytes = document.cos.bytes;
     final problems = <String>[];
     final ranges = byteRange;
@@ -235,6 +249,32 @@ class PdfSignature {
   }
 }
 
+/// Trust anchors for certificate-chain validation: the root (and any
+/// directly trusted) certificates the verifier chooses to rely on. The
+/// library ships no built-in roots — supply your platform's or your
+/// organization's.
+class PdfTrustStore {
+  final List<X509Certificate> anchors = [];
+
+  void addCertificate(X509Certificate certificate) =>
+      anchors.add(certificate);
+
+  void addDer(Uint8List der) => anchors.add(X509Certificate.parse(der));
+
+  /// Adds every CERTIFICATE block in [pem].
+  void addPem(String pem) {
+    final blocks = RegExp(
+            r'-----BEGIN CERTIFICATE-----[^-]+-----END CERTIFICATE-----')
+        .allMatches(pem);
+    if (blocks.isEmpty) {
+      throw ArgumentError('no CERTIFICATE blocks in PEM input');
+    }
+    for (final block in blocks) {
+      addDer(pemBytes(block.group(0)!));
+    }
+  }
+}
+
 /// Outcome of validating one signature.
 class PdfSignatureValidation {
   PdfSignatureValidation._(
@@ -244,8 +284,44 @@ class PdfSignatureValidation {
     this.signerCertificate,
     this.certificates,
     List<DateTime> signingTimes,
-    this.problems,
-  ) : signedAt = signingTimes.isEmpty ? null : signingTimes.first;
+    this.problems, {
+    this.chainTrusted,
+    this.trustChain = const [],
+    this.chainProblems = const [],
+  }) : signedAt = signingTimes.isEmpty ? null : signingTimes.first;
+
+  PdfSignatureValidation _withChain(PdfTrustStore store, DateTime? at) {
+    bool? trusted;
+    var chain = const <X509Certificate>[];
+    var chainProblems = const <String>[];
+    final leaf = signerCertificate;
+    if (leaf == null) {
+      trusted = false;
+      chainProblems = const ['no signer certificate to build a chain from'];
+    } else {
+      final result = verifyCertificateChain(
+        leaf: leaf,
+        intermediates: certificates,
+        trustAnchors: store.anchors,
+        at: at,
+      );
+      trusted = result.trusted;
+      chain = result.chain;
+      chainProblems = result.problems;
+    }
+    return PdfSignatureValidation._(
+      digestMatches,
+      signatureValid,
+      coversWholeDocument,
+      signerCertificate,
+      certificates,
+      signedAt != null ? [signedAt!] : const [],
+      problems,
+      chainTrusted: trusted,
+      trustChain: chain,
+      chainProblems: chainProblems,
+    );
+  }
 
   /// The signed bytes still hash to the digest embedded in the signature.
   final bool digestMatches;
@@ -260,7 +336,8 @@ class PdfSignatureValidation {
   final bool coversWholeDocument;
 
   /// The certificate the signature verifies against. Trust in this
-  /// certificate is NOT established by [PdfSignature.validate].
+  /// certificate is established only when a [PdfTrustStore] is passed to
+  /// [PdfSignature.validate] — see [chainTrusted].
   final X509Certificate? signerCertificate;
 
   /// Every certificate shipped with the signature.
@@ -270,6 +347,18 @@ class PdfSignatureValidation {
   final DateTime? signedAt;
 
   final List<String> problems;
+
+  /// Whether the signer chains to a supplied trust anchor: null when
+  /// validation ran without a trust store, otherwise the verdict of
+  /// signature checks up the chain, issuer matching, and validity
+  /// windows (revocation is not checked).
+  final bool? chainTrusted;
+
+  /// The certificate path that was built, leaf first.
+  final List<X509Certificate> trustChain;
+
+  /// Why the chain is untrusted, when it is.
+  final List<String> chainProblems;
 
   /// The document bytes the signature covers are exactly what was signed.
   bool get intact => digestMatches && signatureValid;

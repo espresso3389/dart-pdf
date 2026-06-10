@@ -185,4 +185,69 @@ void main() {
       expect(result.digestMatches, isTrue);
     });
   });
+
+  group('chain of trust', () {
+    // safely inside the test certificates' 20-year validity window
+    final chainSignedAt = DateTime.utc(2027, 1, 1, 12);
+
+    Uint8List chainSignedFixture() {
+      final editor = PdfEditor(PdfDocument.open(buildMultiPagePdf(1)));
+      return editor.saveSigned(
+        privateKey: RsaPrivateKey.fromPem(testChainSignerKeyPem),
+        certificates: [
+          pemBytes(testChainSignerCertPem),
+          pemBytes(testCaCertPem),
+        ],
+        signingTime: chainSignedAt,
+      );
+    }
+
+    test('without a trust store the verdict stays null', () {
+      final doc = PdfDocument.open(chainSignedFixture());
+      final result = PdfSignature.of(doc).single.validate();
+      expect(result.intact, isTrue);
+      expect(result.chainTrusted, isNull);
+      expect(result.trustChain, isEmpty);
+    });
+
+    test('a CA-signed signature chains to the trusted root', () {
+      final doc = PdfDocument.open(chainSignedFixture());
+      final store = PdfTrustStore()..addPem(testCaCertPem);
+      final result =
+          PdfSignature.of(doc).single.validate(trustStore: store);
+      expect(result.intact, isTrue);
+      expect(result.chainTrusted, isTrue);
+      expect(result.chainProblems, isEmpty);
+      expect(result.trustChain.first.subjectCommonName,
+          'Dart PDF Chain Signer');
+      expect(result.trustChain.last.subjectCommonName, 'Dart PDF Test CA');
+    });
+
+    test('an unrelated trust store rejects the chain', () {
+      final doc = PdfDocument.open(chainSignedFixture());
+      final store = PdfTrustStore()..addPem(testSignerCertPem);
+      final result =
+          PdfSignature.of(doc).single.validate(trustStore: store);
+      expect(result.intact, isTrue, reason: 'integrity is separate');
+      expect(result.chainTrusted, isFalse);
+      expect(result.chainProblems, isNotEmpty);
+    });
+
+    test('a directly trusted self-signed signer passes', () {
+      final editor = PdfEditor(PdfDocument.open(buildMultiPagePdf(1)));
+      final doc = PdfDocument.open(editor.saveSigned(
+        privateKey: key,
+        certificates: [cert],
+        signingTime: chainSignedAt,
+      ));
+      final store = PdfTrustStore()..addPem(testSignerCertPem);
+      final result =
+          PdfSignature.of(doc).single.validate(trustStore: store);
+      expect(result.chainTrusted, isTrue);
+      final empty = PdfSignature.of(doc)
+          .single
+          .validate(trustStore: PdfTrustStore());
+      expect(empty.chainTrusted, isFalse);
+    });
+  });
 }

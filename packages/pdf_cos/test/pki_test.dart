@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:pdf_cos/pdf_cos.dart';
+import 'package:pdf_test_fixtures/pdf_test_fixtures.dart'
+    show testCaCertPem, testChainSignerCertPem, testSignerCertPem;
 import 'package:test/test.dart';
 
 Uint8List hex(String s) => Uint8List.fromList([
@@ -113,6 +115,71 @@ void main() {
           .convert('dart-pdf ecdsa test messagE'.codeUnits)
           .bytes;
       expect(ecdsaVerify(key, digest, signature), isFalse);
+    });
+  });
+
+  group('certificate chain verification', () {
+    final ca = X509Certificate.parse(pemBytes(testCaCertPem));
+    final leaf = X509Certificate.parse(pemBytes(testChainSignerCertPem));
+    final selfSigned = X509Certificate.parse(pemBytes(testSignerCertPem));
+
+    test('a CA-signed leaf chains to its anchor', () {
+      final result = verifyCertificateChain(
+          leaf: leaf, intermediates: [leaf, ca], trustAnchors: [ca]);
+      expect(result.trusted, isTrue);
+      expect(result.problems, isEmpty);
+      expect(result.chain, hasLength(2));
+      expect(result.chain.last.subjectCommonName, 'Dart PDF Test CA');
+    });
+
+    test('the issuer can come from the trust store alone', () {
+      final result = verifyCertificateChain(
+          leaf: leaf, intermediates: const [], trustAnchors: [ca]);
+      expect(result.trusted, isTrue);
+    });
+
+    test('an empty trust store is untrusted with a reason', () {
+      final result = verifyCertificateChain(
+          leaf: leaf, intermediates: [ca], trustAnchors: const []);
+      expect(result.trusted, isFalse);
+      expect(result.problems.single, contains('Dart PDF Test CA'));
+    });
+
+    test('a self-signed certificate is trusted only as an anchor', () {
+      final anchored = verifyCertificateChain(
+          leaf: selfSigned, trustAnchors: [selfSigned]);
+      expect(anchored.trusted, isTrue);
+      final unanchored = verifyCertificateChain(
+          leaf: selfSigned,
+          intermediates: [selfSigned],
+          trustAnchors: [ca]);
+      expect(unanchored.trusted, isFalse);
+      expect(unanchored.problems.single,
+          contains('self-signed certificate'));
+    });
+
+    test('the wrong anchor cannot vouch for the leaf', () {
+      // the self-signed test cert did not issue the leaf
+      final result = verifyCertificateChain(
+          leaf: leaf, trustAnchors: [selfSigned]);
+      expect(result.trusted, isFalse);
+    });
+
+    test('validity windows are enforced at the supplied time', () {
+      final tooLate = verifyCertificateChain(
+          leaf: leaf, trustAnchors: [ca], at: DateTime.utc(2099, 1, 1));
+      expect(tooLate.trusted, isFalse);
+      expect(tooLate.problems, isNotEmpty);
+      expect(tooLate.problems.first, contains('not valid at'));
+      final inWindow = verifyCertificateChain(
+          leaf: leaf, trustAnchors: [ca], at: DateTime.utc(2027, 1, 1));
+      expect(inWindow.trusted, isTrue);
+    });
+
+    test('certificate signatures verify structurally', () {
+      expect(leaf.isSignedBy(ca), isTrue);
+      expect(leaf.isSignedBy(selfSigned), isFalse);
+      expect(ca.isSignedBy(ca), isTrue); // self-signed root
     });
   });
 }

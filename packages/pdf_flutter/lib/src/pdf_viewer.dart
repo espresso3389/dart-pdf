@@ -521,12 +521,15 @@ class _PdfViewerState extends State<PdfViewer>
       final height = _pageHeight(i);
       if (contentY <= top + height || i == _pages.length - 1) {
         final box = _pages[i].cropBox;
-        if (box.width <= 0) return null;
-        // TODO: /Rotate'd pages need the rotation transform
+        if (box.width <= 0 || box.height <= 0) return null;
         final pageWidth = _viewWidth * _layoutZoom;
-        final scale = pageWidth / box.width;
-        final x = box.left + (local.dx - (_viewWidth - pageWidth) / 2) / scale;
-        final y = box.top - (contentY - top) / scale;
+        final geometry = PdfPageGeometry(
+          cropBox: box,
+          rotation: _pages[i].rotation,
+          viewSize: Size(pageWidth, height),
+        );
+        final (x, y) = geometry.toPagePoint(
+            Offset(local.dx - (_viewWidth - pageWidth) / 2, contentY - top));
         return (i, x, y);
       }
       top += height + widget.pageSpacing;

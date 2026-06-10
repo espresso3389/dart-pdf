@@ -51,10 +51,9 @@ class ImageCollector implements PdfDevice {
 /// DeviceGray (8 and 1 bit) and Indexed samples (1/2/4/8 bit, palettes in
 /// RGB, gray, or CMYK bases including ICCBased); /SMask soft-mask alpha;
 /// explicit /Mask stencil streams; color-key /Mask ranges and /Decode
-/// arrays on raw (non-DCT) samples; /ImageMask stencils (decoded as
-/// alpha, tinted by the device).
-/// TODO: JPXDecode, CCITT/JBIG2; color-key /Mask and /Decode on
-/// platform-decoded JPEGs.
+/// arrays (on raw samples and on platform-decoded JPEGs); /ImageMask
+/// stencils (decoded as alpha, tinted by the device).
+/// TODO: JPXDecode, CCITT/JBIG2 (no pure-Dart decoders yet).
 Future<Map<CosStream, ui.Image>> decodeImages(
     CosDocument cos, Iterable<CosStream> streams) async {
   final out = <CosStream, ui.Image>{};
@@ -87,11 +86,27 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
     final codec = await ui.instantiateImageCodec(jpeg);
     final base = (await codec.getNextFrame()).image;
     final mask = await _softMaskOf(cos, dict) ?? _stencilMaskOf(cos, dict);
-    if (mask == null) return base;
+    // /Decode and color-key /Mask apply to the decoded samples; gray
+    // JPEGs decode to RGBA with the sample replicated, so one channel
+    // stands in for the raw sample either way
+    final family = _colorSpaceOf(cos, dict);
+    final components = switch (family) {
+      'DeviceGray' => 1,
+      'DeviceRGB' => 3,
+      _ => 0,
+    };
+    final ranges =
+        components > 0 ? _decodeRanges(cos, dict, components) : null;
+    final colorKey =
+        components > 0 ? _colorKeyRanges(cos, dict, components) : null;
+    if (mask == null && ranges == null && colorKey == null) return base;
     final raw = await base.toByteData(format: ui.ImageByteFormat.rawRgba);
     if (raw == null) return base;
     final rgba = Uint8List.fromList(raw.buffer.asUint8List());
-    _applyAlpha(rgba, base.width, base.height, mask);
+    if (ranges != null || colorKey != null) {
+      _applyDecodeAndColorKey(rgba, components, ranges, colorKey);
+    }
+    if (mask != null) _applyAlpha(rgba, base.width, base.height, mask);
     return _imageFromPixels(rgba, base.width, base.height);
   }
   if (filters.contains('JPXDecode') ||
@@ -299,6 +314,38 @@ Future<_SoftMask?> _softMaskOf(CosDocument cos, CosDictionary dict) async {
     return null;
   } on Exception {
     return null; // unsupported mask: leave the image opaque
+  }
+}
+
+/// Applies a /Decode lookup and color-key transparency to RGBA pixels in
+/// place. Keying compares the pre-/Decode samples (§8.9.6.4), so it runs
+/// before the lookup.
+void _applyDecodeAndColorKey(Uint8List rgba, int components,
+    List<(double, double)>? ranges, List<(int, int)>? colorKey) {
+  final luts = ranges == null
+      ? null
+      : [for (var c = 0; c < components; c++) _lutFor(ranges, c)];
+  for (var i = 0; i < rgba.length; i += 4) {
+    if (colorKey != null) {
+      var inside = true;
+      for (var c = 0; c < components; c++) {
+        final sample = rgba[i + (components == 1 ? 0 : c)];
+        if (sample < colorKey[c].$1 || sample > colorKey[c].$2) {
+          inside = false;
+          break;
+        }
+      }
+      if (inside) rgba[i + 3] = 0;
+    }
+    if (luts != null) {
+      if (components == 1) {
+        rgba[i] = rgba[i + 1] = rgba[i + 2] = luts[0][rgba[i]];
+      } else {
+        rgba[i] = luts[0][rgba[i]];
+        rgba[i + 1] = luts[1][rgba[i + 1]];
+        rgba[i + 2] = luts[2][rgba[i + 2]];
+      }
+    }
   }
 }
 

@@ -288,6 +288,61 @@ void main() {
     });
   });
 
+  testWidgets('color-key /Mask applies to platform-decoded JPEGs',
+      (tester) async {
+    await tester.runAsync(() async {
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(8),
+          'Height': const CosInteger(8),
+          'BitsPerComponent': const CosInteger(8),
+          'ColorSpace': const CosName('DeviceRGB'),
+          'Filter': const CosName('DCTDecode'),
+          // key out red, with slack for JPEG loss
+          'Mask': CosArray([
+            const CosInteger(200), const CosInteger(255), //
+            const CosInteger(0), const CosInteger(50),
+            const CosInteger(0), const CosInteger(50),
+          ]),
+        }),
+        buildTestJpeg(),
+      );
+      final images = await decodeImages(cos, [image]);
+      final pixels = await pixelsOf(images[image]!);
+      for (var i = 0; i < pixels.length; i += 4) {
+        expect(pixels[i + 3], 0, reason: 'pixel $i should be keyed out');
+      }
+    });
+  });
+
+  testWidgets('/Decode inverts platform-decoded JPEG samples',
+      (tester) async {
+    await tester.runAsync(() async {
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(8),
+          'Height': const CosInteger(8),
+          'BitsPerComponent': const CosInteger(8),
+          'ColorSpace': const CosName('DeviceRGB'),
+          'Filter': const CosName('DCTDecode'),
+          'Decode': CosArray([
+            const CosInteger(1), const CosInteger(0), //
+            const CosInteger(1), const CosInteger(0),
+            const CosInteger(1), const CosInteger(0),
+          ]),
+        }),
+        buildTestJpeg(),
+      );
+      final images = await decodeImages(cos, [image]);
+      final pixels = await pixelsOf(images[image]!);
+      // solid red inverts to cyan (chroma subsampling costs ~40 levels)
+      expect(pixels[0], lessThan(60));
+      expect(pixels[1], greaterThan(200));
+      expect(pixels[2], greaterThan(200));
+      expect(pixels[3], 255);
+    });
+  });
+
   testWidgets('4-bit indexed samples unpack two pixels per byte',
       (tester) async {
     await tester.runAsync(() async {

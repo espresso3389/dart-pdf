@@ -28,8 +28,8 @@ class PdfGradient {
   /// Maps gradient (pattern/shading) space to page space.
   final PdfMatrix transform;
 
-  /// PDF /Extend semantics. Devices currently clamp regardless — painting
-  /// nothing beyond an unextended end is a refinement TODO.
+  /// PDF /Extend semantics: an extended end clamps to its terminal color,
+  /// an unextended end paints nothing beyond the gradient geometry.
   final bool extendStart;
   final bool extendEnd;
 

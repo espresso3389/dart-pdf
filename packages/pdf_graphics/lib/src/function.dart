@@ -5,8 +5,8 @@ import 'package:pdf_cos/pdf_cos.dart';
 
 /// A PDF function (§7.10) restricted to one input — what shadings need.
 ///
-/// Types 0 (sampled), 2 (exponential), and 3 (stitching) are supported;
-/// type 4 (PostScript calculator) is a TODO and parses to null.
+/// All four types are supported: 0 (sampled, with linear interpolation),
+/// 2 (exponential), 3 (stitching), and 4 (PostScript calculator).
 abstract class PdfFunction {
   const PdfFunction();
 
@@ -91,8 +91,22 @@ abstract class PdfFunction {
           encode.isEmpty ? [0, size[0] - 1] : encode,
           decode.isEmpty ? range : decode,
         );
+      case 4:
+        if (resolved is! CosStream) return null;
+        final range = _numbers(cos, dict['Range']);
+        if (range.length < 2) return null;
+        final Uint8List source;
+        try {
+          source = cos.decodeStreamData(resolved);
+        } on Exception {
+          return null;
+        }
+        final program = _PostScriptFunction.parseProgram(
+            String.fromCharCodes(source));
+        if (program == null) return null;
+        return _PostScriptFunction(x0, x1, program, range);
       default:
-        return null; // type 4 (PostScript calculator): TODO
+        return null;
     }
   }
 
@@ -196,13 +210,16 @@ class _SampledFunction extends PdfFunction {
     final e0 = encode.isNotEmpty ? encode[0] : 0.0;
     final e1 = encode.length > 1 ? encode[1] : sampleCount - 1.0;
     final position = (e0 + t * (e1 - e0)).clamp(0.0, sampleCount - 1.0);
-    // nearest-sample lookup; linear interpolation is a refinement TODO
-    final index = position.round();
+    final i0 = position.floor();
+    final i1 = math.min(i0 + 1, sampleCount - 1);
+    final frac = position - i0;
     final max = (1 << bitsPerSample) - 1;
     return [
       for (var output = 0; output < _outputs; output++)
         _decodeValue(
-            _sampleAt(index * _outputs + output) / max, output),
+            _sampleAt(i0 * _outputs + output) / max * (1 - frac) +
+                _sampleAt(i1 * _outputs + output) / max * frac,
+            output),
     ];
   }
 
@@ -222,5 +239,266 @@ class _SampledFunction extends PdfFunction {
       value = (value << 1) | ((data[byte] >> (7 - (bit & 7))) & 1);
     }
     return value.toDouble();
+  }
+}
+
+/// Type 4: a PostScript calculator program (§7.10.5). The program is
+/// parsed once into a token list; numbers and booleans share one operand
+/// stack at evaluation time. Angles for sin/cos/atan are in degrees.
+class _PostScriptFunction extends PdfFunction {
+  const _PostScriptFunction(this.x0, this.x1, this.program, this.range);
+
+  final double x0, x1;
+
+  /// Tokens: [double] literals, [String] operator names, and nested
+  /// `List<Object>` procedure bodies for if/ifelse.
+  final List<Object> program;
+  final List<double> range;
+
+  /// Parses the outermost `{ ... }` block. Returns null on malformed
+  /// programs (unbalanced braces, missing body).
+  static List<Object>? parseProgram(String source) {
+    // % starts a comment that runs to the end of the line
+    final stripped = source.replaceAll(RegExp(r'%[^\r\n]*'), ' ');
+    final tokens = RegExp(r'[{}]|[^\s{}]+')
+        .allMatches(stripped)
+        .map((m) => m.group(0)!)
+        .toList();
+    var pos = 0;
+
+    List<Object>? parseBlock() {
+      if (pos >= tokens.length || tokens[pos] != '{') return null;
+      pos++;
+      final block = <Object>[];
+      while (pos < tokens.length && tokens[pos] != '}') {
+        if (tokens[pos] == '{') {
+          final inner = parseBlock();
+          if (inner == null) return null;
+          block.add(inner);
+        } else {
+          final token = tokens[pos++];
+          block.add(double.tryParse(token) ?? token);
+        }
+      }
+      if (pos >= tokens.length) return null;
+      pos++; // the closing brace
+      return block;
+    }
+
+    while (pos < tokens.length && tokens[pos] != '{') {
+      pos++;
+    }
+    return parseBlock();
+  }
+
+  @override
+  List<double> evaluate(double x) {
+    final outputs = range.length ~/ 2;
+    final stack = <Object>[x.clamp(x0, x1)];
+    try {
+      _run(program, stack, 0);
+    } catch (_) {
+      // stack underflow / unknown operator: paint the bottom of the
+      // range, not garbage
+      return [for (var i = 0; i < outputs; i++) range[i * 2]];
+    }
+    final result = <double>[];
+    for (var i = 0; i < outputs; i++) {
+      final index = stack.length - outputs + i;
+      final value = index >= 0 && index < stack.length ? stack[index] : 0.0;
+      final number = switch (value) {
+        bool b => b ? 1.0 : 0.0,
+        num n => n.toDouble(),
+        _ => 0.0,
+      };
+      result.add(number.clamp(range[i * 2], range[i * 2 + 1]));
+    }
+    return result;
+  }
+
+  static void _run(List<Object> block, List<Object> stack, int depth) {
+    if (depth > 100) {
+      throw const FormatException('calculator recursion too deep');
+    }
+    double popNum() {
+      final v = stack.removeLast();
+      if (v is num) return v.toDouble();
+      throw const FormatException('expected a number');
+    }
+
+    int popInt() => popNum().truncate();
+
+    bool popBool() {
+      final v = stack.removeLast();
+      if (v is bool) return v;
+      throw const FormatException('expected a boolean');
+    }
+
+    /// `and or xor not` work on booleans logically and integers bitwise.
+    Object popLogical() {
+      final v = stack.removeLast();
+      if (v is bool || v is num) return v;
+      throw const FormatException('expected a boolean or integer');
+    }
+
+    for (final token in block) {
+      if (token is double) {
+        stack.add(token);
+        continue;
+      }
+      if (token is List<Object>) {
+        stack.add(token);
+        continue;
+      }
+      switch (token as String) {
+        case 'add':
+          final b = popNum(), a = popNum();
+          stack.add(a + b);
+        case 'sub':
+          final b = popNum(), a = popNum();
+          stack.add(a - b);
+        case 'mul':
+          final b = popNum(), a = popNum();
+          stack.add(a * b);
+        case 'div':
+          final b = popNum(), a = popNum();
+          stack.add(b == 0 ? 0.0 : a / b);
+        case 'idiv':
+          final b = popInt(), a = popInt();
+          stack.add(b == 0 ? 0.0 : (a ~/ b).toDouble());
+        case 'mod':
+          final b = popInt(), a = popInt();
+          stack.add(b == 0 ? 0.0 : (a.remainder(b)).toDouble());
+        case 'neg':
+          stack.add(-popNum());
+        case 'abs':
+          stack.add(popNum().abs());
+        case 'ceiling':
+          stack.add(popNum().ceilToDouble());
+        case 'floor':
+          stack.add(popNum().floorToDouble());
+        case 'round':
+          stack.add(popNum().roundToDouble());
+        case 'truncate':
+          stack.add(popNum().truncateToDouble());
+        case 'sqrt':
+          stack.add(math.sqrt(math.max(0, popNum())));
+        case 'sin':
+          stack.add(math.sin(popNum() * math.pi / 180));
+        case 'cos':
+          stack.add(math.cos(popNum() * math.pi / 180));
+        case 'atan':
+          final den = popNum(), num = popNum();
+          var degrees = math.atan2(num, den) * 180 / math.pi;
+          if (degrees < 0) degrees += 360;
+          stack.add(degrees);
+        case 'exp':
+          final exponent = popNum(), base = popNum();
+          stack.add(math.pow(base, exponent).toDouble());
+        case 'ln':
+          stack.add(math.log(math.max(1e-300, popNum())));
+        case 'log':
+          stack.add(math.log(math.max(1e-300, popNum())) / math.ln10);
+        case 'cvi':
+          stack.add(popNum().truncateToDouble());
+        case 'cvr':
+          stack.add(popNum());
+        case 'eq':
+          final b = stack.removeLast(), a = stack.removeLast();
+          stack.add(a == b);
+        case 'ne':
+          final b = stack.removeLast(), a = stack.removeLast();
+          stack.add(a != b);
+        case 'gt':
+          final b = popNum(), a = popNum();
+          stack.add(a > b);
+        case 'ge':
+          final b = popNum(), a = popNum();
+          stack.add(a >= b);
+        case 'lt':
+          final b = popNum(), a = popNum();
+          stack.add(a < b);
+        case 'le':
+          final b = popNum(), a = popNum();
+          stack.add(a <= b);
+        case 'and':
+          final b = popLogical(), a = popLogical();
+          stack.add(a is bool && b is bool
+              ? a && b
+              : ((a as num).truncate() & (b as num).truncate()).toDouble());
+        case 'or':
+          final b = popLogical(), a = popLogical();
+          stack.add(a is bool && b is bool
+              ? a || b
+              : ((a as num).truncate() | (b as num).truncate()).toDouble());
+        case 'xor':
+          final b = popLogical(), a = popLogical();
+          stack.add(a is bool && b is bool
+              ? a != b
+              : ((a as num).truncate() ^ (b as num).truncate()).toDouble());
+        case 'not':
+          final a = popLogical();
+          stack.add(a is bool ? !a : (~(a as num).truncate()).toDouble());
+        case 'bitshift':
+          final shift = popInt(), value = popInt();
+          stack.add((shift >= 0 ? value << shift : value >> -shift)
+              .toDouble());
+        case 'true':
+          stack.add(true);
+        case 'false':
+          stack.add(false);
+        case 'pop':
+          stack.removeLast();
+        case 'exch':
+          final b = stack.removeLast(), a = stack.removeLast();
+          stack
+            ..add(b)
+            ..add(a);
+        case 'dup':
+          stack.add(stack.last);
+        case 'copy':
+          final n = popInt();
+          if (n < 0 || n > stack.length) {
+            throw const FormatException('copy out of range');
+          }
+          stack.addAll(stack.sublist(stack.length - n));
+        case 'index':
+          final n = popInt();
+          if (n < 0 || n >= stack.length) {
+            throw const FormatException('index out of range');
+          }
+          stack.add(stack[stack.length - 1 - n]);
+        case 'roll':
+          final j = popInt(), n = popInt();
+          if (n < 0 || n > stack.length) {
+            throw const FormatException('roll out of range');
+          }
+          if (n > 0 && j != 0) {
+            final window = stack.sublist(stack.length - n);
+            stack.removeRange(stack.length - n, stack.length);
+            final shift = ((j % n) + n) % n;
+            stack
+              ..addAll(window.sublist(n - shift))
+              ..addAll(window.sublist(0, n - shift));
+          }
+        case 'if':
+          final proc = stack.removeLast();
+          final condition = popBool();
+          if (proc is! List<Object>) {
+            throw const FormatException('if needs a procedure');
+          }
+          if (condition) _run(proc, stack, depth + 1);
+        case 'ifelse':
+          final procElse = stack.removeLast();
+          final procThen = stack.removeLast();
+          final condition = popBool();
+          if (procThen is! List<Object> || procElse is! List<Object>) {
+            throw const FormatException('ifelse needs two procedures');
+          }
+          _run(condition ? procThen : procElse, stack, depth + 1);
+        default:
+          throw FormatException('unknown calculator operator: $token');
+      }
+    }
   }
 }

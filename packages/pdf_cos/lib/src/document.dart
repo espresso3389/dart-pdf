@@ -47,8 +47,33 @@ class CosDocument {
   /// the user and then as the owner password; the default empty password
   /// is what most "owner-locked" business documents expect. Throws
   /// [CosPasswordException] when it opens neither.
+  ///
+  /// When the cross-reference machinery is broken (missing `startxref`,
+  /// corrupt offsets, truncated tables), falls back to rebuilding the xref
+  /// by scanning the file for object headers — see [_recover].
   static CosDocument open(Uint8List bytes, {String password = ''}) {
     final shift = _findHeader(bytes);
+    try {
+      final document = _openFromXref(bytes, shift);
+      document._initEncryption(password);
+      final root = document.resolve(document.trailer['Root']);
+      if (root is! CosDictionary) {
+        throw CosParseException('trailer /Root does not resolve');
+      }
+      return document;
+    } on CosPasswordException {
+      rethrow;
+    } on UnsupportedEncryptionException {
+      rethrow;
+    } on Exception {
+      // broken xref chain or trailer — fall through to recovery
+    } on RangeError {
+      // ditto: an xref offset pointing outside the file
+    }
+    return _recover(bytes, shift, password);
+  }
+
+  static CosDocument _openFromXref(Uint8List bytes, int shift) {
     final startXref = _findStartXref(bytes);
     final entries = <int, CosXrefEntry>{};
     CosDictionary trailer = CosDictionary();
@@ -74,9 +99,175 @@ class CosDocument {
       final prev = section.trailer['Prev'];
       if (prev is CosInteger) pending.add(prev.value + shift);
     }
-    final document = CosDocument._(bytes, shift, entries, trailer, startXref);
+    return CosDocument._(bytes, shift, entries, trailer, startXref);
+  }
+
+  /// Last-resort open for files whose cross-reference machinery is broken:
+  /// rebuilds the xref by scanning the whole file for `N G obj` headers
+  /// (the last definition of each object number wins, matching
+  /// incremental-update semantics), recovers the trailer from `trailer`
+  /// dictionaries and cross-reference stream dictionaries, indexes any
+  /// object streams so compressed objects stay reachable, and — failing a
+  /// recovered /Root — locates the catalog by its /Type.
+  static CosDocument _recover(Uint8List bytes, int shift, String password) {
+    final entries = <int, CosXrefEntry>{};
+    for (var i = shift; i + 3 <= bytes.length; i++) {
+      if (bytes[i] != 0x6F /* o */ ||
+          bytes[i + 1] != 0x62 /* b */ ||
+          bytes[i + 2] != 0x6A /* j */) {
+        continue;
+      }
+      if (i + 3 < bytes.length && CosLexer.isRegular(bytes[i + 3])) continue;
+      final header = _objectHeaderBefore(bytes, i, shift);
+      if (header == null) continue;
+      final (start, objectNumber, generation) = header;
+      entries[objectNumber] = CosXrefEntry.inUse(start - shift, generation);
+    }
+    if (entries.isEmpty) {
+      throw CosParseException(
+          'cross-reference recovery found no objects in the file');
+    }
+
+    // Recover the trailer: merge every `trailer` dictionary in file order
+    // (later revisions win), then doc-level keys from any xref stream
+    // dictionaries (files without the trailer keyword).
+    final trailer = CosDictionary();
+    var t = shift;
+    while (true) {
+      t = _indexOf(bytes, 'trailer', t);
+      if (t < 0) break;
+      try {
+        final candidate =
+            CosParser(bytes, offset: t + 'trailer'.length).parseObject();
+        if (candidate is CosDictionary) {
+          candidate.entries.forEach((key, value) {
+            trailer.entries[key] = value;
+          });
+        }
+      } on Exception {
+        // junk that happens to contain the keyword
+      }
+      t += 'trailer'.length;
+    }
+
+    final document = CosDocument._(bytes, shift, entries, trailer, 0);
+
+    // Doc-level keys from xref stream dictionaries. This pass runs before
+    // encryption is initialized (it has to: it may recover /Encrypt), so
+    // every loaded object is dropped from the cache afterwards.
+    const docKeys = ['Root', 'Info', 'Encrypt', 'ID'];
+    for (final number in List.of(entries.keys)) {
+      try {
+        final object = document.getObject(number, entries[number]!.generation);
+        if (object is! CosStream) continue;
+        final type = object.dictionary['Type'];
+        if (type is! CosName || type.value != 'XRef') continue;
+        for (final key in docKeys) {
+          final value = object.dictionary[key];
+          if (value != null) trailer.entries[key] = value;
+        }
+      } on Exception {
+        continue;
+      }
+    }
+    document._cache.clear();
+    document._objectStreams.clear();
+    document._streamOwners.clear();
+
     document._initEncryption(password);
+
+    // Index object streams so compressed objects resolve. Direct
+    // definitions found by the scan win over compressed ones.
+    for (final number in List.of(entries.keys)) {
+      final entry = entries[number]!;
+      if (entry.type != CosXrefEntryType.inUse) continue;
+      try {
+        final object = document.getObject(number, entry.generation);
+        if (object is! CosStream) continue;
+        final type = object.dictionary['Type'];
+        if (type is! CosName || type.value != 'ObjStm') continue;
+        final n = document.resolve(object.dictionary['N']);
+        if (n is! CosInteger) continue;
+        final parser = CosParser(document.decodeStreamData(object));
+        for (var index = 0; index < n.value; index++) {
+          final objectNumber = parser.expectInteger();
+          parser.expectInteger(); // offset within the stream, unused here
+          entries.putIfAbsent(
+              objectNumber, () => CosXrefEntry.compressed(number, index));
+        }
+      } on Exception {
+        // a stream that fails to decode loses only its compressed objects
+      }
+    }
+
+    // No /Root recovered? Find the catalog by type.
+    if (document.resolve(trailer['Root']) is! CosDictionary) {
+      trailer.entries.remove('Root');
+      for (final number in List.of(entries.keys)) {
+        try {
+          final entry = entries[number]!;
+          final object = document.getObject(number, entry.generation);
+          if (object is CosDictionary) {
+            final type = document.resolve(object['Type']);
+            if (type is CosName && type.value == 'Catalog') {
+              trailer.entries['Root'] =
+                  CosReference(number, entry.generation);
+              break;
+            }
+          }
+        } on Exception {
+          continue;
+        }
+      }
+    }
+
+    var maxNumber = 0;
+    for (final number in entries.keys) {
+      if (number > maxNumber) maxNumber = number;
+    }
+    trailer.entries.putIfAbsent('Size', () => CosInteger(maxNumber + 1));
     return document;
+  }
+
+  /// Walks backwards from an `obj` keyword over `N G `, returning the
+  /// offset of the object number and the parsed numbers, or null when the
+  /// bytes before the keyword are not an object header.
+  static (int, int, int)? _objectHeaderBefore(
+      Uint8List bytes, int at, int shift) {
+    var p = at - 1;
+    var end = p;
+    while (p >= shift && CosLexer.isWhitespace(bytes[p])) {
+      p--;
+    }
+    if (p == end) return null;
+    final genEnd = p;
+    while (p >= shift && bytes[p] >= 0x30 && bytes[p] <= 0x39) {
+      p--;
+    }
+    if (p == genEnd || genEnd - p > 5) return null;
+    final genStart = p + 1;
+    end = p;
+    while (p >= shift && CosLexer.isWhitespace(bytes[p])) {
+      p--;
+    }
+    if (p == end) return null;
+    final numEnd = p;
+    while (p >= shift && bytes[p] >= 0x30 && bytes[p] <= 0x39) {
+      p--;
+    }
+    if (p == numEnd || numEnd - p > 10) return null;
+    final numStart = p + 1;
+    if (p >= shift && CosLexer.isRegular(bytes[p])) return null;
+    var objectNumber = 0;
+    for (var d = numStart; d <= numEnd; d++) {
+      objectNumber = objectNumber * 10 + (bytes[d] - 0x30);
+    }
+    if (objectNumber == 0) return null;
+    var generation = 0;
+    for (var d = genStart; d <= genEnd; d++) {
+      generation = generation * 10 + (bytes[d] - 0x30);
+    }
+    return (numStart, objectNumber, generation);
   }
 
   /// Installs the security handler when the trailer carries /Encrypt.
@@ -332,7 +523,7 @@ class CosDocument {
     final from = bytes.length > 2048 ? bytes.length - 2048 : 0;
     final index = _lastIndexOf(bytes, 'startxref', from);
     if (index < 0) {
-      // TODO: recovery mode — rebuild the xref by scanning for "N G obj".
+      // open() catches this and falls back to scan recovery
       throw CosParseException('missing startxref');
     }
     return CosParser(bytes, offset: index + 'startxref'.length)

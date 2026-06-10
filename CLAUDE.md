@@ -69,5 +69,12 @@ enumeration with approximate bounds, stream rewriting), and
 `content_editor.dart`/`content_elements.dart`; the content-stream
 tokenizer (`ContentStreamParser`) now lives in pdf_cos.
 The roadmap is complete; current frontier: the editing UI in
-pdf_flutter. Known gaps: deep-zoom tiling, encrypt-on-write,
-trust-store chain validation, JPX/CCITT/JBIG2 decoders, real ICC.
+pdf_flutter. Polish landed since: LZW/RunLength filters, xref recovery
+(`CosDocument.open` falls back to scanning for `N G obj` when the xref
+chain is broken), type 4 PostScript calculator functions, /Count-based
+page lookup with full-walk fallback, gradient /Extend semantics, JPEG
+/Decode + color-key masks, and /Rotate folded into `PdfPageGeometry`
+(selection, highlights, overlays, and hit-testing are rotation-aware;
+the geometry mirrors the renderer's canvas transform). Known gaps:
+deep-zoom tiling, encrypt-on-write, trust-store chain validation,
+JPX/CCITT/JBIG2 decoders, mesh shadings 4-7, real ICC.

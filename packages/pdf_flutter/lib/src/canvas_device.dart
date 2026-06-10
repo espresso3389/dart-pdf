@@ -112,13 +112,25 @@ class CanvasPdfDevice implements PdfDevice {
   void fillPathGradient(
       PdfPath path, PdfFillRule rule, PdfGradient gradient, double alpha) {
     final colors = [for (final c in gradient.colors) _toColor(c, 1)];
+    final stops = List<double>.of(gradient.stops);
+    // /Extend false paints nothing beyond that end: a zero-width
+    // transparent stop makes TileMode.clamp continue with transparency
+    // instead of the terminal color
+    if (!gradient.extendStart && colors.isNotEmpty) {
+      colors.insert(0, colors.first.withAlpha(0));
+      stops.insert(0, stops.first);
+    }
+    if (!gradient.extendEnd && colors.isNotEmpty) {
+      colors.add(colors.last.withAlpha(0));
+      stops.add(stops.last);
+    }
     final matrix = _toFloat64(gradient.transform);
     final c = gradient.coords;
     final ui.Shader shader = gradient.isRadial
-        ? ui.Gradient.radial(Offset(c[3], c[4]), c[5], colors, gradient.stops,
+        ? ui.Gradient.radial(Offset(c[3], c[4]), c[5], colors, stops,
             TileMode.clamp, matrix, Offset(c[0], c[1]), c[2])
         : ui.Gradient.linear(Offset(c[0], c[1]), Offset(c[2], c[3]), colors,
-            gradient.stops, TileMode.clamp, matrix);
+            stops, TileMode.clamp, matrix);
     canvas.drawPath(
       _toUiPath(path, rule),
       Paint()

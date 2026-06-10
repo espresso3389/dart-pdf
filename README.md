@@ -7,13 +7,13 @@ no PDFium, no platform channels.
 suite with appearance-stream generation, AcroForm filling, page manipulation,
 and digital-signature-safe editing — built natively for Flutter.
 
-> Status: the core pipeline works end to end — COS parsing (including
-> cross-reference and object streams), signature-preserving incremental
-> updates, a content-stream interpreter with TrueType/CFF font rendering,
-> a zoomable Flutter viewer with text selection and search, rendering of
-> annotation appearance streams, annotation authoring and flattening,
-> AcroForm filling, and decryption of encrypted documents
-> (RC4/AES-128/AES-256). Current frontier: page manipulation.
+> Status: the full roadmap below is complete — COS parsing (with xref
+> recovery for broken files), signature-preserving incremental updates,
+> a content-stream interpreter with TrueType/CFF/Type3 font rendering,
+> a zoomable Flutter viewer with text selection, search, and rotated-page
+> support, annotation authoring and flattening, AcroForm filling,
+> decryption (RC4/AES-128/AES-256), page manipulation, digital
+> signatures, and content editing. Current frontier: the editing UI.
 
 ## Architecture
 
@@ -63,8 +63,9 @@ core runs on servers and in plain Dart tests.
     no reflow)
 
 The roadmap is complete. Current work: polish and the editing UI in
-`pdf_flutter` (deep-zoom tiling, encrypt-on-write, trust-store chain
-validation, and richer text editing remain open).
+`pdf_flutter`. Remaining gaps: deep-zoom tiling, encrypt-on-write,
+trust-store chain validation, JPX/CCITT/JBIG2 codecs, mesh shadings
+(types 4–7), real ICC color management, and richer text editing.
 
 ## Development
 

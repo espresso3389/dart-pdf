@@ -5,10 +5,14 @@ import '../objects.dart';
 import '../parser.dart';
 import 'ascii.dart';
 import 'flate.dart';
+import 'lzw.dart';
+import 'run_length.dart';
 
 export 'ascii.dart';
 export 'flate.dart';
+export 'lzw.dart';
 export 'predictor.dart';
+export 'run_length.dart';
 
 /// Decodes one stage of a stream's /Filter chain.
 abstract class CosFilter {
@@ -24,8 +28,12 @@ const Map<String, CosFilter> _filters = {
   'AHx': AsciiHexFilter(),
   'ASCII85Decode': Ascii85Filter(),
   'A85': Ascii85Filter(),
-  // TODO: LZWDecode, RunLengthDecode, CCITTFaxDecode, JBIG2Decode.
-  // DCTDecode/JPXDecode stay encoded; image decoding happens at render time.
+  'LZWDecode': LzwFilter(),
+  'LZW': LzwFilter(),
+  'RunLengthDecode': RunLengthFilter(),
+  'RL': RunLengthFilter(),
+  // CCITTFaxDecode/JBIG2Decode are not decoded here. DCTDecode/JPXDecode
+  // stay encoded; image decoding happens at render time.
 };
 
 /// Decodes a stream's payload by applying its /Filter chain in order.

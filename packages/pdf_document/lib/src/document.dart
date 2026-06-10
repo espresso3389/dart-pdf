@@ -55,11 +55,16 @@ class PdfDocument {
     if (index < 0) {
       throw RangeError.range(index, 0, null, 'index');
     }
-    // TODO: use /Count on intermediate nodes to skip subtrees instead of
-    // walking every leaf — matters for thousand-page documents.
+    // The fast walk trusts /Count on intermediate nodes to skip whole
+    // subtrees. Real-world files lie about /Count, so a miss falls back
+    // to walking every leaf before giving up.
+    final fast = _findPage(_pagesRoot, _Counter(index), const _Inherited(),
+        <CosDictionary>{});
+    if (fast != null) return fast;
     final counter = _Counter(index);
-    final found =
-        _findPage(_pagesRoot, counter, const _Inherited(), <CosDictionary>{});
+    final found = _findPage(
+        _pagesRoot, counter, const _Inherited(), <CosDictionary>{},
+        useCounts: false);
     if (found == null) {
       throw RangeError('page index $index out of range: document has only '
           '${index - counter.value} reachable pages');
@@ -120,7 +125,8 @@ class PdfDocument {
   }
 
   PdfPage? _findPage(CosDictionary node, _Counter remaining,
-      _Inherited inherited, Set<CosDictionary> visited) {
+      _Inherited inherited, Set<CosDictionary> visited,
+      {bool useCounts = true}) {
     if (!visited.add(node)) return null;
     final merged = inherited.mergedWith(node, cos);
     if (_isLeaf(node)) {
@@ -142,7 +148,18 @@ class PdfDocument {
     for (final kid in kids.items) {
       final child = cos.resolve(kid);
       if (child is! CosDictionary) continue;
-      final found = _findPage(child, remaining, merged, visited);
+      if (useCounts && !_isLeaf(child)) {
+        final count = cos.resolve(child['Count']);
+        if (count is CosInteger &&
+            count.value >= 0 &&
+            remaining.value >= count.value) {
+          // the page is not in this subtree; skip it wholesale
+          remaining.value -= count.value;
+          continue;
+        }
+      }
+      final found =
+          _findPage(child, remaining, merged, visited, useCounts: useCounts);
       if (found != null) return found;
     }
     return null;

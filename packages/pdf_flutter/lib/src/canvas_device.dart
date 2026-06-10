@@ -143,7 +143,56 @@ class CanvasPdfDevice implements PdfDevice {
 
   @override
   void clipPath(PdfPath path, PdfFillRule rule) {
-    canvas.clipPath(_toUiPath(path, rule));
+    // Rectangular clips (the `re W n` idiom) must not antialias: writers
+    // tile big images as abutting clipped strips, and soft clip edges
+    // composite to <100% coverage at every shared boundary — visible as
+    // hairline seams of the backdrop. Hard edges keep abutting strips
+    // pixel-exact; irregular clips keep antialiasing for quality.
+    final rect = _rectOf(path);
+    if (rect != null) {
+      canvas.clipRect(rect, doAntiAlias: false);
+    } else {
+      canvas.clipPath(_toUiPath(path, rule));
+    }
+  }
+
+  /// The path as a single axis-aligned rectangle, or null. The four
+  /// points must be exactly the corners of their bounding box.
+  static ui.Rect? _rectOf(PdfPath path) {
+    final points = <ui.Offset>[];
+    for (final segment in path.segments) {
+      switch (segment) {
+        case PdfMoveTo(:final x, :final y):
+          if (points.isNotEmpty) return null;
+          points.add(ui.Offset(x, y));
+        case PdfLineTo(:final x, :final y):
+          if (points.isEmpty) return null;
+          points.add(ui.Offset(x, y));
+        case PdfClosePath():
+          break;
+        case PdfCubicTo():
+          return null;
+      }
+    }
+    if (points.length == 5 && points.last == points.first) {
+      points.removeLast();
+    }
+    if (points.length != 4) return null;
+    final xs = points.map((p) => p.dx).toSet();
+    final ys = points.map((p) => p.dy).toSet();
+    if (xs.length != 2 || ys.length != 2) return null;
+    for (final corner in [
+      for (final x in xs)
+        for (final y in ys) ui.Offset(x, y),
+    ]) {
+      if (!points.contains(corner)) return null;
+    }
+    return ui.Rect.fromLTRB(
+      xs.reduce((a, b) => a < b ? a : b),
+      ys.reduce((a, b) => a < b ? a : b),
+      xs.reduce((a, b) => a > b ? a : b),
+      ys.reduce((a, b) => a > b ? a : b),
+    );
   }
 
   @override

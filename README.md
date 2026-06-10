@@ -11,9 +11,9 @@ and digital-signature-safe editing — built natively for Flutter.
 > cross-reference and object streams), signature-preserving incremental
 > updates, a content-stream interpreter with TrueType/CFF font rendering,
 > a zoomable Flutter viewer with text selection and search, rendering of
-> annotation appearance streams, and decryption of encrypted documents
-> (RC4/AES-128/AES-256). Current frontier: annotation appearance-stream
-> generation.
+> annotation appearance streams, annotation authoring and flattening,
+> AcroForm filling, and decryption of encrypted documents
+> (RC4/AES-128/AES-256). Current frontier: page manipulation.
 
 ## Architecture
 
@@ -44,8 +44,11 @@ core runs on servers and in plain Dart tests.
 8. ✅ Annotations: model, appearance-stream rendering, authoring with
    generated appearances (highlight/underline/strike-out/squiggly, ink,
    shapes, free text, notes, stamps), and flattening
-9. **AcroForm: field model, filling, appearance regeneration** — next
-10. Page manipulation: reorder, merge, split (cross-document object copying)
+9. ✅ AcroForm: field model (text, check box, radio, choice), filling
+   with regenerated appearances (auto-size, multiline wrap, quadding,
+   /MK decorations)
+10. **Page manipulation: reorder, merge, split (cross-document object
+    copying)** — next
 11. Digital signatures: signing and validation
 12. Content editing tiers: stamping → element deletion → text editing
 

@@ -5,5 +5,6 @@ library;
 export 'src/annotation.dart';
 export 'src/document.dart';
 export 'src/editor.dart';
+export 'src/form.dart';
 export 'src/page.dart';
 export 'src/rect.dart';

@@ -23,6 +23,15 @@ class ContentWriter {
   void save() => op('q');
   void restore() => op('Q');
 
+  /// Writes pre-formed operator text verbatim, on its own line. Used for
+  /// operators with name operands (`/Tx BMC`) and for replaying /DA
+  /// fragments that are already valid content-stream syntax.
+  void raw(String text) {
+    _buffer
+      ..write(text)
+      ..write('\n');
+  }
+
   /// References /[name] in the resources' /ExtGState dictionary.
   void extGState(String name) => _buffer.write('/$name gs\n');
 

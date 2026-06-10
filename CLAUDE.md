@@ -49,4 +49,7 @@ rendering, and decryption (RC4/AES-128/AES-256; the updater refuses
 encrypted files until encrypt-on-write lands). Annotation authoring is in:
 `PdfEditor` creates highlights/ink/shapes/free text/notes/stamps with
 generated appearance streams (`annotation_editor.dart`) and can flatten
-them into page content. Current frontier: AcroForm filling.
+them into page content. AcroForm support is in: `PdfAcroForm`/`PdfFormField`
+model (`form.dart`) plus filling with regenerated appearances
+(`form_editor.dart` — text/checkbox/radio/choice, auto-size, quadding).
+Current frontier: page manipulation (reorder, merge, split).

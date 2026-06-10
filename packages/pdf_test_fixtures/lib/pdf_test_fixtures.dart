@@ -261,6 +261,79 @@ Uint8List buildAppearanceAnnotationsPdf() {
   return ascii(buffer.toString());
 }
 
+/// Builds a one-page PDF with an interactive AcroForm:
+///
+/// - text field "name" (merged widget) at [72 700 300 724], own
+///   /DA (/Helv 12 Tf 0 g), prefilled value "prefilled"
+/// - multiline (/Ff 4096) text field "address" at [72 600 300 680],
+///   inheriting the form-wide auto-size /DA (/Helv 0 Tf 0 g)
+/// - check box "agree" at [72 540 92 560] with /Yes and /Off appearance
+///   states, currently /Off
+/// - radio group "color" with two kid widgets at [72 500 92 520] (/Red)
+///   and [120 500 140 520] (/Blue), currently /Off
+/// - combo box (/Ff 131072) "size" at [72 460 200 484], centered (/Q 1),
+///   /Opt [(Small) (Medium) [(L) (Large)]], value "Medium"
+/// - read-only (/Ff 1) text field "serial" at [72 420 200 444],
+///   value "A-1000"
+///
+/// The /AcroForm dictionary carries /NeedAppearances true so fillers can
+/// prove they cleared it, and /DR with /Helv → Helvetica.
+Uint8List buildAcroFormPdf() {
+  const widgets = '6 0 R 7 0 R 8 0 R 10 0 R 11 0 R 12 0 R 13 0 R';
+  const onState = '0.5 g 0 0 20 20 re f';
+  final objects = <String>[
+    '<< /Type /Catalog /Pages 2 0 R /AcroForm << '
+        '/Fields [6 0 R 7 0 R 8 0 R 9 0 R 12 0 R 13 0 R] '
+        '/DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv 5 0 R >> >> '
+        '/NeedAppearances true >> >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+        '/Annots [$widgets] >>',
+    '<< /Length 0 >>\nstream\n\nendstream',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica '
+        '/Encoding /WinAnsiEncoding >>',
+    '<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) '
+        '/Rect [72 700 300 724] /DA (/Helv 12 Tf 0 g) /V (prefilled) >>',
+    '<< /Type /Annot /Subtype /Widget /FT /Tx /T (address) /Ff 4096 '
+        '/Rect [72 600 300 680] >>',
+    '<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) /V /Off /AS /Off '
+        '/Rect [72 540 92 560] '
+        '/AP << /N << /Yes 14 0 R /Off 15 0 R >> >> >>',
+    '<< /FT /Btn /T (color) /Ff 32768 /V /Off /Kids [10 0 R 11 0 R] >>',
+    '<< /Type /Annot /Subtype /Widget /Parent 9 0 R /Rect [72 500 92 520] '
+        '/AS /Off /AP << /N << /Red 14 0 R /Off 15 0 R >> >> >>',
+    '<< /Type /Annot /Subtype /Widget /Parent 9 0 R /Rect [120 500 140 520] '
+        '/AS /Off /AP << /N << /Blue 14 0 R /Off 15 0 R >> >> >>',
+    '<< /Type /Annot /Subtype /Widget /FT /Ch /T (size) /Ff 131072 /Q 1 '
+        '/Opt [(Small) (Medium) [(L) (Large)]] /V (Medium) '
+        '/Rect [72 460 200 484] >>',
+    '<< /Type /Annot /Subtype /Widget /FT /Tx /T (serial) /Ff 1 '
+        '/V (A-1000) /Rect [72 420 200 444] >>',
+    '<< /Type /XObject /Subtype /Form /BBox [0 0 20 20] '
+        '/Length ${onState.length} >>\nstream\n$onState\nendstream',
+    '<< /Type /XObject /Subtype /Form /BBox [0 0 20 20] /Length 0 '
+        '>>\nstream\n\nendstream',
+  ];
+
+  final buffer = StringBuffer('%PDF-1.4\n');
+  final offsets = <int>[];
+  for (var i = 0; i < objects.length; i++) {
+    offsets.add(buffer.length);
+    buffer.write('${i + 1} 0 obj\n${objects[i]}\nendobj\n');
+  }
+  final xrefOffset = buffer.length;
+  buffer
+    ..write('xref\n0 ${objects.length + 1}\n')
+    ..write('0000000000 65535 f \n');
+  for (final offset in offsets) {
+    buffer.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  buffer
+    ..write('trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n')
+    ..write('startxref\n$xrefOffset\n%%EOF\n');
+  return ascii(buffer.toString());
+}
+
 /// Builds a minimal TrueType font, unitsPerEm 1000, three glyphs:
 /// 0 = .notdef (empty), 1 = 'A' (triangle, advance 600),
 /// 2 = 'B' (square, advance 1000). The cmap is a (3,1) format 4 table.

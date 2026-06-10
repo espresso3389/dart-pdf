@@ -135,6 +135,24 @@ void main() {
     expect(dump(flat), dump(live));
   });
 
+  test('a filled form field renders its value as text runs', () {
+    final editor = PdfEditor(PdfDocument.open(buildAcroFormPdf()));
+    editor.setTextValue(editor.acroForm!.fieldNamed('name')!, 'Jane Roe');
+    editor.setCheckBoxValue(editor.acroForm!.fieldNamed('agree')!, true);
+    final doc = PdfDocument.open(editor.save());
+
+    final device = render(doc);
+    final shown = device.texts.map((t) => t.text).join();
+    expect(shown, contains('Jane Roe'));
+    // the checkbox flipped to its /Yes state, whose stream fills 0.5 gray
+    expect(
+        device.fills.any((c) =>
+            (c.red - 0.5).abs() < 0.01 &&
+            (c.green - 0.5).abs() < 0.01 &&
+            (c.blue - 0.5).abs() < 0.01),
+        isTrue);
+  });
+
   test('a generated stamp shows its caption in Helvetica-Bold', () {
     final device = render(annotated(
         (e) => e.addStamp(0, const PdfRect(100, 500, 260, 540), 'DRAFT')));

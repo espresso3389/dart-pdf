@@ -12,9 +12,11 @@ void main(List<String> args) {
       final doc = PdfDocument.open(File(path).readAsBytesSync());
       final page = doc.page(0);
       final title = doc.info['Title'];
+      final fields = PdfAcroForm.of(doc)?.fields.length ?? 0;
       stdout.writeln('OK   PDF ${doc.version}, ${doc.pageCount} page(s), '
           'page 1 ${page.mediaBox.width.round()}x'
           '${page.mediaBox.height.round()}'
+          '${fields == 0 ? '' : ', $fields field(s)'}'
           '${title == null || title.isEmpty ? '' : ', "$title"'} — $path');
       ok++;
     } catch (e) {

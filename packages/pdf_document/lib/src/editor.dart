@@ -5,9 +5,11 @@ import 'package:pdf_cos/pdf_cos.dart';
 import 'annotation.dart';
 import 'content_writer.dart';
 import 'document.dart';
+import 'form.dart';
 import 'rect.dart';
 
 part 'annotation_editor.dart';
+part 'form_editor.dart';
 
 /// High-level editing session over a [PdfDocument].
 ///

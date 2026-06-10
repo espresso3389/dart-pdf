@@ -111,6 +111,99 @@ void main() {
     });
   });
 
+  testWidgets('/Decode [1 0] inverts gray samples', (tester) async {
+    await tester.runAsync(() async {
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(2),
+          'Height': const CosInteger(1),
+          'BitsPerComponent': const CosInteger(8),
+          'ColorSpace': const CosName('DeviceGray'),
+          'Decode': CosArray([const CosInteger(1), const CosInteger(0)]),
+        }),
+        Uint8List.fromList([0, 200]),
+      );
+      final images = await decodeImages(cos, [image]);
+      final pixels = await pixelsOf(images[image]!);
+      expect(pixels[0], 255); // 0 inverted
+      expect(pixels[4], 55); // 200 inverted
+    });
+  });
+
+  testWidgets('/Decode inverts 1-bit gray polarity', (tester) async {
+    await tester.runAsync(() async {
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(2),
+          'Height': const CosInteger(1),
+          'BitsPerComponent': const CosInteger(1),
+          'ColorSpace': const CosName('DeviceGray'),
+          'Decode': CosArray([const CosInteger(1), const CosInteger(0)]),
+        }),
+        Uint8List.fromList([0x40]), // bits: 0, 1
+      );
+      final images = await decodeImages(cos, [image]);
+      final pixels = await pixelsOf(images[image]!);
+      expect(pixels[0], 255); // bit 0 → decode min 1 → white
+      expect(pixels[4], 0); // bit 1 → decode max 0 → black
+    });
+  });
+
+  testWidgets('color-key /Mask ranges knock samples transparent',
+      (tester) async {
+    await tester.runAsync(() async {
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(2),
+          'Height': const CosInteger(1),
+          'BitsPerComponent': const CosInteger(8),
+          'ColorSpace': const CosName('DeviceRGB'),
+          // green-screen: kill pure green
+          'Mask': CosArray([
+            const CosInteger(0), const CosInteger(5), //
+            const CosInteger(250), const CosInteger(255),
+            const CosInteger(0), const CosInteger(5),
+          ]),
+        }),
+        Uint8List.fromList([0, 255, 0, 200, 30, 40]),
+      );
+      final images = await decodeImages(cos, [image]);
+      final pixels = await pixelsOf(images[image]!);
+      expect(pixels[3], 0); // green pixel keyed out
+      expect(pixels[7], 255); // other pixel opaque
+      expect(pixels.sublist(4, 7), [200, 30, 40]);
+    });
+  });
+
+  testWidgets('an explicit /Mask stencil stream hides 1-samples',
+      (tester) async {
+    await tester.runAsync(() async {
+      final mask = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(2),
+          'Height': const CosInteger(1),
+          'BitsPerComponent': const CosInteger(1),
+          'ImageMask': const CosBoolean(true),
+        }),
+        Uint8List.fromList([0x80]), // bits: 1 (mask out), 0 (keep)
+      );
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(2),
+          'Height': const CosInteger(1),
+          'BitsPerComponent': const CosInteger(8),
+          'ColorSpace': const CosName('DeviceGray'),
+          'Mask': mask,
+        }),
+        Uint8List.fromList([100, 100]),
+      );
+      final images = await decodeImages(cos, [image]);
+      final pixels = await pixelsOf(images[image]!);
+      expect(pixels[3], 0);
+      expect(pixels[7], 255);
+    });
+  });
+
   testWidgets('masked-out pixels premultiply to transparent black',
       (tester) async {
     await tester.runAsync(() async {

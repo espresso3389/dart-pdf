@@ -79,8 +79,10 @@ with handles; a content tool that selects page elements for deletion or
 in-place text replacement), keyboard shortcuts, style controls (stroke
 width, opacity, font size), an annotation list sidebar
 (`PdfAnnotationSidebar`), a page thumbnail sidebar
-(`PdfThumbnailSidebar` — tap to jump, drag to reorder pages, delete),
-and a ready-made `PdfEditingToolbar`. Still
+(`PdfThumbnailSidebar` — tap to jump, drag to reorder pages, delete,
+with a live viewport indicator), and a ready-made `PdfEditingToolbar`.
+The viewer opens fitted to the whole page like desktop browser viewers
+(`PdfViewer.initialFit`). Still
 open: richer text editing (reflow),
 RSASSA-PSS signatures, JBIG2 Huffman/refinement variants, and JPX
 subsampling/PCRL-CPRL progressions.

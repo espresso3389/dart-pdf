@@ -117,4 +117,11 @@ rasterization), tap to jump, long-press drag to reorder
 (ReorderableListView `onReorderItem` — already index-adjusted), footer
 delete; `controller.movePage`/`removePage` clear the slot-based
 annotation selection first because page indices shift under it, and
-`removePage` is a no-op on the last page.
+`removePage` is a no-op on the last page. Reorder drag: immediate for
+mouse pointers, long-press for touch (custom listener picking the
+recognizer per pointer kind). The strip shows a viewport indicator fed
+by `PdfViewerController.visiblePageRegion(page)` (fractions 0–1) and
+repainted via `viewportChanges` (a separate Listenable so scrolling
+doesn't spam controller listeners). `PdfViewer.initialFit` defaults to
+`PdfViewerFit.page` (whole first page visible, Chrome-style) — widget
+tests that do view-coordinate math pin `initialFit: PdfViewerFit.width`.

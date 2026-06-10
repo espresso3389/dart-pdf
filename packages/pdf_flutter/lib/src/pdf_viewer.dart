@@ -80,6 +80,37 @@ class PdfViewerController extends ChangeNotifier {
 
   Future<void> jumpToPage(int index) async => _state?._jumpToPage(index);
 
+  final _viewport = _ViewportNotifier();
+
+  /// Notifies whenever the visible region changes — scrolling, zooming.
+  /// The controller itself stays quiet during scrolling (it only notifies
+  /// when [currentPage] flips), so listen to this to track
+  /// [visiblePageRegion], e.g. for a thumbnail strip's viewport indicator.
+  Listenable get viewportChanges => _viewport;
+
+  /// The visible part of [pageIndex], as fractions of the page's
+  /// displayed area (0–1 both axes, y-down from the page's top-left), or
+  /// null while the page is entirely off-screen.
+  Rect? visiblePageRegion(int pageIndex) =>
+      _state?._visibleFractionOf(pageIndex);
+
+  void _bumpViewport() {
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (_state != null) _viewport.notify();
+      });
+    } else {
+      _viewport.notify();
+    }
+  }
+
+  @override
+  void dispose() {
+    _viewport.dispose();
+    super.dispose();
+  }
+
   /// Searches the whole document and jumps to the first hit.
   Future<void> search(String query) async {
     final state = _state;
@@ -153,6 +184,23 @@ class PdfViewerController extends ChangeNotifier {
       ];
 }
 
+/// [ChangeNotifier.notifyListeners] is protected; this is the smallest
+/// way to hand out a bare [Listenable] the viewer can fire.
+class _ViewportNotifier extends ChangeNotifier {
+  void notify() => notifyListeners();
+}
+
+/// How [PdfViewer] zooms the document when it first appears.
+enum PdfViewerFit {
+  /// Pages fill the viewport width.
+  width,
+
+  /// The whole first page fits inside the viewport, like desktop
+  /// browser PDF viewers. On viewports narrower than the page's own
+  /// aspect ratio this is the same as [width].
+  page,
+}
+
 /// Signature for [PdfViewer.onAction]: the user activated [annotation]
 /// (tapped a link or form button) and the viewer doesn't handle its
 /// [action] itself.
@@ -180,6 +228,7 @@ class PdfViewer extends StatefulWidget {
     this.editing,
     this.editingTextPrompt,
     this.pageSpacing = 12,
+    this.initialFit = PdfViewerFit.page,
     this.minZoom = 0.25,
     this.maxZoom = 6,
     this.doubleTapZoom = 2.5,
@@ -217,6 +266,12 @@ class PdfViewer extends StatefulWidget {
   final PdfTextPrompt? editingTextPrompt;
 
   final double pageSpacing;
+
+  /// The zoom the document opens at: the whole first page visible
+  /// (default, like desktop browser viewers) or filling the viewport
+  /// width. Re-applied when a swapped-in document has a different page
+  /// geometry (a different file — not an edit revision).
+  final PdfViewerFit initialFit;
 
   /// Smallest zoom factor; below 1 the page shrinks past fit-width and
   /// floats centered in the viewport.
@@ -258,6 +313,10 @@ class _PdfViewerState extends State<PdfViewer>
   /// (so zooming out shows more of the document); zoom above fit-width
   /// lives in the InteractiveViewer transform instead.
   double _layoutZoom = 1;
+
+  /// Whether [PdfViewer.initialFit] has been turned into a layout zoom
+  /// yet; that needs the viewport size, so it happens on first layout.
+  bool _appliedInitialFit = false;
 
   /// The effective zoom the user sees. Transform values near 1 defer to
   /// the layout zoom; mid-gesture sub-1 transforms combine with it.
@@ -401,6 +460,7 @@ class _PdfViewerState extends State<PdfViewer>
     final pixels = _scroll.hasClients ? _scroll.position.pixels : 0.0;
     final target = (pixels + anchor) * (z / _layoutZoom) - anchor;
     setState(() => _layoutZoom = z);
+    _controller._bumpViewport();
     if (_scroll.hasClients) {
       _scroll.jumpTo(math.max(0, target));
       // the new extents only exist after this frame's layout
@@ -420,6 +480,7 @@ class _PdfViewerState extends State<PdfViewer>
   /// listener (rather than onInteractionEnd) also catches wheel zoom and
   /// the double-tap animation.
   void _onTransformChanged() {
+    _controller._bumpViewport();
     _settleTimer?.cancel();
     _settleTimer = Timer(const Duration(milliseconds: 200), () {
       if (!mounted) return;
@@ -468,6 +529,9 @@ class _PdfViewerState extends State<PdfViewer>
           if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
         });
         _transform.value = Matrix4.identity();
+        // a different file deserves a fresh fit; an edit revision (same
+        // geometry) keeps the zoom the user chose
+        _appliedInitialFit = false;
       }
       setState(() {});
     }
@@ -529,6 +593,7 @@ class _PdfViewerState extends State<PdfViewer>
 
   void _onScroll() {
     if (_viewWidth <= 0 || !_scroll.hasClients) return;
+    _controller._bumpViewport();
     final center = _scroll.offset + _scroll.position.viewportDimension / 2;
     var offset = 0.0;
     for (var i = 0; i < _pages.length; i++) {
@@ -565,6 +630,36 @@ class _PdfViewerState extends State<PdfViewer>
 
   PdfPageText _pageText(int index) =>
       _textCache[index] ??= PdfTextExtractor.extract(widget.document, index);
+
+  /// The visible part of page [index]'s laid-out area, as fractions of
+  /// the page (0–1, y-down), or null while the page is off-screen.
+  Rect? _visibleFractionOf(int index) {
+    if (_viewWidth <= 0 || !_scroll.hasClients || index >= _pages.length) {
+      return null;
+    }
+    // the InteractiveViewer transform is scale + translation only, so the
+    // viewport unprojects to list space as (p - t) / s
+    final m = _transform.value;
+    final scale = m.getMaxScaleOnAxis();
+    final view = Rect.fromLTWH(
+      -m.storage[12] / scale,
+      -m.storage[13] / scale + _scroll.position.pixels,
+      _viewWidth / scale,
+      _viewHeight / scale,
+    );
+    final pageWidth = _viewWidth * _layoutZoom;
+    final pageRect = Rect.fromLTWH((_viewWidth - pageWidth) / 2,
+        _pageOffset(index), pageWidth, _pageHeight(index));
+    if (pageRect.isEmpty) return null;
+    final overlap = view.intersect(pageRect);
+    if (overlap.width <= 0 || overlap.height <= 0) return null;
+    return Rect.fromLTRB(
+      (overlap.left - pageRect.left) / pageRect.width,
+      (overlap.top - pageRect.top) / pageRect.height,
+      (overlap.right - pageRect.left) / pageRect.width,
+      (overlap.bottom - pageRect.top) / pageRect.height,
+    );
+  }
 
   /// Maps a pointer position (list coordinates, inside the
   /// InteractiveViewer transform) to (page index, x, y) in that page's
@@ -1022,14 +1117,21 @@ class _PdfViewerState extends State<PdfViewer>
     return LayoutBuilder(builder: (context, constraints) {
       _viewWidth = constraints.maxWidth;
       _viewHeight = constraints.maxHeight;
+      if (!_appliedInitialFit && _viewWidth > 0 && _viewHeight > 0) {
+        _appliedInitialFit = true;
+        _layoutZoom =
+            widget.initialFit == PdfViewerFit.page && _aspects.isNotEmpty
+                ? (_viewHeight / (_viewWidth * _aspects.first))
+                    .clamp(widget.minZoom, 1.0)
+                : 1.0;
+      }
       final list = ListView.builder(
         controller: _scroll,
         // with a tool armed, touch drags belong to the editing overlay —
         // the list's drag recognizer would win vertical-ish strokes in
         // the arena otherwise. Wheel and trackpad scrolling are unaffected.
-        physics: editing?.tool != null
-            ? const NeverScrollableScrollPhysics()
-            : null,
+        physics:
+            editing?.tool != null ? const NeverScrollableScrollPhysics() : null,
         itemCount: _pages.length,
         padding: EdgeInsets.only(bottom: widget.pageSpacing),
         itemBuilder: (context, index) => Padding(
@@ -1243,8 +1345,7 @@ class _PdfViewerPage extends StatelessWidget {
     // (dropping its rendered image: a white flash)
     final builder = overlayBuilder;
     return Stack(children: [
-      PdfPageView(
-          page: page, scale: scale, settleGeneration: settleGeneration),
+      PdfPageView(page: page, scale: scale, settleGeneration: settleGeneration),
       Positioned.fill(
         child: CustomPaint(
           painter: _HighlightPainter(

@@ -15,6 +15,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: PdfViewer(
+          initialFit: PdfViewerFit.width,
           document: PdfDocument.open(bytes ?? buildMultiPagePdf(pages)),
           controller: controller,
           onAction: onAction,
@@ -37,6 +38,29 @@ void main() {
     expect(controller.pageCount, 5);
     expect(controller.currentPage, 0);
     expect(find.byType(PdfPageView), findsWidgets);
+  });
+
+  testWidgets('opens fitted to the whole page by default', (tester) async {
+    final controller = PdfViewerController();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PdfViewer(
+          document: PdfDocument.open(buildMultiPagePdf(2)),
+          controller: controller,
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    // 800×600 viewport, 612×792 pages: fit-page = 600 / (800 · 792/612)
+    expect(controller.zoom, closeTo(600 / (800 * 792 / 612), 0.001));
+    final region = controller.visiblePageRegion(0)!;
+    expect(region.left, closeTo(0, 0.001));
+    expect(region.top, closeTo(0, 0.001));
+    expect(region.right, closeTo(1, 0.001));
+    expect(region.bottom, closeTo(1, 0.001));
+    expect(controller.visiblePageRegion(1), isNull,
+        reason: 'the next page starts below the viewport');
   });
 
   testWidgets('scrolling updates the current page', (tester) async {
@@ -97,6 +121,7 @@ void main() {
           ),
           Expanded(
             child: PdfViewer(
+              initialFit: PdfViewerFit.width,
               document: PdfDocument.open(buildMultiPagePdf(3)),
               controller: controller,
             ),
@@ -119,7 +144,7 @@ void main() {
     Widget app(PdfDocument document) => MaterialApp(
           home: Scaffold(
             appBar: AppBar(title: const Text('viewer')),
-            body: PdfViewer(document: document),
+            body: PdfViewer(document: document, initialFit: PdfViewerFit.width),
           ),
         );
     await tester.pumpWidget(app(PdfDocument.open(buildMultiPagePdf(3))));
@@ -301,6 +326,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: PdfViewer(
+          initialFit: PdfViewerFit.width,
           document: PdfDocument.open(buildMultiPagePdf(2)),
           pageOverlayBuilder: (context, pageIndex, geometry) => [
             if (pageIndex == 0)
@@ -632,6 +658,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: PdfViewer(
+          initialFit: PdfViewerFit.width,
           document: PdfDocument.open(buildMultiPagePdf(2)),
           pageOverlayBuilder: (context, pageIndex, geometry) => [
             if (pageIndex == 0)

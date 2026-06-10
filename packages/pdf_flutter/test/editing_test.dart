@@ -1,6 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/gestures.dart' show kLongPressTimeout;
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, kLongPressTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,8 +11,7 @@ import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 
 void main() {
   group('PdfEditingController', () {
-    test('apply commits a revision; undo and redo walk the prefix stack',
-        () {
+    test('apply commits a revision; undo and redo walk the prefix stack', () {
       final editing = PdfEditingController(buildMultiPagePdf(2));
       final originalLength = editing.bytes.length;
       expect(editing.isModified, isFalse);
@@ -27,8 +27,7 @@ void main() {
       expect(editing.document.page(0).annotations, hasLength(2));
       // incremental updates: each revision extends the previous one
       expect(editing.bytes.length, greaterThan(oneEditLength));
-      expect(editing.bytes.sublist(0, originalLength),
-          buildMultiPagePdf(2));
+      expect(editing.bytes.sublist(0, originalLength), buildMultiPagePdf(2));
 
       editing.undo();
       expect(editing.document.page(0).annotations, hasLength(1));
@@ -61,8 +60,7 @@ void main() {
       expect(editing.isModified, isFalse);
     });
 
-    test('ink strokes buffer until finishInk commits one Ink annotation',
-        () {
+    test('ink strokes buffer until finishInk commits one Ink annotation', () {
       final editing = PdfEditingController(buildMultiPagePdf(1))
         ..addInkStroke(0, [(100, 100), (150, 130), (200, 100)])
         ..addInkStroke(0, [(120, 90), (140, 95)]);
@@ -116,12 +114,12 @@ void main() {
       editing.moveSelected(10, 20);
       // the annotation keeps its /Annots slot, so the selection survives
       expect(editing.selectedAnnotation, isNotNull);
-      expect(editing.selectedAnnotation!.rect,
-          const PdfRect(110, 120, 210, 170));
+      expect(
+          editing.selectedAnnotation!.rect, const PdfRect(110, 120, 210, 170));
 
       editing.resizeSelected(const PdfRect(110, 120, 310, 270));
-      expect(editing.selectedAnnotation!.rect,
-          const PdfRect(110, 120, 310, 270));
+      expect(
+          editing.selectedAnnotation!.rect, const PdfRect(110, 120, 310, 270));
 
       editing.deleteSelected();
       expect(editing.selectedAnnotation, isNull);
@@ -170,8 +168,7 @@ void main() {
       // full opacity adds no alpha state
       final opaque = PdfEditingController(buildMultiPagePdf(1))
         ..addRectangle(0, const PdfRect(100, 100, 200, 150));
-      expect(String.fromCharCodes(opaque.bytes),
-          isNot(contains('/ExtGState')));
+      expect(String.fromCharCodes(opaque.bytes), isNot(contains('/ExtGState')));
     });
 
     test('selectAnnotation and deleteAnnotation address /Annots slots', () {
@@ -315,6 +312,7 @@ void main() {
           body: ListenableBuilder(
             listenable: editing,
             builder: (context, _) => PdfViewer(
+              initialFit: PdfViewerFit.width,
               document: editing.document,
               controller: viewer,
               editing: editing,
@@ -470,6 +468,7 @@ void main() {
           body: ListenableBuilder(
             listenable: editing,
             builder: (context, _) => PdfViewer(
+              initialFit: PdfViewerFit.width,
               document: editing.document,
               controller: viewer,
               editing: editing,
@@ -537,6 +536,7 @@ void main() {
               child: ListenableBuilder(
                 listenable: editing,
                 builder: (context, _) => PdfViewer(
+                  initialFit: PdfViewerFit.width,
                   document: editing.document,
                   controller: viewer,
                   editing: editing,
@@ -623,6 +623,7 @@ void main() {
               child: ListenableBuilder(
                 listenable: editing,
                 builder: (context, _) => PdfViewer(
+                  initialFit: PdfViewerFit.width,
                   document: editing.document,
                   controller: viewer,
                   editing: editing,
@@ -644,10 +645,18 @@ void main() {
       expect(find.text('Page 1'), findsOneWidget);
       expect(find.text('Page 3'), findsOneWidget);
 
+      // the viewport indicator: page 1 is partially visible (fit-width
+      // pages are taller than the viewport), page 3 is off-screen
+      final region = viewer.visiblePageRegion(0)!;
+      expect(region.top, closeTo(0, 0.01));
+      expect(region.bottom, lessThan(1));
+      expect(viewer.visiblePageRegion(2), isNull);
+
       // tapping a thumbnail jumps the viewer
       await tester.tap(find.text('Page 3'));
       await settle(tester);
       expect(viewer.currentPage, 2);
+      expect(viewer.visiblePageRegion(0), isNull);
 
       // long-press a tile, then drag it one tile down to reorder
       final gesture =
@@ -669,6 +678,19 @@ void main() {
       expect(editing.document.pageCount, 2);
       expect(shown(0), 'Page 1');
       expect(shown(1), 'Page 3');
+
+      // a mouse drags tiles without the long press
+      final mouse = await tester.startGesture(
+          tester.getCenter(find.text('Page 1')),
+          kind: PointerDeviceKind.mouse);
+      await mouse.moveBy(const Offset(0, 90));
+      await tester.pump();
+      await mouse.moveBy(const Offset(0, 90));
+      await tester.pump();
+      await mouse.up();
+      await settle(tester);
+      expect(shown(0), 'Page 3');
+      expect(shown(1), 'Page 1');
     });
   });
 }

@@ -8,6 +8,7 @@ import 'color.dart';
 import 'device.dart';
 import 'font_info.dart';
 import 'function.dart';
+import 'icc.dart';
 import 'matrix.dart';
 import 'path.dart';
 import 'shading.dart';
@@ -28,6 +29,8 @@ class _GraphicsState {
         fillPatternComponents = const [],
         fillTintTransform = null,
         strokeTintTransform = null,
+        fillIcc = null,
+        strokeIcc = null,
         font = null,
         fontDict = null,
         fontSize = 0,
@@ -51,6 +54,8 @@ class _GraphicsState {
         fillPatternComponents = other.fillPatternComponents,
         fillTintTransform = other.fillTintTransform,
         strokeTintTransform = other.strokeTintTransform,
+        fillIcc = other.fillIcc,
+        strokeIcc = other.strokeIcc,
         softMask = other.softMask,
         blendMode = other.blendMode,
         font = other.font,
@@ -78,6 +83,11 @@ class _GraphicsState {
   /// current space carries raw device components.
   PdfColor Function(double)? fillTintTransform;
   PdfColor Function(double)? strokeTintTransform;
+
+  /// Real ICC conversions for ICCBased fill/stroke spaces; null falls
+  /// back to component-count heuristics.
+  IccProfile? fillIcc;
+  IccProfile? strokeIcc;
   int strokeComponents;
 
   /// The active fill pattern (stream for tiling, dictionary for shading)
@@ -136,6 +146,7 @@ class PdfInterpreter {
   final List<_GraphicsState> _stateStack = [];
   final Map<CosDictionary, PdfFontInfo> _fontCache = {};
   final Map<CosStream, List<ContentOperation>> _patternOpsCache = {};
+  final Map<CosStream, IccProfile?> _iccCache = {};
   int _currentFormDepth = 0;
   PdfRect? _pageBox;
 
@@ -371,10 +382,12 @@ class PdfInterpreter {
         case 'cs':
           _state.fillComponents = _componentsOf(resources, o);
           _state.fillTintTransform = _tintTransformOf(resources, o);
+          _state.fillIcc = _iccProfileOf(resources, o);
           _state.fillPattern = null;
         case 'CS':
           _state.strokeComponents = _componentsOf(resources, o);
           _state.strokeTintTransform = _tintTransformOf(resources, o);
+          _state.strokeIcc = _iccProfileOf(resources, o);
         case 'sc' || 'scn':
           _state.fillPattern = null;
           if (o.isNotEmpty && o.last is CosName) {
@@ -385,8 +398,8 @@ class PdfInterpreter {
                 if (v is CosInteger || v is CosReal) _numOf(v),
             ];
           } else {
-            _state.fillColor = _tintedColor(
-                _state.fillTintTransform, o, _state.fillColor);
+            _state.fillColor = _tintedColor(_state.fillTintTransform,
+                _state.fillIcc, o, _state.fillColor);
           }
         case 'SC' || 'SCN':
           if (o.isNotEmpty && o.last is CosName) {
@@ -395,8 +408,8 @@ class PdfInterpreter {
                 _patternAverageColor(_resource(resources, 'Pattern', o.last as CosName));
             if (color != null) _state.strokeColor = color;
           } else {
-            _state.strokeColor = _tintedColor(
-                _state.strokeTintTransform, o, _state.strokeColor);
+            _state.strokeColor = _tintedColor(_state.strokeTintTransform,
+                _state.strokeIcc, o, _state.strokeColor);
           }
 
         // --- text ---
@@ -586,18 +599,41 @@ class PdfInterpreter {
     return 3;
   }
 
-  /// sc/scn through the active tint transform when one is set, else by
-  /// raw component count.
+  /// sc/scn through the active tint transform or ICC profile when one
+  /// is set, else by raw component count.
   PdfColor _tintedColor(PdfColor Function(double)? transform,
-      List<CosObject> o, PdfColor current) {
-    if (transform != null) {
-      final values = [
-        for (final item in o)
-          if (item is CosInteger || item is CosReal) _numOf(item),
-      ];
-      if (values.length == 1) return transform(values[0]);
+      IccProfile? icc, List<CosObject> o, PdfColor current) {
+    final values = [
+      for (final item in o)
+        if (item is CosInteger || item is CosReal) _numOf(item),
+    ];
+    if (transform != null && values.length == 1) return transform(values[0]);
+    if (icc != null && values.length == icc.channels) {
+      return icc.toSrgb(values);
     }
     return _colorFromComponents(o, current);
+  }
+
+  /// Parses (and caches) the ICC profile of a named ICCBased space.
+  /// Null for other spaces and for profile shapes the engine cannot
+  /// handle — those keep the component-count fallback.
+  IccProfile? _iccProfileOf(CosDictionary resources, List<CosObject> o) {
+    if (o.isEmpty || o[0] is! CosName) return null;
+    final spaces = cos.resolve(resources['ColorSpace']);
+    if (spaces is! CosDictionary) return null;
+    final space = cos.resolve(spaces[(o[0] as CosName).value]);
+    if (space is! CosArray || space.length < 2) return null;
+    final family = cos.resolve(space[0]);
+    if (family is! CosName || family.value != 'ICCBased') return null;
+    final stream = cos.resolve(space[1]);
+    if (stream is! CosStream) return null;
+    return _iccCache.putIfAbsent(stream, () {
+      try {
+        return IccProfile.parse(cos.decodeStreamData(stream));
+      } on Exception {
+        return null;
+      }
+    });
   }
 
   /// A converter for Separation (or single-colorant DeviceN) spaces: the

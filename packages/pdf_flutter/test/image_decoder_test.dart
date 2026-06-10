@@ -343,6 +343,55 @@ void main() {
     });
   });
 
+  testWidgets('ICCBased images convert through the real profile',
+      (tester) async {
+    await tester.runAsync(() async {
+      final profile =
+          CosStream(CosDictionary({'N': const CosInteger(3)}),
+              adobeRgb1998Icc());
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(1),
+          'Height': const CosInteger(1),
+          'BitsPerComponent': const CosInteger(8),
+          'ColorSpace': CosArray([const CosName('ICCBased'), profile]),
+        }),
+        Uint8List.fromList([128, 64, 200]),
+      );
+      final images = await decodeImages(cos, [image]);
+      final pixels = await pixelsOf(images[image]!);
+      // AdobeRGB (128,64,200) in sRGB per littleCMS: (146,62,205)
+      expect(pixels[0], closeTo(146, 3));
+      expect(pixels[1], closeTo(62, 3));
+      expect(pixels[2], closeTo(205, 3));
+    });
+  });
+
+  testWidgets('ICCBased CMYK images use the LUT profile', (tester) async {
+    await tester.runAsync(() async {
+      final profile =
+          CosStream(CosDictionary({'N': const CosInteger(4)}),
+              genericCmykIcc());
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(1),
+          'Height': const CosInteger(1),
+          'BitsPerComponent': const CosInteger(8),
+          'ColorSpace': CosArray([const CosName('ICCBased'), profile]),
+        }),
+        Uint8List.fromList([255, 0, 0, 0]), // pure cyan
+      );
+      final images = await decodeImages(cos, [image]);
+      final pixels = await pixelsOf(images[image]!);
+      // littleCMS: (0,164,219) — the naive cmyk() heuristic gives
+      // (0,158,224), so this proves the profile path ran... barely;
+      // the black test separates them decisively
+      expect(pixels[0], closeTo(0, 3));
+      expect(pixels[1], closeTo(164, 3));
+      expect(pixels[2], closeTo(219, 3));
+    });
+  });
+
   testWidgets('CCITT Group 4 images decode to 1-bit gray', (tester) async {
     await tester.runAsync(() async {
       // a libtiff-encoded 64x24 G4 strip (same data as the pdf_cos KAT):

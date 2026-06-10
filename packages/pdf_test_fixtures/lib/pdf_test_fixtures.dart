@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 export 'src/encrypted.dart';
+export 'src/icc_profiles.dart';
 export 'src/signer_identity.dart';
 
 Uint8List ascii(String s) => Uint8List.fromList(s.codeUnits);

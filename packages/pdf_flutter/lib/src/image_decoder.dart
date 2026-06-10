@@ -126,7 +126,8 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
 
   final rgba = isMask
       ? _stencilToRgba(cos, dict, data, width, height)
-      : _toRgba(cos, dict, data, width, height, bits);
+      : _toRgba(cos, dict, data, width, height, bits,
+          icc: _iccProfileFor(cos, dict));
   if (rgba == null) return null;
 
   if (!isMask) {
@@ -364,8 +365,25 @@ void _applyAlpha(Uint8List rgba, int width, int height, _SoftMask mask) {
   }
 }
 
+/// The parsed ICC profile of an ICCBased image color space, when the
+/// engine supports its shape; null falls back to the device family.
+IccProfile? _iccProfileFor(CosDocument cos, CosDictionary dict) {
+  final space = cos.resolve(dict['ColorSpace']);
+  if (space is! CosArray || space.length < 2) return null;
+  final family = cos.resolve(space[0]);
+  if (family is! CosName || family.value != 'ICCBased') return null;
+  final stream = cos.resolve(space[1]);
+  if (stream is! CosStream) return null;
+  try {
+    return IccProfile.parse(cos.decodeStreamData(stream));
+  } on Exception {
+    return null;
+  }
+}
+
 Uint8List? _toRgba(CosDocument cos, CosDictionary dict, Uint8List data,
-    int width, int height, int bits) {
+    int width, int height, int bits,
+    {IccProfile? icc}) {
   final count = width * height;
   final out = Uint8List(count * 4);
 
@@ -422,29 +440,52 @@ Uint8List? _toRgba(CosDocument cos, CosDictionary dict, Uint8List data,
     case 'DeviceRGB':
       if (data.length < count * 3) return null;
       final luts = [for (var c = 0; c < 3; c++) _lutFor(ranges, c)];
+      final rgbIcc = icc != null && icc.channels == 3 ? icc : null;
       for (var i = 0; i < count; i++) {
         final r = data[i * 3], g = data[i * 3 + 1], b = data[i * 3 + 2];
-        out[i * 4] = luts[0][r];
-        out[i * 4 + 1] = luts[1][g];
-        out[i * 4 + 2] = luts[2][b];
+        if (rgbIcc != null) {
+          final c = rgbIcc.toSrgb(
+              [luts[0][r] / 255, luts[1][g] / 255, luts[2][b] / 255]);
+          out[i * 4] = (c.red * 255).round();
+          out[i * 4 + 1] = (c.green * 255).round();
+          out[i * 4 + 2] = (c.blue * 255).round();
+        } else {
+          out[i * 4] = luts[0][r];
+          out[i * 4 + 1] = luts[1][g];
+          out[i * 4 + 2] = luts[2][b];
+        }
         out[i * 4 + 3] = keyed([r, g, b]) ? 0 : 255;
       }
       return out;
     case 'DeviceGray':
       if (data.length < count) return null;
       final lut = _lutFor(ranges, 0);
+      final grayIcc = icc != null && icc.channels == 1 ? icc : null;
+      final grayLut = grayIcc == null
+          ? null
+          : [for (var v = 0; v < 256; v++) grayIcc.toSrgb([lut[v] / 255])];
       for (var i = 0; i < count; i++) {
-        out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = lut[data[i]];
+        if (grayLut != null) {
+          final c = grayLut[data[i]];
+          out[i * 4] = (c.red * 255).round();
+          out[i * 4 + 1] = (c.green * 255).round();
+          out[i * 4 + 2] = (c.blue * 255).round();
+        } else {
+          out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = lut[data[i]];
+        }
         out[i * 4 + 3] = keyed([data[i]]) ? 0 : 255;
       }
       return out;
     case 'DeviceCMYK':
       if (data.length < count * 4) return null;
       final luts = [for (var c = 0; c < 4; c++) _lutFor(ranges, c)];
+      final cmykIcc = icc != null && icc.channels == 4 ? icc : null;
       for (var i = 0; i < count; i++) {
         final s = [for (var c = 0; c < 4; c++) data[i * 4 + c]];
-        final color = PdfColor.cmyk(luts[0][s[0]] / 255, luts[1][s[1]] / 255,
-            luts[2][s[2]] / 255, luts[3][s[3]] / 255);
+        final values = [for (var c = 0; c < 4; c++) luts[c][s[c]] / 255];
+        final color = cmykIcc != null
+            ? cmykIcc.toSrgb(values)
+            : PdfColor.cmyk(values[0], values[1], values[2], values[3]);
         out[i * 4] = (color.red * 255).round();
         out[i * 4 + 1] = (color.green * 255).round();
         out[i * 4 + 2] = (color.blue * 255).round();

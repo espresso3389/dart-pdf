@@ -49,13 +49,14 @@ class ImageCollector implements PdfDevice {
 
 /// Decodes image XObjects to [ui.Image]s ahead of the (synchronous) paint.
 ///
-/// Coverage: DCTDecode via the platform codec; Flate/raw DeviceRGB,
-/// DeviceGray (8 and 1 bit) and Indexed samples (1/2/4/8 bit, palettes in
-/// RGB, gray, or CMYK bases including ICCBased); /SMask soft-mask alpha;
-/// explicit /Mask stencil streams; color-key /Mask ranges and /Decode
-/// arrays (on raw samples and on platform-decoded JPEGs); /ImageMask
-/// stencils (decoded as alpha, tinted by the device).
-/// TODO: JPXDecode, CCITT/JBIG2 (no pure-Dart decoders yet).
+/// Coverage: DCTDecode via the platform codec; CCITTFaxDecode via the
+/// pure-Dart Group 3/4 decoder; Flate/raw DeviceRGB, DeviceGray (8 and
+/// 1 bit) and Indexed samples (1/2/4/8 bit, palettes in RGB, gray, or
+/// CMYK bases including ICCBased); /SMask soft-mask alpha; explicit
+/// /Mask stencil streams; color-key /Mask ranges and /Decode arrays (on
+/// raw samples and on platform-decoded JPEGs); /ImageMask stencils
+/// (decoded as alpha, tinted by the device).
+/// TODO: JPXDecode, JBIG2Decode (no pure-Dart decoders yet).
 Future<Map<CosStream, ui.Image>> decodeImages(
     CosDocument cos, Iterable<CosStream> streams) async {
   final out = <CosStream, ui.Image>{};
@@ -111,11 +112,11 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
     if (mask != null) _applyAlpha(rgba, base.width, base.height, mask);
     return _imageFromPixels(rgba, base.width, base.height);
   }
-  if (filters.contains('JPXDecode') ||
-      filters.contains('CCITTFaxDecode') ||
-      filters.contains('JBIG2Decode')) {
+  if (filters.contains('JPXDecode') || filters.contains('JBIG2Decode')) {
     return null;
   }
+  // CCITTFaxDecode runs as a regular stream filter (pure-Dart decoder in
+  // pdf_cos) and lands here as 1-bit gray samples
 
   final width = _intOf(cos.resolve(dict['Width']));
   final height = _intOf(cos.resolve(dict['Height']));

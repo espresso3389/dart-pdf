@@ -343,6 +343,39 @@ void main() {
     });
   });
 
+  testWidgets('CCITT Group 4 images decode to 1-bit gray', (tester) async {
+    await tester.runAsync(() async {
+      // a libtiff-encoded 64x24 G4 strip (same data as the pdf_cos KAT):
+      // black rectangle at x4..20 on rows 4..12 among other shapes
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(64),
+          'Height': const CosInteger(24),
+          'BitsPerComponent': const CosInteger(1),
+          'ColorSpace': const CosName('DeviceGray'),
+          'Filter': const CosName('CCITTFaxDecode'),
+          'DecodeParms': CosDictionary({
+            'K': const CosInteger(-1),
+            'Columns': const CosInteger(64),
+            'Rows': const CosInteger(24),
+          }),
+        }),
+        Uint8List.fromList(const [
+          200, 25, 156, 93, 148, 12, 216, 49, 178, 139, 251, 40, 71, 143, //
+          254, 72, 95, 101, 107, 236, 173, 61, 148, 31, 178, 136, 29, 148,
+          141, 148, 124, 127, 32, 215, 101, 102, 202, 189, 130, 136, 240,
+          1, 0, 16,
+        ]),
+      );
+      final images = await decodeImages(cos, [image]);
+      final pixels = await pixelsOf(images[image]!);
+      int grayAt(int x, int y) => pixels[(y * 64 + x) * 4];
+      expect(grayAt(0, 0), 255); // background white
+      expect(grayAt(10, 8), 0); // inside the black rectangle
+      expect(grayAt(60, 23), 255);
+    });
+  });
+
   testWidgets('4-bit indexed samples unpack two pixels per byte',
       (tester) async {
     await tester.runAsync(() async {

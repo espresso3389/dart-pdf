@@ -4,11 +4,13 @@ import '../exceptions.dart';
 import '../objects.dart';
 import '../parser.dart';
 import 'ascii.dart';
+import 'ccitt.dart';
 import 'flate.dart';
 import 'lzw.dart';
 import 'run_length.dart';
 
 export 'ascii.dart';
+export 'ccitt.dart';
 export 'flate.dart';
 export 'lzw.dart';
 export 'predictor.dart';
@@ -32,8 +34,10 @@ const Map<String, CosFilter> _filters = {
   'LZW': LzwFilter(),
   'RunLengthDecode': RunLengthFilter(),
   'RL': RunLengthFilter(),
-  // CCITTFaxDecode/JBIG2Decode are not decoded here. DCTDecode/JPXDecode
-  // stay encoded; image decoding happens at render time.
+  'CCITTFaxDecode': CcittFaxFilter(),
+  'CCF': CcittFaxFilter(),
+  // JBIG2Decode is not decoded here. DCTDecode/JPXDecode stay encoded;
+  // image decoding happens at render time (platform codecs).
 };
 
 /// Decodes a stream's payload by applying its /Filter chain in order.

@@ -286,7 +286,13 @@ class _PdfViewerState extends State<PdfViewer>
       _controller.clearSearch();
       _clearSelection();
       _loadPages();
-      if (_scroll.hasClients) _scroll.jumpTo(0);
+      // didUpdateWidget runs mid-build, and jumpTo synchronously
+      // dispatches a ScrollNotification — ancestors listening through a
+      // ScrollNotificationObserver (a Material AppBar's scrolled-under
+      // state, for one) would setState during build. Reset after the frame.
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
+      });
       _transform.value = Matrix4.identity();
       setState(() {});
     }

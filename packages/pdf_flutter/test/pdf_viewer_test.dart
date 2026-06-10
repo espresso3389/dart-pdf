@@ -104,6 +104,30 @@ void main() {
     expect(find.text('3'), findsOneWidget);
   });
 
+  testWidgets(
+      'swapping documents under a Material AppBar does not dispatch '
+      'scroll notifications during build', (tester) async {
+    // Regression: didUpdateWidget (mid-build) used to call jumpTo(0) on a
+    // document swap; jumpTo synchronously dispatches a ScrollNotification,
+    // and the AppBar's scrolled-under listener reacts with setState —
+    // illegally dirtying an ancestor during build.
+    Widget app(PdfDocument document) => MaterialApp(
+          home: Scaffold(
+            appBar: AppBar(title: const Text('viewer')),
+            body: PdfViewer(document: document),
+          ),
+        );
+    await tester.pumpWidget(app(PdfDocument.open(buildMultiPagePdf(3))));
+    await tester.pump();
+    await tester.drag(find.byType(PdfViewer), const Offset(0, -300));
+    await tester.pump();
+
+    await tester.pumpWidget(app(PdfDocument.open(buildMultiPagePdf(2))));
+    expect(tester.takeException(), isNull);
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('mouse drag selects text and copy reaches the clipboard',
       (tester) async {
     final controller = await pumpViewer(tester);

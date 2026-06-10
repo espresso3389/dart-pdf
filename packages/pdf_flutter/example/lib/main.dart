@@ -94,6 +94,25 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     ),
                   ),
           ),
+          ListenableBuilder(
+            listenable: _controller,
+            builder: (context, _) => !_controller.hasSelection
+                ? const SizedBox.shrink()
+                : IconButton(
+                    icon: const Icon(Icons.copy),
+                    tooltip: 'Copy selected text (⌘C)',
+                    onPressed: () async {
+                      await _controller.copySelection();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Copied to clipboard'),
+                          duration: Duration(seconds: 1),
+                        ),
+                      );
+                    },
+                  ),
+          ),
           IconButton(
             icon: const Icon(Icons.folder_open),
             tooltip: 'Open PDF',

@@ -76,14 +76,16 @@ class PdfPageText {
         pageIndex: pageIndex,
         start: index,
         end: end,
-        rects: _rectsFor(index, end),
+        rects: rectsFor(index, end),
       ));
       from = end;
     }
     return matches;
   }
 
-  List<PdfRect> _rectsFor(int start, int end) {
+  /// Page-space rectangles covering the characters [start]..[end] of
+  /// [text] — for search and selection highlights.
+  List<PdfRect> rectsFor(int start, int end) {
     final rects = <PdfRect>[];
     for (final run in runs) {
       if (run.text.isEmpty) continue;
@@ -98,6 +100,34 @@ class PdfPageText {
       rects.add(_boundsOf(run.transform, run.width * f0, run.width * f1));
     }
     return rects;
+  }
+
+  /// Index into [text] nearest the page-space point ([x], [y]), for
+  /// mapping pointer positions to text positions (selection).
+  ///
+  /// Returns -1 when the document has no text or the nearest run is more
+  /// than [tolerance] page units away.
+  int positionNear(double x, double y, {double tolerance = double.infinity}) {
+    PdfExtractedRun? best;
+    var bestDistance = double.infinity;
+    for (final run in runs) {
+      if (run.text.isEmpty) continue;
+      final b = run.bounds;
+      final dx = math.max(0.0, math.max(b.left - x, x - b.right));
+      final dy = math.max(0.0, math.max(b.bottom - y, y - b.top));
+      final distance = dx * dx + dy * dy;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = run;
+      }
+    }
+    if (best == null || bestDistance > tolerance * tolerance) return -1;
+    // fraction along the run's baseline, in em space
+    final inverse = best.transform.inverted();
+    final ex = inverse == null ? 0.0 : inverse.transformX(x, y);
+    final fraction =
+        best.width > 0 ? (ex / best.width).clamp(0.0, 1.0) : 0.0;
+    return best.startIndex + (fraction * best.text.length).round();
   }
 }
 

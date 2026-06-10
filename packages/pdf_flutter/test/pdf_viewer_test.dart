@@ -1,4 +1,7 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_flutter/pdf_flutter.dart';
@@ -96,6 +99,46 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pump(); // deferred notification lands
     expect(find.text('3'), findsOneWidget);
+  });
+
+  testWidgets('mouse drag selects text and copy reaches the clipboard',
+      (tester) async {
+    final controller = await pumpViewer(tester);
+    // fixture text 'Page 1' sits at 72,720..144,720 (24pt) on a 612-wide
+    // page filling the 800px viewport
+    const scale = 800 / 612;
+    Offset view(double x, double y) => Offset(x * scale, (792 - y) * scale);
+
+    // start just right of the run (inside the hit tolerance), drag left
+    // past its start so the whole string is selected
+    final gesture = await tester.startGesture(view(154, 720),
+        kind: PointerDeviceKind.mouse);
+    await gesture.moveBy(const Offset(-20, 0)); // pass the drag slop
+    await tester.pump();
+    await gesture.moveTo(view(50, 720));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    expect(controller.selectedText, 'Page 1');
+    expect(controller.hasSelection, isTrue);
+
+    final copied = <String?>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        copied.add((call.arguments as Map)['text'] as String?);
+      }
+      return null;
+    });
+    await controller.copySelection();
+    expect(copied, ['Page 1']);
+
+    controller.clearSelection();
+    await tester.pump();
+    expect(controller.hasSelection, isFalse);
+    // drain the double-tap recognizer's timeout timer
+    await tester.pump(const Duration(milliseconds: 400));
   });
 
   testWidgets('jumpToPage scrolls to the requested page', (tester) async {

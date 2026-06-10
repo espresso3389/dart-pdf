@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
@@ -27,6 +28,29 @@ class PdfViewerController extends ChangeNotifier {
   bool get isSearching => _searching;
   String get query => _query;
   int get matchCount => _matches.length;
+
+  String _selectedText = '';
+
+  /// The currently selected text, '' with no selection. Drag with a mouse
+  /// (or any pointer the platform doesn't use for scrolling) to select.
+  String get selectedText => _selectedText;
+
+  bool get hasSelection => _selectedText.isNotEmpty;
+
+  /// Copies the current selection to the system clipboard. Also bound to
+  /// Cmd/Ctrl+C while the viewer has focus.
+  Future<void> copySelection() async {
+    if (_selectedText.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: _selectedText));
+  }
+
+  void clearSelection() => _state?._clearSelection();
+
+  void _setSelection(String text) {
+    if (text == _selectedText) return;
+    _selectedText = text;
+    _notifySafely();
+  }
 
   /// Zero-based index into the matches, or -1 with no active match.
   int get currentMatch => _currentMatch;
@@ -145,6 +169,12 @@ class _PdfViewerState extends State<PdfViewer>
   final Map<int, PdfPageText> _textCache = {};
   double _viewWidth = 0;
 
+  final _focusNode = FocusNode(debugLabel: 'PdfViewer');
+
+  // text selection: (pageIndex, offset into that page's text)
+  (int, int)? _selAnchor;
+  (int, int)? _selFocus;
+
   @override
   void initState() {
     super.initState();
@@ -167,6 +197,7 @@ class _PdfViewerState extends State<PdfViewer>
     if (!identical(oldWidget.document, widget.document)) {
       _textCache.clear();
       _controller.clearSearch();
+      _clearSelection();
       _loadPages();
       if (_scroll.hasClients) _scroll.jumpTo(0);
       _transform.value = Matrix4.identity();
@@ -196,6 +227,7 @@ class _PdfViewerState extends State<PdfViewer>
     _scroll.dispose();
     _transform.dispose();
     _zoomAnimator.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -244,6 +276,97 @@ class _PdfViewerState extends State<PdfViewer>
       if (i % 5 == 4) await Future<void>.delayed(Duration.zero);
     }
     return matches;
+  }
+
+  PdfPageText _pageText(int index) =>
+      _textCache[index] ??= PdfTextExtractor.extract(widget.document, index);
+
+  /// Maps a pointer position (list coordinates, inside the
+  /// InteractiveViewer transform) to a text position. [tolerance] is in
+  /// page units; pass infinity to snap to the nearest text while dragging.
+  (int, int)? _textPositionAt(Offset local, {required double tolerance}) {
+    if (_viewWidth <= 0 || !_scroll.hasClients || _pages.isEmpty) return null;
+    final contentY = _scroll.offset + local.dy;
+    var top = 0.0;
+    for (var i = 0; i < _pages.length; i++) {
+      final height = _pageHeight(i);
+      if (contentY <= top + height || i == _pages.length - 1) {
+        final box = _pages[i].cropBox;
+        if (box.width <= 0) return null;
+        // TODO: selection on /Rotate'd pages needs the rotation transform
+        final scale = _viewWidth / box.width;
+        final x = box.left + local.dx / scale;
+        final y = box.top - (contentY - top) / scale;
+        final offset = _pageText(i).positionNear(x, y, tolerance: tolerance);
+        return offset < 0 ? null : (i, offset);
+      }
+      top += height + widget.pageSpacing;
+    }
+    return null;
+  }
+
+  void _onSelectionStart(DragStartDetails details) {
+    _focusNode.requestFocus();
+    final position =
+        _textPositionAt(details.localPosition, tolerance: 14);
+    setState(() {
+      _selAnchor = position;
+      _selFocus = position;
+    });
+    _controller._setSelection('');
+  }
+
+  void _onSelectionUpdate(DragUpdateDetails details) {
+    if (_selAnchor == null) return;
+    final position = _textPositionAt(details.localPosition,
+        tolerance: double.infinity);
+    if (position == null || position == _selFocus) return;
+    setState(() => _selFocus = position);
+    _controller._setSelection(_selectedText());
+  }
+
+  void _clearSelection() {
+    if (_selAnchor != null || _selFocus != null) {
+      setState(() {
+        _selAnchor = null;
+        _selFocus = null;
+      });
+    }
+    _controller._setSelection('');
+  }
+
+  /// Selection bounds in document order, or null when empty.
+  ((int, int), (int, int))? get _selRange {
+    final a = _selAnchor, f = _selFocus;
+    if (a == null || f == null || a == f) return null;
+    final reversed = f.$1 < a.$1 || (f.$1 == a.$1 && f.$2 < a.$2);
+    return reversed ? (f, a) : (a, f);
+  }
+
+  String _selectedText() {
+    final range = _selRange;
+    if (range == null) return '';
+    final (start, end) = range;
+    final parts = <String>[];
+    for (var i = start.$1; i <= end.$1; i++) {
+      final text = _pageText(i).text;
+      final from = (i == start.$1 ? start.$2 : 0).clamp(0, text.length);
+      final to = (i == end.$1 ? end.$2 : text.length).clamp(0, text.length);
+      if (from < to) parts.add(text.substring(from, to));
+    }
+    return parts.join('\n');
+  }
+
+  List<PdfRect> _selectionRectsOn(int pageIndex) {
+    final range = _selRange;
+    if (range == null) return const [];
+    final (start, end) = range;
+    if (pageIndex < start.$1 || pageIndex > end.$1) return const [];
+    final text = _pageText(pageIndex);
+    final from = pageIndex == start.$1 ? start.$2 : 0;
+    final to = pageIndex == end.$1 ? end.$2 : text.text.length;
+    if (from >= to) return const [];
+    return text.rectsFor(from, to);
   }
 
   void _showMatch(PdfTextMatch match) {
@@ -301,26 +424,47 @@ class _PdfViewerState extends State<PdfViewer>
             currentMatch: _controller._currentMatch >= 0
                 ? _controller._matches[_controller._currentMatch]
                 : null,
+            selection: _selectionRectsOn(index),
           ),
         ),
       );
-      return GestureDetector(
-        onDoubleTapDown: (details) => _doubleTapDetails = details,
-        onDoubleTap: _onDoubleTap,
-        child: InteractiveViewer(
-          transformationController: _transform,
-          maxScale: widget.maxZoom,
-          minScale: 1,
-          // vertical drags scroll the list; horizontal panning engages
-          // once zoomed in
-          panEnabled: _zoomed,
-          onInteractionEnd: (_) {
-            final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
-            if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
-          },
-          child: ColoredBox(
-            color: const Color(0xFF404347),
-            child: list,
+      return CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyC, meta: true):
+              _controller.copySelection,
+          const SingleActivator(LogicalKeyboardKey.keyC, control: true):
+              _controller.copySelection,
+          const SingleActivator(LogicalKeyboardKey.escape): _clearSelection,
+        },
+        child: Focus(
+          focusNode: _focusNode,
+          child: GestureDetector(
+            onDoubleTapDown: (details) => _doubleTapDetails = details,
+            onDoubleTap: _onDoubleTap,
+            child: InteractiveViewer(
+              transformationController: _transform,
+              maxScale: widget.maxZoom,
+              minScale: 1,
+              // vertical drags scroll the list; horizontal panning engages
+              // once zoomed in
+              panEnabled: _zoomed,
+              onInteractionEnd: (_) {
+                final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
+                if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
+              },
+              // selection drags: scroll wheels and touch scrolling go to
+              // the list (its drag recognizers win the arena for touch);
+              // mouse drags fall through to this detector
+              child: GestureDetector(
+                onTap: _clearSelection,
+                onPanStart: _onSelectionStart,
+                onPanUpdate: _onSelectionUpdate,
+                child: ColoredBox(
+                  color: const Color(0xFF404347),
+                  child: list,
+                ),
+              ),
+            ),
           ),
         ),
       );
@@ -333,16 +477,18 @@ class _PdfViewerPage extends StatelessWidget {
     required this.page,
     required this.matches,
     required this.currentMatch,
+    required this.selection,
   });
 
   final PdfPage page;
   final List<PdfTextMatch> matches;
   final PdfTextMatch? currentMatch;
+  final List<PdfRect> selection;
 
   @override
   Widget build(BuildContext context) {
     final view = PdfPageView(page: page);
-    if (matches.isEmpty) return view;
+    if (matches.isEmpty && selection.isEmpty) return view;
     return Stack(children: [
       view,
       Positioned.fill(
@@ -351,6 +497,7 @@ class _PdfViewerPage extends StatelessWidget {
             box: page.cropBox,
             matches: matches,
             currentMatch: currentMatch,
+            selection: selection,
           ),
         ),
       ),
@@ -363,37 +510,43 @@ class _HighlightPainter extends CustomPainter {
     required this.box,
     required this.matches,
     required this.currentMatch,
+    required this.selection,
   });
 
   final PdfRect box;
   final List<PdfTextMatch> matches;
   final PdfTextMatch? currentMatch;
+  final List<PdfRect> selection;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (box.width <= 0 || box.height <= 0) return;
     // TODO: highlights on /Rotate'd pages need the rotation transform
     final scale = size.width / box.width;
+    final selected = Paint()..color = const Color(0x4D2196F3);
+    for (final rect in selection) {
+      canvas.drawRect(_toViewRect(rect, scale), selected);
+    }
     final normal = Paint()..color = const Color(0x66FFEB3B);
     final current = Paint()..color = const Color(0x88FF9800);
     for (final match in matches) {
       final paint = identical(match, currentMatch) ? current : normal;
       for (final rect in match.rects) {
-        canvas.drawRect(
-          Rect.fromLTRB(
-            (rect.left - box.left) * scale,
-            (box.top - rect.top) * scale,
-            (rect.right - box.left) * scale,
-            (box.top - rect.bottom) * scale,
-          ),
-          paint,
-        );
+        canvas.drawRect(_toViewRect(rect, scale), paint);
       }
     }
   }
 
+  Rect _toViewRect(PdfRect rect, double scale) => Rect.fromLTRB(
+        (rect.left - box.left) * scale,
+        (box.top - rect.top) * scale,
+        (rect.right - box.left) * scale,
+        (box.top - rect.bottom) * scale,
+      );
+
   @override
   bool shouldRepaint(_HighlightPainter oldDelegate) =>
       oldDelegate.matches != matches ||
-      oldDelegate.currentMatch != currentMatch;
+      oldDelegate.currentMatch != currentMatch ||
+      oldDelegate.selection != selection;
 }

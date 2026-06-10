@@ -42,6 +42,28 @@ void main() {
     expect(text.findAll('HELLO', caseSensitive: true), isEmpty);
   });
 
+  test('positionNear maps page points to character offsets', () {
+    final doc = PdfDocument.open(buildClassicPdf());
+    final text = PdfTextExtractor.extract(doc, 0);
+    // 'Hello, world!' at 72,720 in 24pt: 12pt per char, chars at 72+12k
+    expect(text.positionNear(72, 720), 0);
+    expect(text.positionNear(72 + 12 * 7, 720), 7); // before 'w'
+    expect(text.positionNear(228, 720), 13); // past the end
+    // snaps vertically from outside the bounds
+    expect(text.positionNear(72 + 12 * 7, 750), 7);
+    // but respects a finite tolerance
+    expect(text.positionNear(72, 400, tolerance: 20), -1);
+    expect(text.positionNear(400, 400, tolerance: 20), -1);
+  });
+
+  test('rectsFor covers a character range', () {
+    final doc = PdfDocument.open(buildClassicPdf());
+    final text = PdfTextExtractor.extract(doc, 0);
+    final rect = text.rectsFor(7, 12).single;
+    expect(rect.left, closeTo(72 + 12 * 7, 1e-6));
+    expect(rect.right, closeTo(72 + 12 * 12, 1e-6));
+  });
+
   test('multi-page documents extract per page', () {
     final doc = PdfDocument.open(buildMultiPagePdf(3));
     expect(PdfTextExtractor.extract(doc, 0).text, 'Page 1');

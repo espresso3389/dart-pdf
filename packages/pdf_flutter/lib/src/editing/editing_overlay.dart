@@ -72,6 +72,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     return annotation == null ? null : _geometry.toViewRect(annotation.rect);
   }
 
+  /// The selected content element's view rect when it lives on this page.
+  Rect? get _selectedElementViewRect {
+    if (_controller.selectedElementPage != widget.pageIndex) return null;
+    final bounds = _controller.selectedElement?.bounds;
+    return bounds == null ? null : _geometry.toViewRect(bounds);
+  }
+
   Offset _handleCenter(Rect rect, _Handle handle) => Offset(
         rect.center.dx + handle.dx * rect.width / 2,
         rect.center.dy + handle.dy * rect.height / 2,
@@ -144,8 +151,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
           _dragStart = position;
           _dragCurrent = position;
         });
-      case PdfEditTool.note:
-        break; // placed by tap
+      case PdfEditTool.note || PdfEditTool.content:
+        break; // driven by taps
     }
   }
 
@@ -226,6 +233,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     switch (_tool) {
       case PdfEditTool.select:
         _controller.selectAnnotationAt(widget.pageIndex, x, y);
+      case PdfEditTool.content:
+        _controller.selectElementAt(widget.pageIndex, x, y);
       case PdfEditTool.note:
         final text =
             await widget.textPrompt(context, title: 'Note', multiline: true);
@@ -257,6 +266,14 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       }
     } else if (_tool == PdfEditTool.note) {
       cursor = SystemMouseCursors.click;
+    } else if (_tool == PdfEditTool.content) {
+      final (x, y) = _geometry.toPagePoint(event.localPosition);
+      cursor = _controller
+              .elementsOn(widget.pageIndex)
+              .elementsAt(x, y)
+              .isNotEmpty
+          ? SystemMouseCursors.click
+          : SystemMouseCursors.basic;
     } else {
       cursor = SystemMouseCursors.precise;
     }
@@ -302,6 +319,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
             showHandles: selected != null &&
                 _controller.canResizeSelected &&
                 _moveStart == null,
+            elementRect: _selectedElementViewRect,
           ),
           size: Size.infinite,
         ),
@@ -320,6 +338,7 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.dragRect,
     required this.selectionRect,
     required this.showHandles,
+    required this.elementRect,
   });
 
   final PdfEditTool tool;
@@ -331,7 +350,12 @@ class _EditingPreviewPainter extends CustomPainter {
   final Rect? selectionRect;
   final bool showHandles;
 
+  /// The selected content element's box — orange, to read as "page
+  /// content", distinct from the blue annotation chrome.
+  final Rect? elementRect;
+
   static const _chrome = Color(0xFF1E88E5);
+  static const _elementChrome = Color(0xFFFB8C00);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -403,6 +427,18 @@ class _EditingPreviewPainter extends CustomPainter {
         }
       }
     }
+
+    final element = elementRect;
+    if (element != null) {
+      final box = element.inflate(2);
+      canvas.drawRect(box, Paint()..color = const Color(0x1AFB8C00));
+      canvas.drawRect(
+          box,
+          Paint()
+            ..color = _elementChrome
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5);
+    }
   }
 
   @override
@@ -413,6 +449,7 @@ class _EditingPreviewPainter extends CustomPainter {
       oldDelegate.dragRect != dragRect ||
       oldDelegate.selectionRect != selectionRect ||
       oldDelegate.showHandles != showHandles ||
+      oldDelegate.elementRect != elementRect ||
       oldDelegate.strokes.length != strokes.length ||
       (strokes.isNotEmpty &&
           oldDelegate.strokes.isNotEmpty &&

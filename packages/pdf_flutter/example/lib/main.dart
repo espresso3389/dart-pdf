@@ -40,6 +40,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
   PdfEditingController? _editing;
   String _title = '';
   String? _error;
+  bool _showAnnotations = false;
 
   // app state the interactive demo's PDF links and overlays manipulate
   bool _isDemo = false;
@@ -254,6 +255,14 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     },
                   ),
           ),
+          if (editing != null)
+            IconButton(
+              icon: const Icon(Icons.list_alt),
+              tooltip: 'Annotations',
+              isSelected: _showAnnotations,
+              onPressed: () =>
+                  setState(() => _showAnnotations = !_showAnnotations),
+            ),
           IconButton(
             icon: const Icon(Icons.auto_awesome),
             tooltip: 'Open the interactive demo',
@@ -297,16 +306,25 @@ class _ViewerScreenState extends State<ViewerScreen> {
           ),
         // the editing controller owns the document revisions: rebuild the
         // viewer with the current one whenever the controller notifies
-        (final PdfEditingController session, _) => ListenableBuilder(
-            listenable: session,
-            builder: (context, _) => PdfViewer(
-              document: session.document,
-              controller: _controller,
-              onAction: _onAction,
-              pageOverlayBuilder: _isDemo ? _demoOverlays : null,
-              editing: session,
+        (final PdfEditingController session, _) => Row(children: [
+            Expanded(
+              child: ListenableBuilder(
+                listenable: session,
+                builder: (context, _) => PdfViewer(
+                  document: session.document,
+                  controller: _controller,
+                  onAction: _onAction,
+                  pageOverlayBuilder: _isDemo ? _demoOverlays : null,
+                  editing: session,
+                ),
+              ),
             ),
-          ),
+            if (_showAnnotations)
+              PdfAnnotationSidebar(
+                controller: session,
+                viewerController: _controller,
+              ),
+          ]),
       },
       bottomNavigationBar: editing == null
           ? null

@@ -103,3 +103,11 @@ shortcuts, and preserves the viewport across same-geometry document
 swaps. `PdfEditingToolbar` is the stock chrome. The host must rebuild
 the viewer with `editing.document` whenever the controller notifies
 (asserted in debug builds); the example app shows the wiring.
+On top of that: style controls (controller carries strokeWidth/opacity/
+fontSize; the toolbar's tune button opens a slider popup), an
+annotation sidebar (`PdfAnnotationSidebar` — lists by page, tap selects
+via `selectAnnotation(page, slot)`, trailing delete), and a content
+tool (`PdfEditTool.content`: taps hit-test `PdfPageElements` — cached
+per revision in the controller — orange selection chrome; delete via
+`deleteElements`, text rewrite via `replaceText`; element ids die with
+every revision, so any edit clears the element selection).

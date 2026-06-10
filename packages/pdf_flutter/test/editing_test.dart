@@ -157,6 +157,87 @@ void main() {
       editing.undo();
       expect(editing.selectedAnnotation, isNull);
     });
+
+    test('opacity is baked into new annotation appearances', () {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..opacity = 0.5
+        ..addRectangle(0, const PdfRect(100, 100, 200, 150));
+      final written = String.fromCharCodes(editing.bytes);
+      expect(written, contains('/ExtGState'));
+      expect(written, contains('/CA 0.5'));
+
+      // full opacity adds no alpha state
+      final opaque = PdfEditingController(buildMultiPagePdf(1))
+        ..addRectangle(0, const PdfRect(100, 100, 200, 150));
+      expect(String.fromCharCodes(opaque.bytes),
+          isNot(contains('/ExtGState')));
+    });
+
+    test('selectAnnotation and deleteAnnotation address /Annots slots', () {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..addRectangle(0, const PdfRect(100, 100, 200, 150))
+        ..addEllipse(0, const PdfRect(250, 100, 350, 150));
+
+      expect(editing.selectAnnotation(0, 1), isTrue);
+      expect(editing.tool, PdfEditTool.select,
+          reason: 'selecting from a list arms the select tool');
+      expect(editing.selectedAnnotation!.subtype, 'Circle');
+      expect(editing.selectedAnnotationSlot, (0, 1));
+      expect(editing.selectAnnotation(0, 5), isFalse);
+
+      // deleting slot 0 shifts the circle into it; the stale selection
+      // (slot 1) no longer resolves and is dropped
+      editing.deleteAnnotation(0, 0);
+      expect(editing.document.page(0).annotations.single.subtype, 'Circle');
+      expect(editing.selectedAnnotation, isNull);
+    });
+
+    test('selectAnnotation refuses links and widgets', () {
+      final editing = PdfEditingController(buildAnnotatedPdf());
+      expect(editing.selectAnnotation(0, 0), isFalse); // a Link
+      expect(editing.selectAnnotation(0, 3), isFalse); // a Widget
+    });
+
+    test('selectElementAt finds the text run; delete removes it', () {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..tool = PdfEditTool.content;
+      // "Page 1" is shown at (72, 720) in 24pt
+      expect(editing.selectElementAt(0, 80, 725), isTrue);
+      final element = editing.selectedElement!;
+      expect(element.kind, PdfElementKind.text);
+      expect(element.text, 'Page 1');
+      expect(editing.canEditSelectedElementText, isTrue);
+
+      expect(editing.selectElementAt(0, 400, 400), isFalse,
+          reason: 'empty page area clears the element selection');
+      expect(editing.selectedElement, isNull);
+
+      editing.selectElementAt(0, 80, 725);
+      editing.deleteSelectedElement();
+      expect(editing.selectedElement, isNull);
+      expect(editing.elementsOn(0).elements, isEmpty);
+
+      editing.undo();
+      expect(editing.elementsOn(0).elements.single.text, 'Page 1');
+    });
+
+    test('replaceSelectedElementText rewrites the run in place', () {
+      final editing = PdfEditingController(buildMultiPagePdf(1));
+      editing.selectElementAt(0, 80, 725);
+      expect(editing.replaceSelectedElementText('Hello'), 1);
+      expect(editing.elementsOn(0).elements.single.text, 'Hello');
+      editing.undo();
+      expect(editing.elementsOn(0).elements.single.text, 'Page 1');
+    });
+
+    test('arming a non-content tool clears the element selection', () {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..tool = PdfEditTool.content;
+      editing.selectElementAt(0, 80, 725);
+      expect(editing.selectedElement, isNotNull);
+      editing.tool = PdfEditTool.select;
+      expect(editing.selectedElement, isNull);
+    });
   });
 
   group('editing in the viewer', () {
@@ -372,6 +453,113 @@ void main() {
       await tester.pump();
       expect(editing.document.page(0).annotations, isEmpty);
       await settle(tester);
+    });
+
+    testWidgets('the content tool selects a text run; delete removes it',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester, pages: 1);
+      editing.tool = PdfEditTool.content;
+      await tester.pump();
+
+      // "Page 1" sits at (72, 720) in 24pt
+      await tester.tapAt(view(80, 725));
+      await settle(tester);
+      expect(editing.selectedElement?.text, 'Page 1');
+
+      // escape clears the element selection but keeps the tool
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(editing.selectedElement, isNull);
+      expect(editing.tool, PdfEditTool.content);
+
+      await tester.tapAt(view(80, 725));
+      await settle(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await settle(tester);
+      expect(editing.elementsOn(0).elements, isEmpty);
+    });
+
+    testWidgets('the sidebar lists, selects, and deletes annotations',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(2))
+        ..addNote(0, 100, 700, 'first note')
+        ..addRectangle(1, const PdfRect(100, 100, 200, 150));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            Expanded(
+              child: ListenableBuilder(
+                listenable: editing,
+                builder: (context, _) => PdfViewer(
+                  document: editing.document,
+                  controller: viewer,
+                  editing: editing,
+                ),
+              ),
+            ),
+            PdfAnnotationSidebar(
+              controller: editing,
+              viewerController: viewer,
+            ),
+          ]),
+        ),
+      ));
+      await tester.pump();
+
+      expect(find.text('Page 1'), findsOneWidget);
+      expect(find.text('Page 2'), findsOneWidget);
+      expect(find.text('Note'), findsOneWidget);
+      expect(find.text('first note'), findsOneWidget);
+      expect(find.text('Square'), findsOneWidget);
+
+      await tester.tap(find.text('Note'));
+      await settle(tester);
+      expect(editing.tool, PdfEditTool.select);
+      expect(editing.selectedAnnotation?.subtype, 'Text');
+
+      // the first Delete button belongs to the page-1 note tile
+      await tester.tap(find.byTooltip('Delete').first);
+      await settle(tester);
+      expect(editing.document.page(0).annotations, isEmpty);
+      expect(editing.document.page(1).annotations, hasLength(1));
+      expect(find.text('first note'), findsNothing);
+    });
+
+    testWidgets('the style menu drives stroke width and opacity',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: const SizedBox.expand(),
+          bottomNavigationBar: PdfEditingToolbar(
+            controller: editing,
+            viewerController: viewer,
+          ),
+        ),
+      ));
+
+      // the style button sits at the far right of the scrolling toolbar
+      await tester.scrollUntilVisible(
+          find.byTooltip('Stroke, opacity, font size'), 100);
+      await tester.tap(find.byTooltip('Stroke, opacity, font size'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Slider), findsNWidgets(3));
+
+      // sliders are laid out stroke width, opacity, font size
+      await tester.drag(find.byType(Slider).at(0), const Offset(200, 0));
+      await tester.pump();
+      expect(editing.strokeWidth, greaterThan(2));
+
+      await tester.drag(find.byType(Slider).at(1), const Offset(-200, 0));
+      await tester.pump();
+      expect(editing.opacity, lessThan(1));
+      await tester.pumpAndSettle();
     });
   });
 }

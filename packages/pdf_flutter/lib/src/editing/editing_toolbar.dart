@@ -61,6 +61,19 @@ class PdfEditingToolbar extends StatelessWidget {
     if (controller.tool != null) viewerController.clearSelection();
   }
 
+  Future<void> _editElementText(BuildContext context) async {
+    final element = controller.selectedElement;
+    if (element == null) return;
+    final text = await textPrompt(
+      context,
+      title: 'Replace text',
+      initial: element.text ?? '',
+      multiline: false,
+    );
+    if (text == null || text.isEmpty || text == element.text) return;
+    controller.replaceSelectedElementText(text);
+  }
+
   Future<void> _editSelectedText(BuildContext context) async {
     final annotation = controller.selectedAnnotation;
     if (annotation == null) return;
@@ -162,6 +175,21 @@ class PdfEditingToolbar extends StatelessWidget {
               toolButton(
                   PdfEditTool.note, Icons.sticky_note_2_outlined, 'Note'),
               toolButton(PdfEditTool.stamp, Icons.approval, 'Stamp'),
+              toolButton(PdfEditTool.content, Icons.format_shapes,
+                  'Edit page content'),
+              if (controller.selectedElement != null) ...[
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Delete element',
+                  onPressed: controller.deleteSelectedElement,
+                ),
+                if (controller.canEditSelectedElementText)
+                  IconButton(
+                    icon: const Icon(Icons.edit),
+                    tooltip: 'Replace text',
+                    onPressed: () => _editElementText(context),
+                  ),
+              ],
               const VerticalDivider(width: 16),
               for (final color in palette)
                 Padding(
@@ -185,6 +213,7 @@ class PdfEditingToolbar extends StatelessWidget {
                     ),
                   ),
                 ),
+              _StyleMenu(controller: controller),
               const VerticalDivider(width: 16),
               IconButton(
                 icon: const Icon(Icons.layers),
@@ -202,5 +231,86 @@ class PdfEditingToolbar extends StatelessWidget {
         },
       ),
     );
+  }
+}
+
+/// The style popup: sliders for stroke width, opacity, and font size.
+class _StyleMenu extends StatelessWidget {
+  const _StyleMenu({required this.controller});
+
+  final PdfEditingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return MenuAnchor(
+      menuChildren: [
+        // the menu lives in its own overlay, outside the toolbar's
+        // ListenableBuilder — it needs its own listener to track sliders
+        ListenableBuilder(
+          listenable: controller,
+          builder: (context, _) => Container(
+            width: 280,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _slider(
+                  label: 'Stroke width',
+                  value: controller.strokeWidth,
+                  min: 0.5,
+                  max: 12,
+                  display: '${controller.strokeWidth.toStringAsFixed(1)} pt',
+                  onChanged: (v) => controller.strokeWidth = v,
+                ),
+                _slider(
+                  label: 'Opacity',
+                  value: controller.opacity,
+                  min: 0.1,
+                  max: 1,
+                  display: '${(controller.opacity * 100).round()}%',
+                  onChanged: (v) => controller.opacity = v,
+                ),
+                _slider(
+                  label: 'Font size',
+                  value: controller.fontSize,
+                  min: 8,
+                  max: 48,
+                  display: '${controller.fontSize.round()} pt',
+                  onChanged: (v) => controller.fontSize = v.roundToDouble(),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+      builder: (context, menu, _) => IconButton(
+        icon: const Icon(Icons.tune),
+        tooltip: 'Stroke, opacity, font size',
+        onPressed: () => menu.isOpen ? menu.close() : menu.open(),
+      ),
+    );
+  }
+
+  Widget _slider({
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    required String display,
+    required ValueChanged<double> onChanged,
+  }) {
+    return Row(children: [
+      SizedBox(width: 86, child: Text(label)),
+      Expanded(
+        child: Slider(
+          value: value.clamp(min, max),
+          min: min,
+          max: max,
+          onChanged: onChanged,
+        ),
+      ),
+      SizedBox(width: 44, child: Text(display, textAlign: TextAlign.end)),
+    ]);
   }
 }

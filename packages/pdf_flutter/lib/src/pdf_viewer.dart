@@ -689,12 +689,17 @@ class _PdfViewerState extends State<PdfViewer>
   }
 
   /// Escape backs out of editing state layer by layer before it clears
-  /// the text selection: annotation selection → pending ink → armed tool.
+  /// the text selection: annotation or element selection → pending ink →
+  /// armed tool.
   void _onEscape() {
     final editing = widget.editing;
     if (editing != null) {
       if (editing.selectedAnnotation != null) {
         editing.clearAnnotationSelection();
+        return;
+      }
+      if (editing.selectedElement != null) {
+        editing.clearElementSelection();
         return;
       }
       if (editing.hasPendingInk) {

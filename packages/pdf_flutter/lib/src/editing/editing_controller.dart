@@ -30,6 +30,11 @@ enum PdfEditTool {
 
   /// Drag out a box, then type the rubber-stamp caption (/Stamp).
   stamp,
+
+  /// Tap to select a page content element (text run, path, image); the
+  /// selection can be deleted or, for text, rewritten. Edits the page's
+  /// content stream itself, not annotations.
+  content,
 }
 
 /// Text-markup kinds for [PdfEditingController.addMarkup].
@@ -108,6 +113,7 @@ class PdfEditingController extends ChangeNotifier {
     _document = PdfDocument.open(bytes, password: _password);
     // the same /Annots slot may hold a different annotation now
     _selected = null;
+    _invalidateElements();
     notifyListeners();
   }
 
@@ -131,6 +137,7 @@ class PdfEditingController extends ChangeNotifier {
     _selected = selected != null && _annotationAt(selected) != null
         ? selected
         : null;
+    _invalidateElements();
     notifyListeners();
     return true;
   }
@@ -142,6 +149,7 @@ class PdfEditingController extends ChangeNotifier {
   Color _color = const Color(0xFFE53935);
   double _strokeWidth = 2;
   double _fontSize = 14;
+  double _opacity = 1;
 
   /// The armed tool, or null when the viewer behaves as a plain reader.
   PdfEditTool? get tool => _tool;
@@ -152,6 +160,7 @@ class PdfEditingController extends ChangeNotifier {
     if (_tool == PdfEditTool.ink && value != PdfEditTool.ink) finishInk();
     _tool = value;
     if (value != PdfEditTool.select) _selected = null;
+    if (value != PdfEditTool.content) _selectedElement = null;
     notifyListeners();
   }
 
@@ -179,6 +188,16 @@ class PdfEditingController extends ChangeNotifier {
   set fontSize(double value) {
     if (value == _fontSize) return;
     _fontSize = value;
+    notifyListeners();
+  }
+
+  /// Opacity (0–1] new ink, shape, markup, and stamp annotations are
+  /// created with. Free text and notes are always opaque.
+  double get opacity => _opacity;
+
+  set opacity(double value) {
+    if (value == _opacity) return;
+    _opacity = value;
     notifyListeners();
   }
 
@@ -211,7 +230,9 @@ class PdfEditingController extends ChangeNotifier {
       strokes.forEach((page, pageStrokes) {
         if (pageStrokes.isNotEmpty) {
           editor.addInk(page, pageStrokes,
-              color: _colorValue, strokeWidth: _strokeWidth);
+              color: _colorValue,
+              strokeWidth: _strokeWidth,
+              opacity: _opacity);
         }
       });
     });
@@ -236,13 +257,17 @@ class PdfEditingController extends ChangeNotifier {
         if (quads.isEmpty) return;
         switch (kind) {
           case PdfMarkupKind.highlight:
-            editor.addHighlight(page, quads, color: _colorValue);
+            editor.addHighlight(page, quads,
+                color: _colorValue, opacity: _opacity);
           case PdfMarkupKind.underline:
-            editor.addUnderline(page, quads, color: _colorValue);
+            editor.addUnderline(page, quads,
+                color: _colorValue, opacity: _opacity);
           case PdfMarkupKind.strikeOut:
-            editor.addStrikeOut(page, quads, color: _colorValue);
+            editor.addStrikeOut(page, quads,
+                color: _colorValue, opacity: _opacity);
           case PdfMarkupKind.squiggly:
-            editor.addSquiggly(page, quads, color: _colorValue);
+            editor.addSquiggly(page, quads,
+                color: _colorValue, opacity: _opacity);
         }
       });
     });
@@ -250,18 +275,23 @@ class PdfEditingController extends ChangeNotifier {
 
   void addRectangle(int pageIndex, PdfRect rect) =>
       apply((e) => e.addSquare(pageIndex, rect,
-          strokeColor: _colorValue, strokeWidth: _strokeWidth));
+          strokeColor: _colorValue,
+          strokeWidth: _strokeWidth,
+          opacity: _opacity));
 
   void addEllipse(int pageIndex, PdfRect rect) =>
       apply((e) => e.addCircle(pageIndex, rect,
-          strokeColor: _colorValue, strokeWidth: _strokeWidth));
+          strokeColor: _colorValue,
+          strokeWidth: _strokeWidth,
+          opacity: _opacity));
 
   void addFreeText(int pageIndex, PdfRect rect, String text) =>
       apply((e) => e.addFreeText(pageIndex, rect, text,
           fontSize: _fontSize, color: _colorValue));
 
   void addStamp(int pageIndex, PdfRect rect, String text) =>
-      apply((e) => e.addStamp(pageIndex, rect, text, color: _colorValue));
+      apply((e) => e.addStamp(pageIndex, rect, text,
+          color: _colorValue, opacity: _opacity));
 
   /// Adds a sticky note with its top-left corner at ([x], [y]).
   void addNote(int pageIndex, double x, double y, String text) =>
@@ -308,6 +338,11 @@ class PdfEditingController extends ChangeNotifier {
   /// The page the selected annotation lives on.
   int? get selectedPage => selectedAnnotation == null ? null : _selected!.$1;
 
+  /// (pageIndex, /Annots slot) of the selected annotation, for comparing
+  /// against a list position (the annotation sidebar's selected tile).
+  (int page, int index)? get selectedAnnotationSlot =>
+      selectedAnnotation == null ? null : _selected;
+
   bool get canResizeSelected =>
       _resizable.contains(selectedAnnotation?.subtype);
 
@@ -338,6 +373,32 @@ class PdfEditingController extends ChangeNotifier {
     return false;
   }
 
+  /// Selects the annotation in slot [index] of [pageIndex]'s /Annots
+  /// (the position in [PdfPage.annotations]), arming the select tool so
+  /// the viewer shows the selection. Used by the annotation sidebar.
+  /// Returns false for invalid slots and unselectable subtypes.
+  bool selectAnnotation(int pageIndex, int index) {
+    final annotation = _annotationAt((pageIndex, index));
+    if (annotation == null || _unselectable.contains(annotation.subtype)) {
+      return false;
+    }
+    tool = PdfEditTool.select;
+    if (_selected != (pageIndex, index)) {
+      _selected = (pageIndex, index);
+      notifyListeners();
+    }
+    return true;
+  }
+
+  /// Removes the annotation in slot [index] of [pageIndex]'s /Annots
+  /// without going through the selection.
+  void deleteAnnotation(int pageIndex, int index) {
+    final annotation = _annotationAt((pageIndex, index));
+    if (annotation == null) return;
+    if (_selected == (pageIndex, index)) _selected = null;
+    apply((e) => e.removeAnnotation(pageIndex, annotation));
+  }
+
   void clearAnnotationSelection() {
     if (_selected == null) return;
     _selected = null;
@@ -360,7 +421,13 @@ class PdfEditingController extends ChangeNotifier {
     apply((e) => e.resizeAnnotation(_selected!.$1, annotation, to));
   }
 
+  /// Deletes whatever is selected: the content element when the content
+  /// tool has one, otherwise the selected annotation.
   void deleteSelected() {
+    if (_selectedElement != null) {
+      deleteSelectedElement();
+      return;
+    }
     final selected = _selected;
     final annotation = selectedAnnotation;
     if (selected == null || annotation == null) return;
@@ -399,5 +466,91 @@ class PdfEditingController extends ChangeNotifier {
           e.addNote(page, rect.left, rect.top, text, color: color ?? 0xFFD100);
       }
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // content elements
+
+  /// Parsed page elements, cached per page for the current revision.
+  final Map<int, PdfPageElements> _elements = {};
+
+  /// (pageIndex, element id) of the selected content element. Element ids
+  /// only mean anything within one revision, so any edit clears this.
+  (int page, int id)? _selectedElement;
+
+  void _invalidateElements() {
+    _elements.clear();
+    _selectedElement = null;
+  }
+
+  /// The content elements of [pageIndex] at the current revision.
+  PdfPageElements elementsOn(int pageIndex) => _elements.putIfAbsent(
+      pageIndex, () => PdfPageElements.of(_document, pageIndex));
+
+  /// The selected content element, or null.
+  PdfContentElement? get selectedElement {
+    final selected = _selectedElement;
+    if (selected == null) return null;
+    final elements = elementsOn(selected.$1).elements;
+    return selected.$2 < elements.length ? elements[selected.$2] : null;
+  }
+
+  /// The page the selected content element lives on.
+  int? get selectedElementPage =>
+      selectedElement == null ? null : _selectedElement!.$1;
+
+  /// Whether the selected element is a text run whose characters the
+  /// controller can rewrite.
+  bool get canEditSelectedElementText =>
+      selectedElement?.kind == PdfElementKind.text &&
+      (selectedElement?.text?.isNotEmpty ?? false);
+
+  /// Selects the topmost content element whose bounds contain ([x], [y])
+  /// on [pageIndex]; clears the selection when nothing is hit. Bounds are
+  /// approximate (see [PdfContentElement.bounds]).
+  bool selectElementAt(int pageIndex, double x, double y) {
+    final hits = elementsOn(pageIndex).elementsAt(x, y);
+    if (hits.isEmpty) {
+      clearElementSelection();
+      return false;
+    }
+    final hit = (pageIndex, hits.first.id);
+    if (_selectedElement != hit) {
+      _selectedElement = hit;
+      notifyListeners();
+    }
+    return true;
+  }
+
+  void clearElementSelection() {
+    if (_selectedElement == null) return;
+    _selectedElement = null;
+    notifyListeners();
+  }
+
+  /// Deletes the selected content element from its page's content stream.
+  void deleteSelectedElement() {
+    final selected = _selectedElement;
+    final element = selectedElement;
+    if (selected == null || element == null) return;
+    apply((e) => e.deleteElements(elementsOn(selected.$1), [element.id]));
+  }
+
+  /// Rewrites the selected text element's characters to [text] and
+  /// returns how many text runs changed.
+  ///
+  /// Built on [PdfEditor.replaceText], so its limits apply: identical
+  /// runs elsewhere on the page change too, composite (Type0) fonts are
+  /// skipped, and glyphs are not re-measured — longer replacements can
+  /// overlap what follows on the line.
+  int replaceSelectedElementText(String text) {
+    final selected = _selectedElement;
+    final element = selectedElement;
+    if (selected == null || element == null || !canEditSelectedElementText) {
+      return 0;
+    }
+    var count = 0;
+    apply((e) => count = e.replaceText(selected.$1, element.text!, text));
+    return count;
   }
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -9,9 +10,7 @@ import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 
 void main() {
   Future<PdfViewerController> pumpViewer(WidgetTester tester,
-      {int pages = 5,
-      Uint8List? bytes,
-      PdfActionHandler? onAction}) async {
+      {int pages = 5, Uint8List? bytes, PdfActionHandler? onAction}) async {
     final controller = PdfViewerController();
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
@@ -159,12 +158,11 @@ void main() {
     expect(controller.hasSelection, isTrue);
     // selection painting must not reshape the tree and recreate the page
     // view (that drops its raster: a white flash)
-    expect(tester.state(find.byType(PdfPageView).first),
-        same(pageViewState));
+    expect(tester.state(find.byType(PdfPageView).first), same(pageViewState));
 
     final copied = <String?>[];
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        SystemChannels.platform, (call) async {
+    tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
       if (call.method == 'Clipboard.setData') {
         copied.add((call.arguments as Map)['text'] as String?);
       }
@@ -311,6 +309,82 @@ void main() {
     await tester.tapAt(const Offset(400, 300));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(controller.zoom, greaterThan(1));
+  });
+
+  testWidgets('trackpad scrolling still moves the document while zoomed',
+      (tester) async {
+    final controller = await pumpViewer(tester);
+
+    // unzoomed: two-finger scroll moves the list
+    final flat = await tester.createGesture(
+        kind: PointerDeviceKind.trackpad, pointer: 20);
+    await flat.panZoomStart(const Offset(400, 300));
+    for (var i = 1; i <= 5; i++) {
+      await flat.panZoomUpdate(const Offset(400, 300),
+          pan: Offset(0, -400.0 * i));
+      await tester.pump();
+    }
+    await flat.panZoomEnd();
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.currentPage, greaterThan(0));
+    // don't await: the animation only advances while the test pumps
+    unawaited(controller.jumpToPage(0));
+    await tester.pumpAndSettle();
+
+    // zoom in with a touch double-tap
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, greaterThan(1));
+
+    // zoomed: two-finger scroll must keep moving through the document
+    // (regression: InteractiveViewer used to claim the gesture and pan
+    // only within the zoom window)
+    final gesture = await tester.createGesture(
+        kind: PointerDeviceKind.trackpad, pointer: 21);
+    await gesture.panZoomStart(const Offset(400, 300));
+    for (var i = 1; i <= 10; i++) {
+      await gesture.panZoomUpdate(const Offset(400, 300),
+          pan: Offset(0, -600.0 * i));
+      await tester.pump();
+    }
+    await gesture.panZoomEnd();
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.currentPage, greaterThan(0));
+    expect(controller.zoom, greaterThan(1)); // scrolling didn't unzoom
+
+    // trackpad pinch-out still collapses the zoom
+    final pinch = await tester.createGesture(
+        kind: PointerDeviceKind.trackpad, pointer: 22);
+    await pinch.panZoomStart(const Offset(400, 300));
+    await pinch.panZoomUpdate(const Offset(400, 300), scale: 0.2);
+    await tester.pump();
+    await pinch.panZoomEnd();
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, 1);
+  });
+
+  testWidgets('plain wheel at the scroll extents does not zoom',
+      (tester) async {
+    // Regression: at the top/bottom edge the scrollable declines wheel
+    // events, which then fell through to InteractiveViewer's wheel-zoom.
+    final controller = await pumpViewer(tester, pages: 1);
+    final pointer = TestPointer(12, PointerDeviceKind.mouse);
+    pointer.hover(const Offset(400, 300));
+    for (var i = 0; i < 10; i++) {
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 400)));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, 1); // wheeled past the end: no zoom
+
+    for (var i = 0; i < 10; i++) {
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, -400)));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, 1); // and past the top: no zoom
   });
 
   testWidgets('ctrl+wheel zooms, plain wheel scrolls', (tester) async {

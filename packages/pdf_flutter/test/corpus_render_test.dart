@@ -22,9 +22,9 @@ void main() {
     }
     await tester.runAsync(() async {
       await loadSystemFonts();
-      final outDir = Directory(
-          Platform.environment['RENDER_OUT'] ?? '$corpusDir/renders')
-        ..createSync(recursive: true);
+      final outDir =
+          Directory(Platform.environment['RENDER_OUT'] ?? '$corpusDir/renders')
+            ..createSync(recursive: true);
 
       final files = Directory(corpusDir)
           .listSync()
@@ -39,9 +39,9 @@ void main() {
         final name = file.uri.pathSegments.last;
         try {
           final doc = PdfDocument.open(file.readAsBytesSync());
-          final image = await PdfPageRenderer.renderImage(doc.page(0),
-                  pixelRatio: 1.5)
-              .timeout(const Duration(seconds: 60));
+          final image =
+              await PdfPageRenderer.renderImage(doc.page(0), pixelRatio: 1.5)
+                  .timeout(const Duration(seconds: 60));
           final png = await image.toByteData(format: ui.ImageByteFormat.png);
           File('${outDir.path}/$name.png')
               .writeAsBytesSync(png!.buffer.asUint8List());

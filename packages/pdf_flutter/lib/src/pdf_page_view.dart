@@ -29,6 +29,7 @@ class _PdfPageViewState extends State<PdfPageView> {
   ui.Image? _image;
   int _renderGeneration = 0;
   double? _pixelRatio;
+  double? _layoutWidth;
 
   // Deep-zoom rasters stay within GPU texture limits and sane memory:
   // at most ~16.7M px (64 MB RGBA) and 8192 px per side. Past these caps
@@ -42,8 +43,24 @@ class _PdfPageViewState extends State<PdfPageView> {
     final ratio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1.0;
     if (ratio != _pixelRatio) {
       _pixelRatio = ratio;
-      _render();
+      // before the first layout there is nothing to size against; the
+      // initial render fires from the first LayoutBuilder pass instead
+      if (_layoutWidth != null) _render();
     }
+  }
+
+  /// Re-rasterizes when the on-screen width changes meaningfully (window
+  /// resize, move to another display). 5% hysteresis keeps live resizes
+  /// from re-rendering on every frame; the old raster scales meanwhile.
+  void _noteLayoutWidth(double width) {
+    final previous = _layoutWidth;
+    if (previous != null && (width - previous).abs() < previous * 0.05) {
+      return;
+    }
+    _layoutWidth = width;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _render();
+    });
   }
 
   @override
@@ -73,7 +90,11 @@ class _PdfPageViewState extends State<PdfPageView> {
     final size = PdfPageRenderer.pageSize(widget.page);
     final width = math.max(1.0, size.width);
     final height = math.max(1.0, size.height);
-    var ratio = (_pixelRatio ?? 1.0) * widget.scale;
+    // pages display fit-width, so the raster must match the on-screen
+    // width — a 612pt page across a wide window needs far more pixels
+    // than its nominal point size
+    final fitWidth = (_layoutWidth ?? width) / width;
+    var ratio = fitWidth * (_pixelRatio ?? 1.0) * widget.scale;
     ratio = math.min(ratio, math.sqrt(_maxPixels / (width * height)));
     ratio = math.min(ratio, _maxDimension / math.max(width, height));
     return math.max(ratio, 0.05);
@@ -102,15 +123,19 @@ class _PdfPageViewState extends State<PdfPageView> {
   Widget build(BuildContext context) {
     final size = PdfPageRenderer.pageSize(widget.page);
     final hasArea = size.width > 0 && size.height > 0;
-    return AspectRatio(
-      aspectRatio: hasArea ? size.width / size.height : 1,
-      child: _image == null
-          ? const ColoredBox(color: Color(0xFFFFFFFF))
-          : RawImage(
-              image: _image,
-              fit: BoxFit.contain,
-              filterQuality: FilterQuality.medium,
-            ),
-    );
+    return LayoutBuilder(builder: (context, constraints) {
+      final width = constraints.maxWidth;
+      if (width.isFinite && width > 0) _noteLayoutWidth(width);
+      return AspectRatio(
+        aspectRatio: hasArea ? size.width / size.height : 1,
+        child: _image == null
+            ? const ColoredBox(color: Color(0xFFFFFFFF))
+            : RawImage(
+                image: _image,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.medium,
+              ),
+      );
+    });
   }
 }

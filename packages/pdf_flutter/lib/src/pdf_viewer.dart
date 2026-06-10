@@ -129,8 +129,10 @@ class PdfViewerController extends ChangeNotifier {
     }
   }
 
-  List<PdfTextMatch> _matchesOn(int pageIndex) =>
-      [for (final m in _matches) if (m.pageIndex == pageIndex) m];
+  List<PdfTextMatch> _matchesOn(int pageIndex) => [
+        for (final m in _matches)
+          if (m.pageIndex == pageIndex) m
+      ];
 }
 
 /// Signature for [PdfViewer.onAction]: the user activated [annotation]
@@ -209,6 +211,10 @@ class _PdfViewerState extends State<PdfViewer>
   final Map<int, PdfPageText> _textCache = {};
   final Map<int, List<PdfAnnotation>> _annotCache = {};
   double _viewWidth = 0;
+  double _viewHeight = 0;
+
+  /// Cumulative scale of the trackpad pan-zoom gesture in progress.
+  double _trackpadScale = 1;
 
   final _focusNode = FocusNode(debugLabel: 'PdfViewer');
 
@@ -241,17 +247,26 @@ class _PdfViewerState extends State<PdfViewer>
     _controller = widget.controller ?? PdfViewerController();
     _ownsController = widget.controller == null;
     _controller._state = this;
-    _zoomAnimator =
-        AnimationController(vsync: this, duration: const Duration(milliseconds: 200))
-          ..addListener(() {
-            final animation = _zoomAnimation;
-            if (animation != null) _transform.value = animation.value;
-          });
+    _zoomAnimator = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 200))
+      ..addListener(() {
+        final animation = _zoomAnimation;
+        if (animation != null) _transform.value = animation.value;
+      });
     _loadPages();
     _scroll.addListener(_onScroll);
     _transform.addListener(_onTransformChanged);
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
+    // Cmd+Tab and friends: the modifier's key-up goes to the other app, so
+    // the tracked state would stick. Losing focus clears it.
+    _lifecycle = AppLifecycleListener(onInactive: () {
+      if (_zoomModifierDown && mounted) {
+        setState(() => _zoomModifierDown = false);
+      }
+    });
   }
+
+  late final AppLifecycleListener _lifecycle;
 
   bool _onKeyEvent(KeyEvent event) {
     final down = HardwareKeyboard.instance.isControlPressed ||
@@ -260,6 +275,38 @@ class _PdfViewerState extends State<PdfViewer>
       setState(() => _zoomModifierDown = down);
     }
     return false; // observe only, never consume
+  }
+
+  /// Wheel events: the viewer owns zooming, not InteractiveViewer (whose
+  /// wheel handler acts directly, outside the signal resolver, so it would
+  /// zoom on every wheel-up regardless of modifiers — its scaleFactor is
+  /// set to infinity to neutralize it).
+  ///
+  /// With ctrl/cmd held the list is out of the hit path (IgnorePointer),
+  /// this registration wins, and the wheel zooms around the pointer.
+  /// Without a modifier the list's own registration wins while it can
+  /// scroll; at the scroll extents this no-op soaks up the leftovers.
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    GestureBinding.instance.pointerSignalResolver.register(event, (event) {
+      if (_zoomModifierDown) _applyWheelZoom(event as PointerScrollEvent);
+    });
+  }
+
+  void _applyWheelZoom(PointerScrollEvent event) {
+    if (event.scrollDelta.dy == 0) return;
+    final matrix = _transform.value.clone();
+    final scale = matrix.getMaxScaleOnAxis();
+    // InteractiveViewer's wheel feel: e^(-delta/200)
+    final factor = (scale * math.exp(-event.scrollDelta.dy / 200))
+            .clamp(1.0, widget.maxZoom) /
+        scale;
+    final p = event.localPosition;
+    matrix
+      ..translateByDouble(p.dx, p.dy, 0, 1)
+      ..scaleByDouble(factor, factor, 1, 1)
+      ..translateByDouble(-p.dx, -p.dy, 0, 1);
+    _transform.value = _clampedTransform(matrix);
   }
 
   /// During a gesture the existing rasters scale under the transform
@@ -321,6 +368,7 @@ class _PdfViewerState extends State<PdfViewer>
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKeyEvent);
+    _lifecycle.dispose();
     _settleTimer?.cancel();
     _controller._state = null;
     if (_ownsController) _controller.dispose();
@@ -343,8 +391,7 @@ class _PdfViewerState extends State<PdfViewer>
 
   void _onScroll() {
     if (_viewWidth <= 0 || !_scroll.hasClients) return;
-    final center =
-        _scroll.offset + _scroll.position.viewportDimension / 2;
+    final center = _scroll.offset + _scroll.position.viewportDimension / 2;
     var offset = 0.0;
     for (var i = 0; i < _pages.length; i++) {
       offset += _pageHeight(i) + widget.pageSpacing;
@@ -369,8 +416,8 @@ class _PdfViewerState extends State<PdfViewer>
   Future<List<PdfTextMatch>> _searchAllPages(String query) async {
     final matches = <PdfTextMatch>[];
     for (var i = 0; i < _pages.length; i++) {
-      final text = _textCache[i] ??=
-          PdfTextExtractor.extract(widget.document, i);
+      final text =
+          _textCache[i] ??= PdfTextExtractor.extract(widget.document, i);
       matches.addAll(text.findAll(query));
       // yield between pages so long documents don't freeze the UI
       if (i % 5 == 4) await Future<void>.delayed(Duration.zero);
@@ -415,8 +462,7 @@ class _PdfViewerState extends State<PdfViewer>
   }
 
   /// Visible annotations with an action on a page, cached.
-  List<PdfAnnotation> _interactiveAnnots(int index) =>
-      _annotCache[index] ??= [
+  List<PdfAnnotation> _interactiveAnnots(int index) => _annotCache[index] ??= [
         for (final a in _pages[index].annotations)
           if (!a.isHidden && !a.isNoView && a.action != null) a,
       ];
@@ -550,8 +596,7 @@ class _PdfViewerState extends State<PdfViewer>
       return;
     }
     _wordAnchor = null;
-    final position =
-        _textPositionAt(details.localPosition, tolerance: 14);
+    final position = _textPositionAt(details.localPosition, tolerance: 14);
     setState(() {
       _selAnchor = position;
       _selFocus = position;
@@ -567,7 +612,8 @@ class _PdfViewerState extends State<PdfViewer>
       final range =
           _wordRangeAt(details.localPosition, tolerance: double.infinity);
       if (range == null) return;
-      final start = _isBefore(range.$1, wordAnchor.$1) ? range.$1 : wordAnchor.$1;
+      final start =
+          _isBefore(range.$1, wordAnchor.$1) ? range.$1 : wordAnchor.$1;
       final end = _isBefore(wordAnchor.$2, range.$2) ? range.$2 : wordAnchor.$2;
       if (start == _selAnchor && end == _selFocus) return;
       setState(() {
@@ -578,8 +624,8 @@ class _PdfViewerState extends State<PdfViewer>
       return;
     }
     if (_selAnchor == null) return;
-    final position = _textPositionAt(details.localPosition,
-        tolerance: double.infinity);
+    final position =
+        _textPositionAt(details.localPosition, tolerance: double.infinity);
     if (position == null || position == _selFocus) return;
     setState(() => _selFocus = position);
     _controller._setSelection(_selectedText());
@@ -699,8 +745,8 @@ class _PdfViewerState extends State<PdfViewer>
       final position = details.localPosition;
       final scale = widget.doubleTapZoom;
       end = Matrix4.identity()
-        ..translateByDouble(-position.dx * (scale - 1),
-            -position.dy * (scale - 1), 0, 1)
+        ..translateByDouble(
+            -position.dx * (scale - 1), -position.dy * (scale - 1), 0, 1)
         ..scaleByDouble(scale, scale, 1, 1);
     }
     _zoomAnimation = Matrix4Tween(begin: _transform.value, end: end).animate(
@@ -709,10 +755,69 @@ class _PdfViewerState extends State<PdfViewer>
     setState(() => _zoomed = !_zoomed);
   }
 
+  // --- trackpad gestures ---
+  //
+  // A dedicated recognizer owns every trackpad pan-zoom gesture (see
+  // _TrackpadPanRecognizer): vertical deltas scroll the list 1:1 with the
+  // fingers on screen, horizontal deltas pan the zoom window when zoomed,
+  // and pinch zooms around the gesture's focal point. macOS momentum
+  // arrives as continued pan-zoom updates, so flings work unchanged.
+
+  void _onTrackpadPanZoomStart(PointerPanZoomStartEvent event) {
+    _trackpadScale = 1;
+  }
+
+  void _onTrackpadPanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    final matrix = _transform.value.clone();
+    final scale = matrix.getMaxScaleOnAxis();
+
+    if (event.scale > 0 && event.scale != _trackpadScale) {
+      final factor =
+          (scale * event.scale / _trackpadScale).clamp(1.0, widget.maxZoom) /
+              scale;
+      _trackpadScale = event.scale;
+      // zoom around the gesture's start point, in pre-transform coordinates
+      final p = event.localPosition;
+      matrix
+        ..translateByDouble(p.dx, p.dy, 0, 1)
+        ..scaleByDouble(factor, factor, 1, 1)
+        ..translateByDouble(-p.dx, -p.dy, 0, 1);
+    }
+
+    matrix.storage[12] += event.panDelta.dx;
+    _transform.value = _clampedTransform(matrix);
+
+    if (_scroll.hasClients && event.panDelta.dy != 0) {
+      final position = _scroll.position;
+      // deltas are screen pixels; the list lives under the zoom transform
+      final dy = event.panDelta.dy / _transform.value.getMaxScaleOnAxis();
+      position.jumpTo((position.pixels - dy)
+          .clamp(position.minScrollExtent, position.maxScrollExtent));
+    }
+  }
+
+  void _onTrackpadPanZoomEnd() {
+    final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
+    if (!zoomed) _transform.value = Matrix4.identity();
+    if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
+  }
+
+  /// Keeps the zoom window over the content: snaps near-1 scales back to
+  /// identity and clamps the translation so no blank edges show.
+  Matrix4 _clampedTransform(Matrix4 matrix) {
+    final scale = matrix.getMaxScaleOnAxis();
+    if (scale <= 1.01) return Matrix4.identity();
+    final s = matrix.storage;
+    s[12] = s[12].clamp(_viewWidth * (1 - scale), 0.0);
+    s[13] = s[13].clamp(_viewHeight * (1 - scale), 0.0);
+    return matrix;
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       _viewWidth = constraints.maxWidth;
+      _viewHeight = constraints.maxHeight;
       final list = ListView.builder(
         controller: _scroll,
         itemCount: _pages.length,
@@ -758,14 +863,16 @@ class _PdfViewerState extends State<PdfViewer>
                   },
                 ),
                 (recognizer) => recognizer
-                  ..onDoubleTapDown =
-                      ((details) => _doubleTapDetails = details)
+                  ..onDoubleTapDown = ((details) => _doubleTapDetails = details)
                   ..onDoubleTap = _onDoubleTap,
               ),
             },
             child: InteractiveViewer(
               transformationController: _transform,
               maxScale: widget.maxZoom,
+              // wheel zoom is handled in _onPointerSignal; e^(-dy/∞) = 1
+              // disables InteractiveViewer's own (modifier-blind) version
+              scaleFactor: double.maxFinite,
               minScale: 1,
               // vertical drags scroll the list; horizontal panning engages
               // once zoomed in
@@ -774,32 +881,55 @@ class _PdfViewerState extends State<PdfViewer>
                 final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
                 if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
               },
-              // selection drags: scroll wheels and touch scrolling go to
-              // the list (its drag recognizers win the arena for touch);
-              // mouse drags fall through to this detector
-              child: MouseRegion(
-                cursor: _hoverCursor,
-                onHover: _onHover,
-                onExit: (_) {
-                  if (_hoverCursor != MouseCursor.defer) {
-                    setState(() => _hoverCursor = MouseCursor.defer);
-                  }
+              // all trackpad pan-zoom gestures are handled here, never by
+              // the list's drag recognizer (whose iOS-style velocity
+              // tracker asserts on macOS trackpad timestamps) nor by
+              // InteractiveViewer (which would pan only within the zoom
+              // window). Innermost recognizers win the arena, and this one
+              // accepts eagerly.
+              child: RawGestureDetector(
+                gestures: <Type, GestureRecognizerFactory>{
+                  _TrackpadPanRecognizer: GestureRecognizerFactoryWithHandlers<
+                      _TrackpadPanRecognizer>(
+                    () => _TrackpadPanRecognizer(debugOwner: this),
+                    (recognizer) => recognizer
+                      ..onStart = _onTrackpadPanZoomStart
+                      ..onUpdate = _onTrackpadPanZoomUpdate
+                      ..onEnd = _onTrackpadPanZoomEnd,
+                  ),
                 },
+                // plain wheel events the list can't use (at its extents)
+                // must not fall through to InteractiveViewer's wheel-zoom
                 child: Listener(
-                  onPointerDown: _onPointerDown,
-                  onPointerUp: _onPointerUp,
-                  child: GestureDetector(
-                    onTapUp: _onTapUp,
-                    onPanStart: _onSelectionStart,
-                    onPanUpdate: _onSelectionUpdate,
-                    child: ColoredBox(
-                    color: const Color(0xFF404347),
-                      // with ctrl/cmd held the list stops claiming wheel
-                      // events, so they reach the InteractiveViewer, which
-                      // zooms around the pointer
-                      child: IgnorePointer(
-                        ignoring: _zoomModifierDown,
-                        child: list,
+                  onPointerSignal: _onPointerSignal,
+                  // selection drags: scroll wheels and touch scrolling go to
+                  // the list (its drag recognizers win the arena for touch);
+                  // mouse drags fall through to this detector
+                  child: MouseRegion(
+                    cursor: _hoverCursor,
+                    onHover: _onHover,
+                    onExit: (_) {
+                      if (_hoverCursor != MouseCursor.defer) {
+                        setState(() => _hoverCursor = MouseCursor.defer);
+                      }
+                    },
+                    child: Listener(
+                      onPointerDown: _onPointerDown,
+                      onPointerUp: _onPointerUp,
+                      child: GestureDetector(
+                        onTapUp: _onTapUp,
+                        onPanStart: _onSelectionStart,
+                        onPanUpdate: _onSelectionUpdate,
+                        child: ColoredBox(
+                          color: const Color(0xFF404347),
+                          // with ctrl/cmd held the list stops claiming wheel
+                          // events, so they reach the InteractiveViewer, which
+                          // zooms around the pointer
+                          child: IgnorePointer(
+                            ignoring: _zoomModifierDown,
+                            child: list,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -905,4 +1035,42 @@ class _HighlightPainter extends CustomPainter {
       oldDelegate.matches != matches ||
       oldDelegate.currentMatch != currentMatch ||
       oldDelegate.selection != selection;
+}
+
+/// Claims every trackpad pan-zoom gesture, eagerly. The viewer drives
+/// scrolling, zoom-window panning, and pinch zoom itself: leaving these
+/// gestures to the list's drag recognizer trips the iOS-style velocity
+/// tracker's timestamp assert on macOS, and leaving them to
+/// InteractiveViewer pans only within the zoom window's bounds, so
+/// two-finger scrolling could never move through the document.
+class _TrackpadPanRecognizer extends OneSequenceGestureRecognizer {
+  _TrackpadPanRecognizer({super.debugOwner})
+      : super(supportedDevices: {PointerDeviceKind.trackpad});
+
+  void Function(PointerPanZoomStartEvent event)? onStart;
+  void Function(PointerPanZoomUpdateEvent event)? onUpdate;
+  VoidCallback? onEnd;
+
+  @override
+  void addAllowedPointerPanZoom(PointerPanZoomStartEvent event) {
+    startTrackingPointer(event.pointer, event.transform);
+    resolve(GestureDisposition.accepted);
+    onStart?.call(event);
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (event is PointerPanZoomUpdateEvent) {
+      onUpdate?.call(event);
+    } else if (event is PointerPanZoomEndEvent) {
+      onEnd?.call();
+      stopTrackingPointer(event.pointer);
+    }
+  }
+
+  @override
+  void didStopTrackingLastPointer(int pointer) {}
+
+  @override
+  String get debugDescription => 'trackpad pan';
 }

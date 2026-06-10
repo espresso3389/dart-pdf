@@ -22,8 +22,7 @@ void main() {
       final pageIndex =
           int.tryParse(Platform.environment['PDF_PAGE'] ?? '') ?? 0;
       final collector = ImageCollector();
-      PdfInterpreter(cos: cos, device: collector)
-          .drawPage(doc.page(pageIndex));
+      PdfInterpreter(cos: cos, device: collector).drawPage(doc.page(pageIndex));
       // ignore: avoid_print
       print('collected ${collector.streams.length} image draws');
       final images = await decodeImages(cos, collector.streams);

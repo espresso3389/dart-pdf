@@ -17,7 +17,9 @@ import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 Future<void> loadSystemFonts() async {
   const fonts = {
     'Helvetica': ['/System/Library/Fonts/Helvetica.ttc'],
-    'Times New Roman': ['/System/Library/Fonts/Supplemental/Times New Roman.ttf'],
+    'Times New Roman': [
+      '/System/Library/Fonts/Supplemental/Times New Roman.ttf'
+    ],
     'Courier': ['/System/Library/Fonts/Supplemental/Courier New.ttf'],
   };
   for (final entry in fonts.entries) {
@@ -44,9 +46,8 @@ void main() {
       final pdfPath = Platform.environment['PDF_PATH'];
       final pageIndex =
           int.tryParse(Platform.environment['PDF_PAGE'] ?? '') ?? 0;
-      final bytes = pdfPath == null
-          ? buildClassicPdf()
-          : File(pdfPath).readAsBytesSync();
+      final bytes =
+          pdfPath == null ? buildClassicPdf() : File(pdfPath).readAsBytesSync();
 
       final doc = PdfDocument.open(bytes);
       final page = doc.page(pageIndex.clamp(0, doc.pageCount - 1));

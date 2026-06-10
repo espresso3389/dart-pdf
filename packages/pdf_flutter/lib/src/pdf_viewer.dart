@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
@@ -60,7 +61,7 @@ class PdfViewerController extends ChangeNotifier {
     _matches = const [];
     _currentMatch = -1;
     _searching = false;
-    notifyListeners();
+    _notifySafely();
   }
 
   void _stepMatch(int delta) {
@@ -74,13 +75,28 @@ class PdfViewerController extends ChangeNotifier {
   void _setCurrentPage(int page) {
     if (page == _currentPage) return;
     _currentPage = page;
-    notifyListeners();
+    _notifySafely();
   }
 
   void _setPageCount(int count) {
     _pageCount = count;
     _currentPage = 0;
-    notifyListeners();
+    _notifySafely();
+  }
+
+  /// Viewer-internal updates can land mid-frame (initState/didUpdateWidget
+  /// run during build; scroll listeners can fire during layout), when
+  /// notifying would mark listening widgets dirty illegally — defer those
+  /// to after the frame.
+  void _notifySafely() {
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (_state != null) notifyListeners();
+      });
+    } else {
+      notifyListeners();
+    }
   }
 
   List<PdfTextMatch> _matchesOn(int pageIndex) =>

@@ -70,6 +70,34 @@ void main() {
     expect(controller.matchCount, 0);
   });
 
+  testWidgets(
+      'mounting next to an already-built ListenableBuilder does not '
+      'notify during build', (tester) async {
+    // Regression: _loadPages runs in initState (mid-build) and used to
+    // notifyListeners synchronously, dirtying a sibling page indicator that
+    // had already built this frame.
+    final controller = PdfViewerController();
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Column(children: [
+          ListenableBuilder(
+            listenable: controller,
+            builder: (_, __) => Text('${controller.pageCount}'),
+          ),
+          Expanded(
+            child: PdfViewer(
+              document: PdfDocument.open(buildMultiPagePdf(3)),
+              controller: controller,
+            ),
+          ),
+        ]),
+      ),
+    ));
+    expect(tester.takeException(), isNull);
+    await tester.pump(); // deferred notification lands
+    expect(find.text('3'), findsOneWidget);
+  });
+
   testWidgets('jumpToPage scrolls to the requested page', (tester) async {
     final controller = await pumpViewer(tester);
     controller.jumpToPage(4);

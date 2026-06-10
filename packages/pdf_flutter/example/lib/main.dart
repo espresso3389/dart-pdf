@@ -44,6 +44,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
   EditTool? _tool;
   Color _editColor = EditBar.palette.first;
   final Map<int, List<List<(double, double)>>> _inkByPage = {};
+  (int page, int index)? _selectedAnnot;
 
   // app state the interactive demo's PDF links and overlays manipulate
   bool _isDemo = false;
@@ -263,8 +264,87 @@ class _ViewerScreenState extends State<ViewerScreen> {
 
   void _setTool(EditTool? tool) {
     if (_hasPendingInk && tool != EditTool.draw) _finishInk();
-    setState(() => _tool = tool);
+    setState(() {
+      _tool = tool;
+      if (tool != EditTool.select) _selectedAnnot = null;
+    });
     if (tool != null) _controller.clearSelection();
+  }
+
+  PdfAnnotation? get _selectedAnnotation {
+    final selected = _selectedAnnot;
+    final document = _document;
+    if (selected == null || document == null) return null;
+    final annotations = document.page(selected.$1).annotations;
+    return selected.$2 < annotations.length ? annotations[selected.$2] : null;
+  }
+
+  void _onSelectTap(int pageIndex, double x, double y) {
+    final annotations = _document!.page(pageIndex).annotations;
+    // topmost first: later array entries draw above earlier ones
+    for (var i = annotations.length - 1; i >= 0; i--) {
+      final annot = annotations[i];
+      if (annot.isHidden || annot.subtype == 'Popup') continue;
+      if (annot.rect.contains(x, y)) {
+        setState(() => _selectedAnnot = (pageIndex, i));
+        return;
+      }
+    }
+    setState(() => _selectedAnnot = null);
+  }
+
+  void _onMoveSelected(int pageIndex, double dx, double dy) {
+    final annot = _selectedAnnotation;
+    if (annot == null) return;
+    // the annotation keeps its slot in /Annots, so the selection survives
+    _applyEdit((e) => e.moveAnnotation(pageIndex, annot, dx, dy),
+        'Annotation moved');
+  }
+
+  void _deleteSelected() {
+    final selected = _selectedAnnot;
+    final annot = _selectedAnnotation;
+    if (selected == null || annot == null) return;
+    setState(() => _selectedAnnot = null);
+    _applyEdit(
+        (e) => e.removeAnnotation(selected.$1, annot), 'Annotation deleted');
+  }
+
+  /// Rewrites a text-bearing annotation: same place, same color, new
+  /// text — remove plus re-add regenerates the appearance stream.
+  void _editSelectedText() async {
+    final selected = _selectedAnnot;
+    final annot = _selectedAnnotation;
+    if (selected == null || annot == null) return;
+    final text = await promptForText(context,
+        title: switch (annot.subtype) {
+          'FreeText' => 'Text box',
+          'Stamp' => 'Stamp text',
+          _ => 'Edit note',
+        },
+        initial: annot.contents ?? '');
+    if (text == null || text.isEmpty) return;
+
+    final page = selected.$1;
+    final rect = annot.rect;
+    final color = annot.color;
+    setState(() => _selectedAnnot = null);
+    _applyEdit((e) {
+      e.removeAnnotation(page, annot);
+      switch (annot.subtype) {
+        case 'FreeText':
+          final tf = RegExp(r'(\d+(?:\.\d+)?)\s+Tf')
+              .firstMatch(annot.defaultAppearance ?? '');
+          e.addFreeText(page, rect, text,
+              fontSize: double.tryParse(tf?.group(1) ?? '') ?? 14,
+              color: color ?? 0x000000);
+        case 'Stamp':
+          e.addStamp(page, rect, text, color: color ?? 0xC03030);
+        default:
+          e.addNote(page, rect.left, rect.top, text,
+              color: color ?? 0xFFD100);
+      }
+    }, 'Annotation updated');
   }
 
   void _finishInk() {
@@ -352,10 +432,15 @@ class _ViewerScreenState extends State<ViewerScreen> {
             geometry: geometry,
             color: _editColor,
             inkStrokes: _inkByPage[pageIndex] ?? const [],
+            selectedRect: _selectedAnnot?.$1 == pageIndex
+                ? _selectedAnnotation?.rect
+                : null,
             onRect: _onRectDone,
             onPoint: _onPointDone,
             onStroke: (page, stroke) => setState(
                 () => _inkByPage.putIfAbsent(page, () => []).add(stroke)),
+            onSelectTap: _onSelectTap,
+            onMove: _onMoveSelected,
           ),
         ),
     ];
@@ -458,11 +543,16 @@ class _ViewerScreenState extends State<ViewerScreen> {
               color: _editColor,
               hasPendingInk: _hasPendingInk,
               canSave: _bytes != null,
+              hasAnnotationSelection: _selectedAnnotation != null,
+              canEditSelectionText: const {'FreeText', 'Text', 'Stamp'}
+                  .contains(_selectedAnnotation?.subtype),
               onMarkup: _markupSelection,
               onToolChanged: _setTool,
               onColorChanged: (color) => setState(() => _editColor = color),
               onFinishInk: _finishInk,
               onCancelInk: () => setState(_inkByPage.clear),
+              onDeleteSelection: _deleteSelected,
+              onEditSelectionText: _editSelectedText,
               onFlatten: _flatten,
               onSave: _saveAs,
             ),

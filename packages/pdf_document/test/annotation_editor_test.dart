@@ -200,6 +200,69 @@ void main() {
     expect(saved.sublist(0, original.length), original);
   });
 
+  test('removeAnnotation deletes the annotation from /Annots', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150))
+      ..addNote(0, 300, 700, 'keep me');
+    final doc = PdfDocument.open(first.save());
+    final square = doc.page(0).annotations.first;
+    expect(square.subtype, 'Square');
+
+    final editor = PdfEditor(doc)..removeAnnotation(0, square);
+    final reopened = PdfDocument.open(editor.save());
+    final remaining = reopened.page(0).annotations;
+    expect(remaining, hasLength(1));
+    expect(remaining.single.subtype, 'Text');
+  });
+
+  test('removeAnnotation on an existing indirect /Annots array', () {
+    final doc = PdfDocument.open(buildAnnotatedPdf());
+    final before = doc.page(0).annotations.length;
+    final editor = PdfEditor(doc)
+      ..removeAnnotation(0, doc.page(0).annotations.first);
+    final reopened = PdfDocument.open(editor.save());
+    expect(reopened.page(0).annotations.length, before - 1);
+  });
+
+  test('moveAnnotation shifts rect, quad points, and ink lists', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addHighlight(0, const [PdfRect(72, 700, 200, 712)])
+      ..addInk(0, [
+        [(100, 100), (150, 130)],
+      ]);
+    final doc = PdfDocument.open(first.save());
+
+    final editor = PdfEditor(doc)
+      ..moveAnnotation(0, doc.page(0).annotations[0], 10, -20)
+      ..moveAnnotation(0, doc.page(0).annotations[1], 5, 5);
+    final reopened = PdfDocument.open(editor.save());
+
+    final highlight = reopened.page(0).annotations[0];
+    expect(highlight.rect, const PdfRect(82, 680, 210, 692));
+    final quads = reopened.cos.resolve(highlight.dict['QuadPoints']) as CosArray;
+    expect((reopened.cos.resolve(quads[0]) as CosReal).value, 82); // left
+    expect((reopened.cos.resolve(quads[1]) as CosReal).value, 692); // top
+
+    final ink = reopened.page(0).annotations[1];
+    final inkList = reopened.cos.resolve(ink.dict['InkList']) as CosArray;
+    final stroke = reopened.cos.resolve(inkList[0]) as CosArray;
+    expect((reopened.cos.resolve(stroke[0]) as CosReal).value, 105);
+    expect((reopened.cos.resolve(stroke[1]) as CosReal).value, 105);
+  });
+
+  test('a moved annotation still renders: BBox maps onto the new rect', () {
+    // the fixture square's appearance BBox is [0 0 10 10] over rect
+    // (100,100)-(200,150) — after a move the §12.5.5 mapping must land it
+    // on the new rect without touching the stream
+    final doc = PdfDocument.open(buildAppearanceAnnotationsPdf());
+    final editor = PdfEditor(doc)
+      ..moveAnnotation(0, doc.page(0).annotations.first, 50, 100);
+    final reopened = PdfDocument.open(editor.save());
+    final moved = reopened.page(0).annotations.first;
+    expect(moved.rect, const PdfRect(150, 200, 250, 250));
+    expect(moved.normalAppearance, isNotNull);
+  });
+
   test('print flag is set so annotations survive printing', () {
     final doc = roundTrip(
         (e) => e.addHighlight(0, const [PdfRect(72, 700, 200, 712)]));

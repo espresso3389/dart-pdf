@@ -69,6 +69,51 @@ class PdfAnnotation {
   bool get isHidden => flags & 2 != 0;
   bool get isNoView => flags & 32 != 0;
 
+  /// The /Contents text (note body, free-text body, tooltip), if any.
+  String? get contents {
+    final c = document.cos.resolve(dict['Contents']);
+    return c is CosString ? c.text : null;
+  }
+
+  /// The /C color as 0xRRGGBB, if present. Gray and CMYK component
+  /// counts are converted; an empty array (explicit "no color") and
+  /// malformed entries resolve to null.
+  int? get color {
+    final c = document.cos.resolve(dict['C']);
+    if (c is! CosArray) return null;
+    final values = <double>[];
+    for (final item in c.items) {
+      final n = document.cos.resolve(item);
+      if (n is CosInteger) {
+        values.add(n.value.toDouble());
+      } else if (n is CosReal) {
+        values.add(n.value);
+      } else {
+        return null;
+      }
+    }
+    if (values.length != 1 && values.length != 3 && values.length != 4) {
+      return null;
+    }
+    final (r, g, b) = switch (values.length) {
+      1 => (values[0], values[0], values[0]),
+      3 => (values[0], values[1], values[2]),
+      _ => (
+          (1 - values[0]) * (1 - values[3]),
+          (1 - values[1]) * (1 - values[3]),
+          (1 - values[2]) * (1 - values[3]),
+        ),
+    };
+    int byte(double v) => (v.clamp(0.0, 1.0) * 255).round();
+    return (byte(r) << 16) | (byte(g) << 8) | byte(b);
+  }
+
+  /// The /DA default-appearance string (free text, widgets), if any.
+  String? get defaultAppearance {
+    final da = document.cos.resolve(dict['DA']);
+    return da is CosString ? da.text : null;
+  }
+
   /// The action this annotation triggers when activated, if any.
   PdfAction? get action => null;
 

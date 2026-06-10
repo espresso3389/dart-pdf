@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:pdf_cos/pdf_cos.dart';
 
+import 'annotation.dart';
 import 'content_writer.dart';
 import 'document.dart';
 import 'rect.dart';

@@ -323,6 +323,99 @@ extension PdfAnnotationEditing on PdfEditor {
     );
   }
 
+  /// Removes [annotation] from the page, along with its popup, if any.
+  void removeAnnotation(int pageIndex, PdfAnnotation annotation) {
+    final cos = document.cos;
+    final page = document.page(pageIndex);
+    final raw = page.dict['Annots'];
+    final array = cos.resolve(raw);
+    if (array is! CosArray) return;
+    final popup = cos.resolve(annotation.dict['Popup']);
+    final before = array.items.length;
+    array.items.removeWhere((item) {
+      final resolved = cos.resolve(item);
+      return identical(resolved, annotation.dict) ||
+          (popup is CosDictionary && identical(resolved, popup));
+    });
+    if (array.items.length == before) return;
+    if (raw is CosReference) {
+      _updater.replaceObject(raw.objectNumber, array);
+    } else {
+      _updater.markChanged(page.dict);
+    }
+  }
+
+  /// Translates [annotation] by ([dx], [dy]) in page space.
+  ///
+  /// Shifts /Rect and the absolute-coordinate entries that travel with it
+  /// (/QuadPoints, /InkList, /L, /Vertices, /CL). The appearance stream
+  /// needs no rewrite: viewers map its BBox onto the new /Rect (§12.5.5).
+  void moveAnnotation(
+      int pageIndex, PdfAnnotation annotation, double dx, double dy) {
+    final dict = annotation.dict;
+    final rect = annotation.rect;
+    dict['Rect'] = _rectArray(PdfRect(
+      rect.left + dx,
+      rect.bottom + dy,
+      rect.right + dx,
+      rect.top + dy,
+    ));
+    for (final key in const ['QuadPoints', 'L', 'Vertices', 'CL']) {
+      final shifted = _shiftPoints(dict[key], dx, dy);
+      if (shifted != null) dict[key] = shifted;
+    }
+    final ink = document.cos.resolve(dict['InkList']);
+    if (ink is CosArray) {
+      dict['InkList'] = CosArray([
+        for (final stroke in ink.items)
+          _shiftPoints(stroke, dx, dy) ?? stroke,
+      ]);
+    }
+    _markAnnotationChanged(pageIndex, dict);
+  }
+
+  /// An x y x y ... array translated by (dx, dy), or null if [raw] is not
+  /// a numeric array.
+  CosArray? _shiftPoints(CosObject? raw, double dx, double dy) {
+    final cos = document.cos;
+    final array = cos.resolve(raw);
+    if (array is! CosArray) return null;
+    final values = <double>[];
+    for (var i = 0; i < array.length; i++) {
+      final n = cos.resolve(array[i]);
+      if (n is CosInteger) {
+        values.add(n.value.toDouble());
+      } else if (n is CosReal) {
+        values.add(n.value);
+      } else {
+        return null;
+      }
+    }
+    return CosArray([
+      for (var i = 0; i < values.length; i++)
+        CosReal(values[i] + (i.isEven ? dx : dy)),
+    ]);
+  }
+
+  /// Stages whatever object owns [dict]'s bytes: the annotation itself
+  /// when indirect, otherwise its containing /Annots array or page.
+  void _markAnnotationChanged(int pageIndex, CosDictionary dict) {
+    final cos = document.cos;
+    final ref = cos.referenceTo(dict);
+    if (ref != null) {
+      _updater.replaceObject(ref.objectNumber, dict);
+      return;
+    }
+    final page = document.page(pageIndex);
+    final raw = page.dict['Annots'];
+    final array = cos.resolve(raw);
+    if (raw is CosReference && array is CosArray) {
+      _updater.replaceObject(raw.objectNumber, array);
+    } else {
+      _updater.markChanged(page.dict);
+    }
+  }
+
   /// Bakes the page's annotation appearances into its content streams and
   /// removes those annotations, making them permanent, non-interactive
   /// page graphics.

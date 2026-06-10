@@ -5,7 +5,7 @@ import 'package:pdf_flutter/pdf_flutter.dart';
 /// The annotation tools the example app offers. Text markups (highlight,
 /// underline, strike-out) are not modes — they act on the current text
 /// selection directly from the toolbar.
-enum EditTool { draw, rect, ellipse, text, note, stamp }
+enum EditTool { select, draw, rect, ellipse, text, note, stamp }
 
 /// A full-page layer that captures the active tool's gestures in page
 /// space and previews them before they become annotations.
@@ -23,6 +23,9 @@ class EditOverlay extends StatefulWidget {
     required this.onRect,
     required this.onPoint,
     required this.onStroke,
+    this.selectedRect,
+    this.onSelectTap,
+    this.onMove,
   });
 
   final EditTool tool;
@@ -33,9 +36,18 @@ class EditOverlay extends StatefulWidget {
   /// Committed but not yet applied ink strokes on this page (page coords).
   final List<List<(double, double)>> inkStrokes;
 
+  /// The selected annotation's rect when it lives on this page.
+  final PdfRect? selectedRect;
+
   final void Function(int pageIndex, PdfRect rect) onRect;
   final void Function(int pageIndex, double x, double y) onPoint;
   final void Function(int pageIndex, List<(double, double)> stroke) onStroke;
+
+  /// Select-tool taps, in page coordinates.
+  final void Function(int pageIndex, double x, double y)? onSelectTap;
+
+  /// A finished drag of the selected annotation, in page-space deltas.
+  final void Function(int pageIndex, double dx, double dy)? onMove;
 
   @override
   State<EditOverlay> createState() => _EditOverlayState();
@@ -45,11 +57,20 @@ class _EditOverlayState extends State<EditOverlay> {
   Offset? _dragStart;
   Offset? _dragCurrent;
   List<(double, double)>? _activeStroke;
+  Offset? _moveDelta; // live offset while dragging the selected annotation
 
-  bool get _isDrag => widget.tool != EditTool.draw && widget.tool != EditTool.note;
+  bool get _isDrag =>
+      widget.tool != EditTool.draw &&
+      widget.tool != EditTool.note &&
+      widget.tool != EditTool.select;
 
   void _panStart(DragStartDetails details) {
-    if (widget.tool == EditTool.draw) {
+    if (widget.tool == EditTool.select) {
+      final selected = widget.selectedRect;
+      if (selected == null) return;
+      final (x, y) = widget.geometry.toPagePoint(details.localPosition);
+      if (selected.contains(x, y)) setState(() => _moveDelta = Offset.zero);
+    } else if (widget.tool == EditTool.draw) {
       setState(() => _activeStroke = [
             widget.geometry.toPagePoint(details.localPosition),
           ]);
@@ -62,7 +83,9 @@ class _EditOverlayState extends State<EditOverlay> {
   }
 
   void _panUpdate(DragUpdateDetails details) {
-    if (widget.tool == EditTool.draw) {
+    if (_moveDelta != null) {
+      setState(() => _moveDelta = _moveDelta! + details.delta);
+    } else if (widget.tool == EditTool.draw) {
       setState(() =>
           _activeStroke?.add(widget.geometry.toPagePoint(details.localPosition)));
     } else if (_dragStart != null) {
@@ -74,12 +97,21 @@ class _EditOverlayState extends State<EditOverlay> {
     final stroke = _activeStroke;
     final start = _dragStart;
     final current = _dragCurrent;
+    final moveDelta = _moveDelta;
     setState(() {
       _activeStroke = null;
       _dragStart = null;
       _dragCurrent = null;
+      _moveDelta = null;
     });
-    if (widget.tool == EditTool.draw && stroke != null && stroke.isNotEmpty) {
+    if (moveDelta != null) {
+      if (moveDelta.distance < 2) return; // a click, not a move
+      // view deltas are y-down logical pixels; page deltas are y-up points
+      widget.onMove?.call(widget.pageIndex, moveDelta.dx / widget.geometry.scale,
+          -moveDelta.dy / widget.geometry.scale);
+    } else if (widget.tool == EditTool.draw &&
+        stroke != null &&
+        stroke.isNotEmpty) {
       widget.onStroke(widget.pageIndex, stroke);
     } else if (start != null && current != null) {
       final rect = Rect.fromPoints(start, current);
@@ -95,16 +127,23 @@ class _EditOverlayState extends State<EditOverlay> {
       onPanStart: _panStart,
       onPanUpdate: _panUpdate,
       onPanEnd: _panEnd,
-      onTapUp: widget.tool == EditTool.note
-          ? (details) {
-              final (x, y) = widget.geometry.toPagePoint(details.localPosition);
-              widget.onPoint(widget.pageIndex, x, y);
-            }
-          : null,
+      onTapUp: switch (widget.tool) {
+        EditTool.note => (details) {
+            final (x, y) = widget.geometry.toPagePoint(details.localPosition);
+            widget.onPoint(widget.pageIndex, x, y);
+          },
+        EditTool.select => (details) {
+            final (x, y) = widget.geometry.toPagePoint(details.localPosition);
+            widget.onSelectTap?.call(widget.pageIndex, x, y);
+          },
+        _ => null,
+      },
       child: MouseRegion(
-        cursor: widget.tool == EditTool.note
-            ? SystemMouseCursors.click
-            : SystemMouseCursors.precise,
+        cursor: switch (widget.tool) {
+          EditTool.note => SystemMouseCursors.click,
+          EditTool.select => SystemMouseCursors.basic,
+          _ => SystemMouseCursors.precise,
+        },
         child: CustomPaint(
           painter: _EditPreviewPainter(
             tool: widget.tool,
@@ -117,6 +156,11 @@ class _EditOverlayState extends State<EditOverlay> {
             dragRect: _dragStart != null && _dragCurrent != null
                 ? Rect.fromPoints(_dragStart!, _dragCurrent!)
                 : null,
+            selectionRect: widget.selectedRect == null
+                ? null
+                : widget.geometry
+                    .toViewRect(widget.selectedRect!)
+                    .shift(_moveDelta ?? Offset.zero),
           ),
           size: Size.infinite,
         ),
@@ -132,6 +176,7 @@ class _EditPreviewPainter extends CustomPainter {
     required this.geometry,
     required this.strokes,
     required this.dragRect,
+    this.selectionRect,
   });
 
   final EditTool tool;
@@ -139,6 +184,7 @@ class _EditPreviewPainter extends CustomPainter {
   final PdfPageGeometry geometry;
   final List<List<(double, double)>> strokes;
   final Rect? dragRect;
+  final Rect? selectionRect;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -180,12 +226,29 @@ class _EditPreviewPainter extends CustomPainter {
           canvas.drawRect(rect, paint);
       }
     }
+
+    final selection = selectionRect;
+    if (selection != null) {
+      final chrome = selection.inflate(2);
+      canvas.drawRect(
+          chrome,
+          Paint()
+            ..color = const Color(0x331E88E5)
+            ..style = PaintingStyle.fill);
+      canvas.drawRect(
+          chrome,
+          Paint()
+            ..color = const Color(0xFF1E88E5)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5);
+    }
   }
 
   @override
   bool shouldRepaint(_EditPreviewPainter oldDelegate) =>
       oldDelegate.strokes.length != strokes.length ||
       oldDelegate.dragRect != dragRect ||
+      oldDelegate.selectionRect != selectionRect ||
       (strokes.isNotEmpty &&
           oldDelegate.strokes.isNotEmpty &&
           oldDelegate.strokes.last.length != strokes.last.length) ||
@@ -203,11 +266,15 @@ class EditBar extends StatelessWidget {
     required this.color,
     required this.hasPendingInk,
     required this.canSave,
+    required this.hasAnnotationSelection,
+    required this.canEditSelectionText,
     required this.onMarkup,
     required this.onToolChanged,
     required this.onColorChanged,
     required this.onFinishInk,
     required this.onCancelInk,
+    required this.onDeleteSelection,
+    required this.onEditSelectionText,
     required this.onFlatten,
     required this.onSave,
   });
@@ -217,11 +284,15 @@ class EditBar extends StatelessWidget {
   final Color color;
   final bool hasPendingInk;
   final bool canSave;
+  final bool hasAnnotationSelection;
+  final bool canEditSelectionText;
   final void Function(String kind) onMarkup;
   final ValueChanged<EditTool?> onToolChanged;
   final ValueChanged<Color> onColorChanged;
   final VoidCallback onFinishInk;
   final VoidCallback onCancelInk;
+  final VoidCallback onDeleteSelection;
+  final VoidCallback onEditSelectionText;
   final VoidCallback onFlatten;
   final VoidCallback onSave;
 
@@ -273,6 +344,20 @@ class EditBar extends StatelessWidget {
             },
           ),
           const VerticalDivider(width: 16),
+          toolButton(EditTool.select, Icons.near_me, 'Select annotation'),
+          if (hasAnnotationSelection) ...[
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Delete annotation',
+              onPressed: onDeleteSelection,
+            ),
+            if (canEditSelectionText)
+              IconButton(
+                icon: const Icon(Icons.edit),
+                tooltip: 'Edit annotation text',
+                onPressed: onEditSelectionText,
+              ),
+          ],
           toolButton(EditTool.draw, Icons.draw, 'Draw'),
           if (hasPendingInk) ...[
             IconButton(

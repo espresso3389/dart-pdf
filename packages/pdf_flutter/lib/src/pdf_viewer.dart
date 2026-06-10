@@ -28,8 +28,9 @@ class PdfViewerController extends ChangeNotifier {
   /// Zero-based index of the page nearest the viewport center.
   int get currentPage => _currentPage;
 
-  /// Current zoom factor (1 = fit width).
-  double get zoom => _state?._transform.value.getMaxScaleOnAxis() ?? 1;
+  /// Current zoom factor (1 = fit width; below 1 the pages lay out
+  /// smaller so more of the document is on screen).
+  double get zoom => _state?._currentZoom ?? 1;
 
   bool get isSearching => _searching;
   String get query => _query;
@@ -218,6 +219,19 @@ class _PdfViewerState extends State<PdfViewer>
   double _viewWidth = 0;
   double _viewHeight = 0;
 
+  /// Zoom at or below fit-width, applied by laying the pages out smaller
+  /// (so zooming out shows more of the document); zoom above fit-width
+  /// lives in the InteractiveViewer transform instead.
+  double _layoutZoom = 1;
+
+  /// The effective zoom the user sees. Transform values near 1 defer to
+  /// the layout zoom; mid-gesture sub-1 transforms combine with it.
+  double get _currentZoom {
+    final t = _transform.value.getMaxScaleOnAxis();
+    if (t > 1.01 || t < 0.99) return t * _layoutZoom;
+    return _layoutZoom;
+  }
+
   /// Cumulative scale of the trackpad pan-zoom gesture in progress.
   double _trackpadScale = 1;
 
@@ -313,18 +327,55 @@ class _PdfViewerState extends State<PdfViewer>
 
   void _applyWheelZoom(PointerScrollEvent event) {
     if (event.scrollDelta.dy == 0) return;
-    final matrix = _transform.value.clone();
-    final scale = matrix.getMaxScaleOnAxis();
     // InteractiveViewer's wheel feel: e^(-delta/200)
-    final factor = (scale * math.exp(-event.scrollDelta.dy / 200))
-            .clamp(widget.minZoom, widget.maxZoom) /
-        scale;
-    final p = event.localPosition;
-    matrix
-      ..translateByDouble(p.dx, p.dy, 0, 1)
-      ..scaleByDouble(factor, factor, factor, 1)
-      ..translateByDouble(-p.dx, -p.dy, 0, 1);
-    _transform.value = _clampedTransform(matrix);
+    _zoomTo(_currentZoom * math.exp(-event.scrollDelta.dy / 200),
+        event.localPosition);
+  }
+
+  /// Applies an absolute zoom level. Above 1 it lives in the
+  /// InteractiveViewer transform (a window over fit-width pages); at or
+  /// below 1 the pages themselves lay out smaller, so zooming out shows
+  /// more of the document rather than a shrunken viewport.
+  void _zoomTo(double target, Offset focal) {
+    final zoom = target.clamp(widget.minZoom, widget.maxZoom);
+    if (zoom <= 1) {
+      if (_transform.value.getMaxScaleOnAxis() > 1) {
+        _transform.value = Matrix4.identity();
+      }
+      _setLayoutZoom(zoom, focalY: focal.dy);
+    } else {
+      if (_layoutZoom < 1) _setLayoutZoom(1, focalY: focal.dy);
+      final matrix = _transform.value.clone();
+      final factor = zoom / matrix.getMaxScaleOnAxis();
+      matrix
+        ..translateByDouble(focal.dx, focal.dy, 0, 1)
+        ..scaleByDouble(factor, factor, factor, 1)
+        ..translateByDouble(-focal.dx, -focal.dy, 0, 1);
+      _transform.value = _clampedTransform(matrix);
+    }
+  }
+
+  /// Lays the pages out at [zoom] × fit-width (≤ 1), keeping the content
+  /// at [focalY] (viewport coordinates) as stationary as the new scroll
+  /// extents allow.
+  void _setLayoutZoom(double zoom, {double? focalY}) {
+    final z = zoom.clamp(widget.minZoom, 1.0);
+    if (z == _layoutZoom) return;
+    final anchor = focalY ?? _viewHeight / 2;
+    final pixels = _scroll.hasClients ? _scroll.position.pixels : 0.0;
+    final target = (pixels + anchor) * (z / _layoutZoom) - anchor;
+    setState(() => _layoutZoom = z);
+    if (_scroll.hasClients) {
+      _scroll.jumpTo(math.max(0, target));
+      // the new extents only exist after this frame's layout
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scroll.hasClients) return;
+        final position = _scroll.position;
+        if (position.pixels > position.maxScrollExtent) {
+          position.jumpTo(position.maxScrollExtent);
+        }
+      });
+    }
   }
 
   /// During a gesture the existing rasters scale under the transform
@@ -397,7 +448,7 @@ class _PdfViewerState extends State<PdfViewer>
     super.dispose();
   }
 
-  double _pageHeight(int index) => _aspects[index] * _viewWidth;
+  double _pageHeight(int index) => _aspects[index] * _viewWidth * _layoutZoom;
 
   double _pageOffset(int index) {
     var offset = 0.0;
@@ -459,8 +510,9 @@ class _PdfViewerState extends State<PdfViewer>
         final box = _pages[i].cropBox;
         if (box.width <= 0) return null;
         // TODO: /Rotate'd pages need the rotation transform
-        final scale = _viewWidth / box.width;
-        final x = box.left + local.dx / scale;
+        final pageWidth = _viewWidth * _layoutZoom;
+        final scale = pageWidth / box.width;
+        final x = box.left + (local.dx - (_viewWidth - pageWidth) / 2) / scale;
         final y = box.top - (contentY - top) / scale;
         return (i, x, y);
       }
@@ -756,11 +808,14 @@ class _PdfViewerState extends State<PdfViewer>
   void _onDoubleTap() {
     final details = _doubleTapDetails;
     if (details == null) return;
-    final current = _transform.value.getMaxScaleOnAxis();
+    final current = _currentZoom;
     final Matrix4 end;
     final bool zoomedAfter;
     if ((current - 1).abs() > 0.01) {
       // from any zoom — in or out — back to 100%
+      if (_layoutZoom < 1) {
+        _setLayoutZoom(1, focalY: details.localPosition.dy);
+      }
       end = Matrix4.identity();
       zoomedAfter = false;
     } else {
@@ -795,22 +850,17 @@ class _PdfViewerState extends State<PdfViewer>
 
   void _onTrackpadPanZoomUpdate(PointerPanZoomUpdateEvent event) {
     _trackpadVelocity?.addPosition(event.timeStamp, event.pan);
-    final matrix = _transform.value.clone();
-    final scale = matrix.getMaxScaleOnAxis();
 
     if (event.scale > 0 && event.scale != _trackpadScale) {
-      final factor = (scale * event.scale / _trackpadScale)
-              .clamp(widget.minZoom, widget.maxZoom) /
-          scale;
+      final target = _currentZoom * event.scale / _trackpadScale;
       _trackpadScale = event.scale;
-      // zoom around the gesture's start point, in pre-transform coordinates
-      final p = event.localPosition;
-      matrix
-        ..translateByDouble(p.dx, p.dy, 0, 1)
-        ..scaleByDouble(factor, factor, factor, 1)
-        ..translateByDouble(-p.dx, -p.dy, 0, 1);
+      // pinch zooms around the gesture's start point and may cross the
+      // fit-width seam into layout zoom
+      _zoomTo(target, event.localPosition);
     }
 
+    final matrix = _transform.value.clone();
+    final scale = matrix.getMaxScaleOnAxis();
     matrix.storage[12] += event.panDelta.dx;
 
     // vertical: scroll the list (deltas are screen pixels; the list lives
@@ -845,19 +895,12 @@ class _PdfViewerState extends State<PdfViewer>
     }
   }
 
-  /// Keeps the zoom window over the content: snaps the fit-width seam to
-  /// exactly 1, clamps zoomed-in translations so no blank edges show, and
-  /// centers the shrunken viewport when zoomed out past 100%.
+  /// Keeps the zoom window over the content: snaps near-1 scales back to
+  /// identity (sub-1 zoom is layout zoom, not a transform) and clamps the
+  /// translation so no blank edges show.
   Matrix4 _clampedTransform(Matrix4 matrix) {
     final scale = matrix.getMaxScaleOnAxis();
-    if ((scale - 1).abs() <= 0.01) return Matrix4.identity();
-    if (scale < 1) {
-      final out = math.max(scale, widget.minZoom);
-      return Matrix4.identity()
-        ..translateByDouble(
-            _viewWidth * (1 - out) / 2, _viewHeight * (1 - out) / 2, 0, 1)
-        ..scaleByDouble(out, out, out, 1);
-    }
+    if (scale <= 1.01) return Matrix4.identity();
     final s = matrix.storage;
     s[12] = s[12].clamp(_viewWidth * (1 - scale), 0.0);
     s[13] = s[13].clamp(_viewHeight * (1 - scale), 0.0);
@@ -875,16 +918,23 @@ class _PdfViewerState extends State<PdfViewer>
         padding: EdgeInsets.only(bottom: widget.pageSpacing),
         itemBuilder: (context, index) => Padding(
           padding: EdgeInsets.only(top: index == 0 ? 0 : widget.pageSpacing),
-          child: _PdfViewerPage(
-            page: _pages[index],
-            index: index,
-            scale: _renderScale,
-            matches: _controller._matchesOn(index),
-            currentMatch: _controller._currentMatch >= 0
-                ? _controller._matches[_controller._currentMatch]
-                : null,
-            selection: _selectionRectsOn(index),
-            overlayBuilder: widget.pageOverlayBuilder,
+          // zoomed out, each page lays out at a fraction of the viewport
+          // width, centered — more of the document on screen at once
+          child: Center(
+            child: FractionallySizedBox(
+              widthFactor: _layoutZoom,
+              child: _PdfViewerPage(
+                page: _pages[index],
+                index: index,
+                scale: _renderScale,
+                matches: _controller._matchesOn(index),
+                currentMatch: _controller._currentMatch >= 0
+                    ? _controller._matches[_controller._currentMatch]
+                    : null,
+                selection: _selectionRectsOn(index),
+                overlayBuilder: widget.pageOverlayBuilder,
+              ),
+            ),
           ),
         ),
       );
@@ -937,8 +987,27 @@ class _PdfViewerState extends State<PdfViewer>
                 // once zoomed in
                 panEnabled: _zoomed,
                 onInteractionEnd: (_) {
-                  _transform.value =
-                      _clampedTransform(_transform.value.clone());
+                  // touch pinches run on the transform mid-gesture; settle
+                  // them into the layout/transform regime split
+                  final total =
+                      _transform.value.getMaxScaleOnAxis() * _layoutZoom;
+                  if (total <= 1) {
+                    _transform.value = Matrix4.identity();
+                    _setLayoutZoom(total);
+                  } else if (_layoutZoom < 1) {
+                    // fold the layout factor into the transform zoom
+                    final fold = _layoutZoom;
+                    _setLayoutZoom(1);
+                    final matrix = _transform.value.clone()
+                      ..translateByDouble(_viewWidth / 2, _viewHeight / 2, 0, 1)
+                      ..scaleByDouble(fold, fold, fold, 1)
+                      ..translateByDouble(
+                          -_viewWidth / 2, -_viewHeight / 2, 0, 1);
+                    _transform.value = _clampedTransform(matrix);
+                  } else {
+                    _transform.value =
+                        _clampedTransform(_transform.value.clone());
+                  }
                   final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
                   if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
                 },

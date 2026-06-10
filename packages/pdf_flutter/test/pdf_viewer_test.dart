@@ -387,8 +387,16 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(controller.zoom, moreOrLessEquals(0.25, epsilon: 0.001));
+
+    // pages lay out at a quarter width, centered — and MORE of the
+    // document is on screen: several pages fit the viewport at once
     final pageRect = tester.getRect(find.byType(PdfPageView).first);
     expect(pageRect.left, moreOrLessEquals(800 * 0.75 / 2, epsilon: 1));
+    expect(pageRect.width, moreOrLessEquals(200, epsilon: 1));
+    final second = tester.getRect(find.byType(PdfPageView).at(1));
+    expect(second.top, lessThan(600)); // page 2 visible in the viewport
+    final third = tester.getRect(find.byType(PdfPageView).at(2));
+    expect(third.top, lessThan(600)); // and page 3
 
     // double-tap from zoomed-out returns to exactly 100%
     await tester.tapAt(const Offset(400, 300));

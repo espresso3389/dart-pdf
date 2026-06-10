@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:pdf_cos/pdf_cos.dart';
 
+import 'fonts/cff.dart';
+import 'fonts/encodings.dart';
 import 'fonts/truetype.dart';
 import 'path.dart';
 
@@ -16,14 +18,18 @@ class PdfFontInfo {
     required double defaultWidth,
     required Map<int, String> toUnicode,
     TrueTypeFont? trueType,
+    CffFont? cff,
     Uint8List? cidToGid,
     bool symbolic = false,
+    Map<int, int>? cffCodeToGid,
   })  : _widths = widths,
         _defaultWidth = defaultWidth,
         _toUnicode = toUnicode,
         _trueType = trueType,
+        _cff = cff,
         _cidToGid = cidToGid,
-        _symbolic = symbolic;
+        _symbolic = symbolic,
+        _cffCodeToGid = cffCodeToGid;
 
   final String? baseFont;
 
@@ -36,11 +42,16 @@ class PdfFontInfo {
   final double _defaultWidth;
   final Map<int, String> _toUnicode;
   final TrueTypeFont? _trueType;
+  final CffFont? _cff;
   final Uint8List? _cidToGid;
   final bool _symbolic;
 
+  /// PDF /Encoding (base + Differences) resolved against the CFF charset;
+  /// overrides the font's built-in encoding when present.
+  final Map<int, int>? _cffCodeToGid;
+
   /// True when embedded glyph outlines are available.
-  bool get hasOutlines => _trueType != null;
+  bool get hasOutlines => _trueType != null || _cff != null;
 
   static PdfFontInfo load(CosDocument cos, CosDictionary font) {
     final subtype = font['Subtype'];
@@ -64,6 +75,7 @@ class PdfFontInfo {
     var defaultWidth = 0.5;
     final toUnicode = _parseToUnicode(cos, font['ToUnicode']);
     TrueTypeFont? trueType;
+    CffFont? cff;
     Uint8List? cidToGid;
     var symbolic = false;
 
@@ -83,6 +95,7 @@ class PdfFontInfo {
         final descriptor = cos.resolve(descendant['FontDescriptor']);
         if (descriptor is CosDictionary) {
           trueType = _loadTrueType(cos, descriptor);
+          if (trueType == null) cff = _loadCff(cos, descriptor);
           symbolic = _isSymbolic(cos, descriptor);
         }
         final gidMap = cos.resolve(descendant['CIDToGIDMap']);
@@ -111,8 +124,14 @@ class PdfFontInfo {
           defaultWidth = missing.value * widthScale;
         }
         trueType = _loadTrueType(cos, descriptor);
+        if (trueType == null) cff = _loadCff(cos, descriptor);
         symbolic = _isSymbolic(cos, descriptor);
       }
+    }
+
+    Map<int, int>? cffCodeToGid;
+    if (cff != null && !isCid) {
+      cffCodeToGid = _buildCffEncoding(cos, font, cff);
     }
 
     return PdfFontInfo._(
@@ -122,9 +141,45 @@ class PdfFontInfo {
       defaultWidth: defaultWidth,
       toUnicode: toUnicode,
       trueType: trueType,
+      cff: cff,
       cidToGid: cidToGid,
       symbolic: symbolic,
+      cffCodeToGid: cffCodeToGid,
     );
+  }
+
+  /// When the PDF declares its own /Encoding, codes map by glyph name
+  /// (base encoding + /Differences) through the CFF charset — the font's
+  /// built-in encoding does not apply (§9.6.6.2).
+  static Map<int, int>? _buildCffEncoding(
+      CosDocument cos, CosDictionary font, CffFont cff) {
+    final encoding = cos.resolve(font['Encoding']);
+    if (encoding is! CosName && encoding is! CosDictionary) return null;
+
+    final result = <int, int>{};
+    for (var code = 0; code <= 255; code++) {
+      final name = winAnsiGlyphName(code);
+      if (name == null) continue;
+      final gid = cff.gidForName(name);
+      if (gid != 0) result[code] = gid;
+    }
+    if (encoding is CosDictionary) {
+      final differences = cos.resolve(encoding['Differences']);
+      if (differences is CosArray) {
+        var code = 0;
+        for (final item in differences.items) {
+          final resolved = cos.resolve(item);
+          if (resolved is CosInteger) {
+            code = resolved.value;
+          } else if (resolved is CosName) {
+            final gid = cff.gidForName(resolved.value);
+            if (gid != 0) result[code] = gid;
+            code++;
+          }
+        }
+      }
+    }
+    return result.isEmpty ? null : result;
   }
 
   static TrueTypeFont? _loadTrueType(
@@ -150,11 +205,40 @@ class PdfFontInfo {
     return flags is CosInteger && (flags.value & 4) != 0;
   }
 
+  /// CFF outlines: FontFile3 (/Type1C, /CIDFontType0C, CFF-flavored
+  /// /OpenType), plus FontFile2 streams that turn out to be OTTO.
+  static CffFont? _loadCff(CosDocument cos, CosDictionary descriptor) {
+    for (final key in const ['FontFile3', 'FontFile2']) {
+      final file = cos.resolve(descriptor[key]);
+      if (file is! CosStream) continue;
+      try {
+        final parsed = CffFont.parse(cos.decodeStreamData(file));
+        if (parsed != null) return parsed;
+      } on Exception {
+        // fall through to substitution
+      }
+    }
+    return null;
+  }
+
   /// Real outline for one character code, in em units, or null.
   PdfPath? outlineFor(int code) {
-    final font = _trueType;
-    if (font == null) return null;
-    return font.outlineForGlyph(_gidFor(code));
+    final trueType = _trueType;
+    if (trueType != null) return trueType.outlineForGlyph(_gidFor(code));
+    final cff = _cff;
+    if (cff != null) return cff.outlineForGlyph(_cffGidFor(code));
+    return null;
+  }
+
+  int _cffGidFor(int code) {
+    final cff = _cff!;
+    if (isCid) return cff.gidForCid(code);
+    final fromPdfEncoding = _cffCodeToGid?[code];
+    if (fromPdfEncoding != null) return fromPdfEncoding;
+    final gid = cff.gidForCode(code);
+    if (gid != 0) return gid;
+    // subset fonts without an encoding index glyphs directly
+    return code < cff.numGlyphs ? code : 0;
   }
 
   /// Code → glyph id, per §9.6.6.4 (simple fonts) and §9.7.4.2 (CID fonts).
@@ -199,9 +283,14 @@ class PdfFontInfo {
   double widthOf(int code) {
     final declared = _widths[code];
     if (declared != null) return declared;
-    final font = _trueType;
-    if (font != null) {
-      final advance = font.advanceForGlyph(_gidFor(code));
+    final trueType = _trueType;
+    if (trueType != null) {
+      final advance = trueType.advanceForGlyph(_gidFor(code));
+      if (advance != null && advance > 0) return advance;
+    }
+    final cff = _cff;
+    if (cff != null) {
+      final advance = cff.advanceForGlyph(_cffGidFor(code));
       if (advance != null && advance > 0) return advance;
     }
     return _defaultWidth;

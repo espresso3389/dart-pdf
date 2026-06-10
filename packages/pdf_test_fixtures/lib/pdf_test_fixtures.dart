@@ -278,3 +278,95 @@ Uint8List buildEmbeddedFontPdf() {
   out.add(ascii(buffer.toString()));
   return out.takeBytes();
 }
+
+/// Builds a minimal CFF (Type1C) font: glyph 0 = .notdef, glyph 1 = an
+/// 800x800 square at the origin, mapped to character code 65 ('A') with
+/// advance width 660 (via nominalWidthX 600 + leading operand 60).
+Uint8List buildTestCffFont() {
+  Uint8List u8(int v) => Uint8List.fromList([v & 0xFF]);
+  Uint8List u16(int v) => Uint8List.fromList([(v >> 8) & 0xFF, v & 0xFF]);
+  Uint8List int5(int v) => Uint8List.fromList([
+        29,
+        (v >> 24) & 0xFF,
+        (v >> 16) & 0xFF,
+        (v >> 8) & 0xFF,
+        v & 0xFF,
+      ]);
+  Uint8List joinAll(List<Uint8List> parts) {
+    final b = BytesBuilder();
+    for (final part in parts) {
+      b.add(part);
+    }
+    return b.takeBytes();
+  }
+
+  Uint8List index(List<Uint8List> items) {
+    if (items.isEmpty) return u16(0);
+    final out = BytesBuilder()
+      ..add(u16(items.length))
+      ..add(u8(2)); // offSize 2
+    var offset = 1;
+    out.add(u16(offset));
+    for (final item in items) {
+      offset += item.length;
+      out.add(u16(offset));
+    }
+    for (final item in items) {
+      out.add(item);
+    }
+    return out.takeBytes();
+  }
+
+  // charstrings: .notdef = endchar; square = 60 width, then contour
+  final notdef = Uint8List.fromList([14]);
+  final square = Uint8List.fromList([
+    139 + 60, // width delta 60 over nominalWidthX
+    139, 139, 21, // 0 0 rmoveto
+    249, 180, 6, // 800 hlineto
+    249, 180, 7, // 800 vlineto
+    253, 180, 6, // -800 hlineto
+    14, // endchar
+  ]);
+
+  final header = Uint8List.fromList([1, 0, 4, 2]);
+  final nameIndex = index([ascii('Test')]);
+  final stringIndex = u16(0);
+  final gsubrIndex = u16(0);
+
+  // encoding: format 0, one code: 65 -> gid 1
+  final encoding = Uint8List.fromList([0, 1, 65]);
+  final charstringsIndex = index([notdef, square]);
+  // private dict: defaultWidthX 500 (20), nominalWidthX 600 (21)
+  final privateDict = joinAll([int5(500), u8(20), int5(600), u8(21)]);
+
+  // top dict (fixed-size operands so offsets are computable):
+  // CharStrings (17), Encoding (16), Private (18)
+  Uint8List topDictWith(int charstringsAt, int encodingAt, int privateAt) =>
+      joinAll([
+        int5(charstringsAt), u8(17),
+        int5(encodingAt), u8(16),
+        int5(privateDict.length), int5(privateAt), u8(18),
+      ]);
+
+  final topDictSize = topDictWith(0, 0, 0).length;
+  final topDictIndexSize = index([Uint8List(topDictSize)]).length;
+  final fixedPrefix = header.length +
+      nameIndex.length +
+      topDictIndexSize +
+      stringIndex.length +
+      gsubrIndex.length;
+  final encodingAt = fixedPrefix;
+  final charstringsAt = encodingAt + encoding.length;
+  final privateAt = charstringsAt + charstringsIndex.length;
+
+  return joinAll([
+    header,
+    nameIndex,
+    index([topDictWith(charstringsAt, encodingAt, privateAt)]),
+    stringIndex,
+    gsubrIndex,
+    encoding,
+    charstringsIndex,
+    privateDict,
+  ]);
+}

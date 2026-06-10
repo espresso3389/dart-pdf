@@ -49,14 +49,15 @@ class ImageCollector implements PdfDevice {
 
 /// Decodes image XObjects to [ui.Image]s ahead of the (synchronous) paint.
 ///
-/// Coverage: DCTDecode via the platform codec; CCITTFaxDecode via the
-/// pure-Dart Group 3/4 decoder; Flate/raw DeviceRGB, DeviceGray (8 and
-/// 1 bit) and Indexed samples (1/2/4/8 bit, palettes in RGB, gray, or
-/// CMYK bases including ICCBased); /SMask soft-mask alpha; explicit
-/// /Mask stencil streams; color-key /Mask ranges and /Decode arrays (on
-/// raw samples and on platform-decoded JPEGs); /ImageMask stencils
-/// (decoded as alpha, tinted by the device).
-/// TODO: JPXDecode, JBIG2Decode (no pure-Dart decoders yet).
+/// Coverage: DCTDecode via the platform codec; CCITTFaxDecode and
+/// JBIG2Decode (with /JBIG2Globals) via the pure-Dart decoders;
+/// Flate/raw DeviceRGB, DeviceGray (8 and 1 bit) and Indexed samples
+/// (1/2/4/8 bit, palettes in RGB, gray, or CMYK bases including
+/// ICCBased — real ICC profiles applied); /SMask soft-mask alpha;
+/// explicit /Mask stencil streams; color-key /Mask ranges and /Decode
+/// arrays (on raw samples and on platform-decoded JPEGs); /ImageMask
+/// stencils (decoded as alpha, tinted by the device).
+/// TODO: JPXDecode (no pure-Dart JPEG 2000 decoder yet).
 Future<Map<CosStream, ui.Image>> decodeImages(
     CosDocument cos, Iterable<CosStream> streams) async {
   final out = <CosStream, ui.Image>{};
@@ -112,7 +113,7 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
     if (mask != null) _applyAlpha(rgba, base.width, base.height, mask);
     return _imageFromPixels(rgba, base.width, base.height);
   }
-  if (filters.contains('JPXDecode') || filters.contains('JBIG2Decode')) {
+  if (filters.contains('JPXDecode')) {
     return null;
   }
   // CCITTFaxDecode runs as a regular stream filter (pure-Dart decoder in
@@ -122,7 +123,19 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
   final height = _intOf(cos.resolve(dict['Height']));
   if (width <= 0 || height <= 0) return null;
   final bits = _intOf(cos.resolve(dict['BitsPerComponent']), fallback: 8);
-  final data = cos.decodeStreamData(stream);
+  final Uint8List data;
+  if (filters.contains('JBIG2Decode')) {
+    final decoded = Jbig2Decoder.decode(
+      data: cos.decodeStreamData(stream, stopBeforeFilter: 'JBIG2Decode'),
+      globals: _jbig2Globals(cos, dict),
+      width: width,
+      height: height,
+    );
+    if (decoded == null) return null;
+    data = decoded;
+  } else {
+    data = cos.decodeStreamData(stream);
+  }
 
   final rgba = isMask
       ? _stencilToRgba(cos, dict, data, width, height)
@@ -135,6 +148,31 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
     if (mask != null) _applyAlpha(rgba, width, height, mask);
   }
   return _imageFromPixels(rgba, width, height);
+}
+
+/// The /JBIG2Globals stream from /DecodeParms (dict or filter-aligned
+/// array form), decoded, or null.
+Uint8List? _jbig2Globals(CosDocument cos, CosDictionary dict) {
+  final parms = cos.resolve(dict['DecodeParms'] ?? dict['DP']);
+  CosObject? globalsRef;
+  if (parms is CosDictionary) globalsRef = parms['JBIG2Globals'];
+  if (parms is CosArray) {
+    for (final entry in parms.items) {
+      final resolved = cos.resolve(entry);
+      if (resolved is CosDictionary &&
+          resolved.containsKey('JBIG2Globals')) {
+        globalsRef = resolved['JBIG2Globals'];
+        break;
+      }
+    }
+  }
+  final globals = cos.resolve(globalsRef);
+  if (globals is! CosStream) return null;
+  try {
+    return cos.decodeStreamData(globals);
+  } on Exception {
+    return null;
+  }
 }
 
 /// An explicit /Mask stencil stream (§8.9.6.3): 1-bit samples where 1

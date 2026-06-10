@@ -425,6 +425,46 @@ void main() {
     });
   });
 
+  testWidgets('JBIG2 images decode with globals', (tester) async {
+    await tester.runAsync(() async {
+      // jbig2enc symbol-mode output: globals carry the symbol
+      // dictionary, the page stream the text region (64x24 image with a
+      // black rectangle at x4..20 rows 4..12 among other shapes)
+      final globals = CosStream(
+        CosDictionary({}),
+        Uint8List.fromList(const [
+          0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 41, 0, 0, 3, 255, 253, 255, 2, //
+          254, 254, 254, 0, 0, 0, 4, 0, 0, 0, 4, 85, 82, 55, 183, 56, 30,
+          214, 116, 64, 103, 36, 66, 172, 231, 67, 88, 194, 157, 165, 26,
+          123, 255, 172,
+        ]),
+      );
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(64),
+          'Height': const CosInteger(24),
+          'BitsPerComponent': const CosInteger(1),
+          'ColorSpace': const CosName('DeviceGray'),
+          'Filter': const CosName('JBIG2Decode'),
+          'DecodeParms': CosDictionary({'JBIG2Globals': globals}),
+        }),
+        Uint8List.fromList(const [
+          0, 0, 0, 1, 48, 0, 1, 0, 0, 0, 19, 0, 0, 0, 64, 0, 0, 0, 24, //
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 6, 34, 0, 1, 0, 0,
+          0, 38, 0, 0, 0, 64, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 5, 159, 117, 238, 240, 241, 108, 197, 150, 89, 20,
+          32, 28, 127, 255, 172,
+        ]),
+      );
+      final images = await decodeImages(cos, [image]);
+      final pixels = await pixelsOf(images[image]!);
+      int grayAt(int x, int y) => pixels[(y * 64 + x) * 4];
+      expect(grayAt(0, 0), 255); // background white
+      expect(grayAt(10, 8), 0); // inside the black rectangle
+      expect(grayAt(63, 23), 255);
+    });
+  });
+
   testWidgets('4-bit indexed samples unpack two pixels per byte',
       (tester) async {
     await tester.runAsync(() async {

@@ -3,6 +3,7 @@ import 'package:pdf_document/pdf_document.dart';
 
 import 'color.dart';
 import 'matrix.dart';
+import 'mesh.dart';
 import 'path.dart';
 import 'shading.dart';
 
@@ -121,6 +122,11 @@ abstract interface class PdfDevice {
   /// `fillPath` with [PdfGradient.averageColor].
   void fillPathGradient(
       PdfPath path, PdfFillRule rule, PdfGradient gradient, double alpha);
+
+  /// Paints a Gouraud triangle mesh (mesh shadings, types 4–7). Vertices
+  /// arrive in page space. Non-painting devices can ignore it; simple
+  /// devices may fall back to [PdfMesh.averageColor].
+  void fillMesh(PdfMesh mesh, double alpha);
 
   void strokePath(PdfPath path, PdfColor color, PdfStroke stroke, double alpha);
 

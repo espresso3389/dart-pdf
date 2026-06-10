@@ -11,5 +11,6 @@ export 'src/function.dart';
 export 'src/interpreter.dart';
 export 'src/shading.dart';
 export 'src/matrix.dart';
+export 'src/mesh.dart';
 export 'src/path.dart';
 export 'src/text_extraction.dart';

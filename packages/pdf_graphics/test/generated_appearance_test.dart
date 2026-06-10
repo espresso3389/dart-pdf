@@ -21,6 +21,9 @@ class CountingDevice implements PdfDevice {
   }
 
   @override
+  void fillMesh(PdfMesh mesh, double a) {}
+
+  @override
   void strokePath(
       PdfPath path, PdfColor color, PdfStroke stroke, double alpha) {
     strokes.add(color);

@@ -1,8 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:pdf_cos/pdf_cos.dart';
 
 import 'color.dart';
 import 'function.dart';
 import 'matrix.dart';
+import 'mesh.dart';
 
 /// A gradient ready for a device: stops pre-sampled from the shading's
 /// function, with geometry in the space mapped by [transform].
@@ -55,7 +58,12 @@ class PdfShading {
     required this.domain,
     required this.extendStart,
     required this.extendEnd,
-  });
+    CosDocument? cos,
+    CosStream? stream,
+    CosDictionary? dict,
+  })  : _cos = cos,
+        _stream = stream,
+        _dict = dict;
 
   final int shadingType;
   final List<double> coords;
@@ -64,6 +72,11 @@ class PdfShading {
   final List<double> domain;
   final bool extendStart;
   final bool extendEnd;
+
+  /// Kept for mesh shadings, whose geometry lives in the stream payload.
+  final CosDocument? _cos;
+  final CosStream? _stream;
+  final CosDictionary? _dict;
 
   static PdfShading? parse(CosDocument cos, CosObject? object) {
     final resolved = cos.resolve(object);
@@ -91,12 +104,49 @@ class PdfShading {
       extendEnd: extend is CosArray &&
           extend.length > 1 &&
           extend[1] == const CosBoolean(true),
+      cos: cos,
+      stream: resolved is CosStream ? resolved : null,
+      dict: dict,
     );
   }
 
+  /// Decodes a mesh shading (types 4–7) into triangles in the space
+  /// mapped by [transform]. Null for non-mesh types or broken data.
+  PdfMesh? toMesh(PdfMatrix transform) {
+    final cos = _cos;
+    final stream = _stream;
+    final dict = _dict;
+    if (shadingType < 4 || shadingType > 7) return null;
+    if (cos == null || stream == null || dict == null) return null;
+
+    int intOf(String key, int fallback) {
+      final v = cos.resolve(dict[key]);
+      return v is CosInteger ? v.value : fallback;
+    }
+
+    final Uint8List data;
+    try {
+      data = cos.decodeStreamData(stream);
+    } on Exception {
+      return null;
+    }
+    return PdfMeshParser(
+      data: data,
+      shadingType: shadingType,
+      bitsPerCoordinate: intOf('BitsPerCoordinate', 16),
+      bitsPerComponent: intOf('BitsPerComponent', 8),
+      bitsPerFlag: intOf('BitsPerFlag', 8),
+      decode: _numbers(cos, dict['Decode']),
+      components: components,
+      verticesPerRow: intOf('VerticesPerRow', 0),
+      function: function,
+      transform: transform,
+    ).parse();
+  }
+
   /// Samples the shading into gradient stops. Returns null for shading
-  /// types other than axial (2) and radial (3) — function-based (1) and
-  /// mesh shadings (4-7) are TODO.
+  /// types other than axial (2) and radial (3) — mesh shadings (4-7)
+  /// decode via [toMesh]; function-based (1) is unsupported.
   PdfGradient? toGradient(PdfMatrix transform) {
     final fn = function;
     if (fn == null) return null;

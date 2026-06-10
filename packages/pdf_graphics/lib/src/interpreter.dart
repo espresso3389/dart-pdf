@@ -924,7 +924,9 @@ class PdfInterpreter {
     final dict = _patternDict(pattern);
     if (dict == null) return null;
     final shading = PdfShading.parse(cos, dict['Shading']);
-    return shading?.toGradient(PdfMatrix.identity)?.averageColor;
+    if (shading == null) return null;
+    return shading.toGradient(PdfMatrix.identity)?.averageColor ??
+        shading.toMesh(PdfMatrix.identity)?.averageColor;
   }
 
   void _fillWithPattern(PdfPath path, PdfFillRule rule, CosObject pattern) {
@@ -939,6 +941,14 @@ class PdfInterpreter {
       final gradient = shading?.toGradient(_patternMatrix(dict));
       if (gradient != null) {
         device.fillPathGradient(path, rule, gradient, _state.fillAlpha);
+        return;
+      }
+      final mesh = shading?.toMesh(_patternMatrix(dict));
+      if (mesh != null) {
+        device.save();
+        device.clipPath(path, rule);
+        device.fillMesh(mesh, _state.fillAlpha);
+        device.restore();
       }
       // unsupported shading types: skip rather than paint a wrong solid
       return;
@@ -1044,7 +1054,12 @@ class PdfInterpreter {
         PdfShading.parse(cos, _resource(resources, 'Shading', o[0] as CosName));
     // sh geometry lives in the current user space (§8.7.4.2)
     final gradient = shading?.toGradient(_state.ctm);
-    if (gradient == null) return;
+    if (gradient == null) {
+      // mesh shadings paint their own geometry; the clip bounds them
+      final mesh = shading?.toMesh(_state.ctm);
+      if (mesh != null) device.fillMesh(mesh, _state.fillAlpha);
+      return;
+    }
     // paint across the page; the active canvas clip bounds it
     final box = _pageBox ?? const PdfRect(-1e5, -1e5, 1e5, 1e5);
     final area = PdfPath([

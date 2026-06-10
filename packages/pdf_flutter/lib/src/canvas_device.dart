@@ -142,6 +142,47 @@ class CanvasPdfDevice implements PdfDevice {
   }
 
   @override
+  void fillMesh(PdfMesh mesh, double alpha) {
+    if (mesh.vertices.isEmpty || mesh.triangles.isEmpty) return;
+    final positions = Float32List(mesh.vertices.length * 2);
+    final colors = Int32List(mesh.vertices.length);
+    final a = (alpha.clamp(0.0, 1.0) * 255).round();
+    for (var i = 0; i < mesh.vertices.length; i++) {
+      final v = mesh.vertices[i];
+      positions[i * 2] = v.x;
+      positions[i * 2 + 1] = v.y;
+      colors[i] = (a << 24) |
+          ((v.color.red * 255).round().clamp(0, 255) << 16) |
+          ((v.color.green * 255).round().clamp(0, 255) << 8) |
+          (v.color.blue * 255).round().clamp(0, 255);
+    }
+    // Uint16 indices cap the vertex count; expand huge meshes instead
+    final ui.Vertices vertices;
+    if (mesh.vertices.length <= 0xFFFF) {
+      vertices = ui.Vertices.raw(
+        ui.VertexMode.triangles,
+        positions,
+        colors: colors,
+        indices: Uint16List.fromList(mesh.triangles),
+      );
+    } else {
+      final expanded = Float32List(mesh.triangles.length * 2);
+      final expandedColors = Int32List(mesh.triangles.length);
+      for (var i = 0; i < mesh.triangles.length; i++) {
+        final v = mesh.triangles[i];
+        expanded[i * 2] = positions[v * 2];
+        expanded[i * 2 + 1] = positions[v * 2 + 1];
+        expandedColors[i] = colors[v];
+      }
+      vertices = ui.Vertices.raw(ui.VertexMode.triangles, expanded,
+          colors: expandedColors);
+    }
+    // BlendMode.dst keeps the vertex colors (paint is the src side of
+    // this mode); the paint still carries the PDF blend mode
+    canvas.drawVertices(vertices, BlendMode.dst, Paint()..blendMode = _blend);
+  }
+
+  @override
   void strokePath(
       PdfPath path, PdfColor color, PdfStroke stroke, double alpha) {
     var uiPath = _toUiPath(path, PdfFillRule.nonzero);

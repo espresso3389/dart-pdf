@@ -6,6 +6,7 @@ import 'color.dart';
 import 'device.dart';
 import 'interpreter.dart';
 import 'matrix.dart';
+import 'mesh.dart';
 import 'path.dart';
 import 'shading.dart';
 
@@ -218,6 +219,8 @@ class _ExtractionDevice implements PdfDevice {
   @override
   void fillPathGradient(
       PdfPath path, PdfFillRule rule, PdfGradient gradient, double a) {}
+  @override
+  void fillMesh(PdfMesh mesh, double a) {}
   @override
   void strokePath(PdfPath path, PdfColor color, PdfStroke stroke, double a) {}
   @override

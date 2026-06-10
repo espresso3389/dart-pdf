@@ -99,6 +99,9 @@ class _TextRecorder implements PdfDevice {
   void fillPathGradient(
       PdfPath path, PdfFillRule rule, PdfGradient gradient, double a) {}
   @override
+  void fillMesh(PdfMesh mesh, double a) {}
+
+  @override
   void strokePath(PdfPath path, PdfColor color, PdfStroke stroke, double a) {}
   @override
   void clipPath(PdfPath path, PdfFillRule rule) {}

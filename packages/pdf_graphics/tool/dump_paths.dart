@@ -71,6 +71,9 @@ class _DumpDevice implements PdfDevice {
   }
 
   @override
+  void fillMesh(PdfMesh mesh, double a) {}
+
+  @override
   void strokePath(PdfPath path, PdfColor color, PdfStroke stroke, double a) {
     strokes++;
     if (_shown <= maxOps) {

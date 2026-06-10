@@ -354,13 +354,46 @@ void main() {
     expect(controller.currentPage, greaterThan(0));
     expect(controller.zoom, greaterThan(1)); // scrolling didn't unzoom
 
-    // trackpad pinch-out still collapses the zoom
+    // trackpad pinch-out keeps working — and may pass 100% (2.5 × 0.2)
     final pinch = await tester.createGesture(
         kind: PointerDeviceKind.trackpad, pointer: 22);
     await pinch.panZoomStart(const Offset(400, 300));
     await pinch.panZoomUpdate(const Offset(400, 300), scale: 0.2);
     await tester.pump();
     await pinch.panZoomEnd();
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, moreOrLessEquals(0.5, epsilon: 0.01));
+  });
+
+  testWidgets('zooming out past 100% floors at minZoom and recenters',
+      (tester) async {
+    final controller = await pumpViewer(tester);
+    final pointer = TestPointer(13, PointerDeviceKind.mouse);
+    pointer.hover(const Offset(400, 300));
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+
+    // ctrl+wheel-down passes below fit-width...
+    await tester.sendEventToBinding(pointer.scroll(const Offset(0, 150)));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, lessThan(1));
+    expect(controller.zoom, greaterThan(0.4));
+
+    // ...and floors at minZoom (default 0.25), page centered in the view
+    for (var i = 0; i < 5; i++) {
+      await tester.sendEventToBinding(pointer.scroll(const Offset(0, 600)));
+      await tester.pump();
+    }
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, moreOrLessEquals(0.25, epsilon: 0.001));
+    final pageRect = tester.getRect(find.byType(PdfPageView).first);
+    expect(pageRect.left, moreOrLessEquals(800 * 0.75 / 2, epsilon: 1));
+
+    // double-tap from zoomed-out returns to exactly 100%
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.tapAt(const Offset(400, 300));
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(controller.zoom, 1);
   });

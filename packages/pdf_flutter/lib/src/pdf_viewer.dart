@@ -160,6 +160,7 @@ class PdfViewer extends StatefulWidget {
     this.onAction,
     this.pageOverlayBuilder,
     this.pageSpacing = 12,
+    this.minZoom = 0.25,
     this.maxZoom = 6,
     this.doubleTapZoom = 2.5,
   });
@@ -182,6 +183,10 @@ class PdfViewer extends StatefulWidget {
   final PdfPageOverlayBuilder? pageOverlayBuilder;
 
   final double pageSpacing;
+
+  /// Smallest zoom factor; below 1 the page shrinks past fit-width and
+  /// floats centered in the viewport.
+  final double minZoom;
   final double maxZoom;
   final double doubleTapZoom;
 
@@ -312,12 +317,12 @@ class _PdfViewerState extends State<PdfViewer>
     final scale = matrix.getMaxScaleOnAxis();
     // InteractiveViewer's wheel feel: e^(-delta/200)
     final factor = (scale * math.exp(-event.scrollDelta.dy / 200))
-            .clamp(1.0, widget.maxZoom) /
+            .clamp(widget.minZoom, widget.maxZoom) /
         scale;
     final p = event.localPosition;
     matrix
       ..translateByDouble(p.dx, p.dy, 0, 1)
-      ..scaleByDouble(factor, factor, 1, 1)
+      ..scaleByDouble(factor, factor, factor, 1)
       ..translateByDouble(-p.dx, -p.dy, 0, 1);
     _transform.value = _clampedTransform(matrix);
   }
@@ -751,21 +756,26 @@ class _PdfViewerState extends State<PdfViewer>
   void _onDoubleTap() {
     final details = _doubleTapDetails;
     if (details == null) return;
+    final current = _transform.value.getMaxScaleOnAxis();
     final Matrix4 end;
-    if (_zoomed) {
+    final bool zoomedAfter;
+    if ((current - 1).abs() > 0.01) {
+      // from any zoom — in or out — back to 100%
       end = Matrix4.identity();
+      zoomedAfter = false;
     } else {
       final position = details.localPosition;
       final scale = widget.doubleTapZoom;
       end = Matrix4.identity()
         ..translateByDouble(
             -position.dx * (scale - 1), -position.dy * (scale - 1), 0, 1)
-        ..scaleByDouble(scale, scale, 1, 1);
+        ..scaleByDouble(scale, scale, scale, 1);
+      zoomedAfter = true;
     }
     _zoomAnimation = Matrix4Tween(begin: _transform.value, end: end).animate(
         CurvedAnimation(parent: _zoomAnimator, curve: Curves.easeInOut));
     _zoomAnimator.forward(from: 0);
-    setState(() => _zoomed = !_zoomed);
+    setState(() => _zoomed = zoomedAfter);
   }
 
   // --- trackpad gestures ---
@@ -789,15 +799,15 @@ class _PdfViewerState extends State<PdfViewer>
     final scale = matrix.getMaxScaleOnAxis();
 
     if (event.scale > 0 && event.scale != _trackpadScale) {
-      final factor =
-          (scale * event.scale / _trackpadScale).clamp(1.0, widget.maxZoom) /
-              scale;
+      final factor = (scale * event.scale / _trackpadScale)
+              .clamp(widget.minZoom, widget.maxZoom) /
+          scale;
       _trackpadScale = event.scale;
       // zoom around the gesture's start point, in pre-transform coordinates
       final p = event.localPosition;
       matrix
         ..translateByDouble(p.dx, p.dy, 0, 1)
-        ..scaleByDouble(factor, factor, 1, 1)
+        ..scaleByDouble(factor, factor, factor, 1)
         ..translateByDouble(-p.dx, -p.dy, 0, 1);
     }
 
@@ -824,7 +834,6 @@ class _PdfViewerState extends State<PdfViewer>
     _trackpadVelocity = null;
     final scale = _transform.value.getMaxScaleOnAxis();
     final zoomed = scale > 1.01;
-    if (!zoomed) _transform.value = Matrix4.identity();
     if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
     // hand leftover momentum to the scroll physics (same sign convention
     // as a drag: content follows the fingers)
@@ -836,11 +845,19 @@ class _PdfViewerState extends State<PdfViewer>
     }
   }
 
-  /// Keeps the zoom window over the content: snaps near-1 scales back to
-  /// identity and clamps the translation so no blank edges show.
+  /// Keeps the zoom window over the content: snaps the fit-width seam to
+  /// exactly 1, clamps zoomed-in translations so no blank edges show, and
+  /// centers the shrunken viewport when zoomed out past 100%.
   Matrix4 _clampedTransform(Matrix4 matrix) {
     final scale = matrix.getMaxScaleOnAxis();
-    if (scale <= 1.01) return Matrix4.identity();
+    if ((scale - 1).abs() <= 0.01) return Matrix4.identity();
+    if (scale < 1) {
+      final out = math.max(scale, widget.minZoom);
+      return Matrix4.identity()
+        ..translateByDouble(
+            _viewWidth * (1 - out) / 2, _viewHeight * (1 - out) / 2, 0, 1)
+        ..scaleByDouble(out, out, out, 1);
+    }
     final s = matrix.storage;
     s[12] = s[12].clamp(_viewWidth * (1 - scale), 0.0);
     s[13] = s[13].clamp(_viewHeight * (1 - scale), 0.0);
@@ -901,67 +918,79 @@ class _PdfViewerState extends State<PdfViewer>
                   ..onDoubleTap = _onDoubleTap,
               ),
             },
-            child: InteractiveViewer(
-              transformationController: _transform,
-              maxScale: widget.maxZoom,
-              // wheel zoom is handled in _onPointerSignal; e^(-dy/∞) = 1
-              // disables InteractiveViewer's own (modifier-blind) version
-              scaleFactor: double.maxFinite,
-              minScale: 1,
-              // vertical drags scroll the list; horizontal panning engages
-              // once zoomed in
-              panEnabled: _zoomed,
-              onInteractionEnd: (_) {
-                final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
-                if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
-              },
-              // all trackpad pan-zoom gestures are handled here, never by
-              // the list's drag recognizer (whose iOS-style velocity
-              // tracker asserts on macOS trackpad timestamps) nor by
-              // InteractiveViewer (which would pan only within the zoom
-              // window). Innermost recognizers win the arena, and this one
-              // accepts eagerly.
-              child: RawGestureDetector(
-                gestures: <Type, GestureRecognizerFactory>{
-                  _TrackpadPanRecognizer: GestureRecognizerFactoryWithHandlers<
-                      _TrackpadPanRecognizer>(
-                    () => _TrackpadPanRecognizer(debugOwner: this),
-                    (recognizer) => recognizer
-                      ..onStart = _onTrackpadPanZoomStart
-                      ..onUpdate = _onTrackpadPanZoomUpdate
-                      ..onEnd = _onTrackpadPanZoomEnd,
-                  ),
+            child: ColoredBox(
+              // the canvas color behind the page: visible as margins when
+              // zoomed out past fit-width
+              color: const Color(0xFF404347),
+              child: InteractiveViewer(
+                transformationController: _transform,
+                maxScale: widget.maxZoom,
+                // wheel zoom is handled in _onPointerSignal; e^(-dy/∞) = 1
+                // disables InteractiveViewer's own (modifier-blind) version
+                scaleFactor: double.maxFinite,
+                minScale: widget.minZoom,
+                // scaling below "cover" needs a free boundary; our own
+                // clamping replaces InteractiveViewer's (live for wheel and
+                // trackpad, on gesture end for touch)
+                boundaryMargin: const EdgeInsets.all(double.infinity),
+                // vertical drags scroll the list; horizontal panning engages
+                // once zoomed in
+                panEnabled: _zoomed,
+                onInteractionEnd: (_) {
+                  _transform.value =
+                      _clampedTransform(_transform.value.clone());
+                  final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
+                  if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
                 },
-                // plain wheel events the list can't use (at its extents)
-                // must not fall through to InteractiveViewer's wheel-zoom
-                child: Listener(
-                  onPointerSignal: _onPointerSignal,
-                  // selection drags: scroll wheels and touch scrolling go to
-                  // the list (its drag recognizers win the arena for touch);
-                  // mouse drags fall through to this detector
-                  child: MouseRegion(
-                    cursor: _hoverCursor,
-                    onHover: _onHover,
-                    onExit: (_) {
-                      if (_hoverCursor != MouseCursor.defer) {
-                        setState(() => _hoverCursor = MouseCursor.defer);
-                      }
-                    },
-                    child: Listener(
-                      onPointerDown: _onPointerDown,
-                      onPointerUp: _onPointerUp,
-                      child: GestureDetector(
-                        onTapUp: _onTapUp,
-                        onPanStart: _onSelectionStart,
-                        onPanUpdate: _onSelectionUpdate,
-                        child: ColoredBox(
-                          color: const Color(0xFF404347),
-                          // with ctrl/cmd held the list stops claiming wheel
-                          // events, so they reach the InteractiveViewer, which
-                          // zooms around the pointer
-                          child: IgnorePointer(
-                            ignoring: _zoomModifierDown,
-                            child: list,
+                // all trackpad pan-zoom gestures are handled here, never by
+                // the list's drag recognizer (whose iOS-style velocity
+                // tracker asserts on macOS trackpad timestamps) nor by
+                // InteractiveViewer (which would pan only within the zoom
+                // window). Innermost recognizers win the arena, and this one
+                // accepts eagerly.
+                child: RawGestureDetector(
+                  gestures: <Type, GestureRecognizerFactory>{
+                    _TrackpadPanRecognizer:
+                        GestureRecognizerFactoryWithHandlers<
+                            _TrackpadPanRecognizer>(
+                      () => _TrackpadPanRecognizer(debugOwner: this),
+                      (recognizer) => recognizer
+                        ..onStart = _onTrackpadPanZoomStart
+                        ..onUpdate = _onTrackpadPanZoomUpdate
+                        ..onEnd = _onTrackpadPanZoomEnd,
+                    ),
+                  },
+                  // plain wheel events the list can't use (at its extents)
+                  // must not fall through to InteractiveViewer's wheel-zoom
+                  child: Listener(
+                    onPointerSignal: _onPointerSignal,
+                    // selection drags: scroll wheels and touch scrolling go to
+                    // the list (its drag recognizers win the arena for touch);
+                    // mouse drags fall through to this detector
+                    child: MouseRegion(
+                      cursor: _hoverCursor,
+                      onHover: _onHover,
+                      onExit: (_) {
+                        if (_hoverCursor != MouseCursor.defer) {
+                          setState(() => _hoverCursor = MouseCursor.defer);
+                        }
+                      },
+                      child: Listener(
+                        onPointerDown: _onPointerDown,
+                        onPointerUp: _onPointerUp,
+                        child: GestureDetector(
+                          onTapUp: _onTapUp,
+                          onPanStart: _onSelectionStart,
+                          onPanUpdate: _onSelectionUpdate,
+                          child: ColoredBox(
+                            color: const Color(0xFF404347),
+                            // with ctrl/cmd held the list stops claiming wheel
+                            // events, so they reach the InteractiveViewer, which
+                            // zooms around the pointer
+                            child: IgnorePointer(
+                              ignoring: _zoomModifierDown,
+                              child: list,
+                            ),
                           ),
                         ),
                       ),

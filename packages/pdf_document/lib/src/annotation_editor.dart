@@ -1,5 +1,12 @@
 part of 'editor.dart';
 
+/// The drawn width of an ink segment at normalized [pressure] (0–1) for a
+/// base [strokeWidth]: 0.4× when barely touching up to 1.6× at full
+/// pressure, the base width at 0.5. Shared by [PdfAnnotationEditing.addInk]
+/// appearances and live stroke previews so they look identical.
+double pdfInkStrokeWidth(double strokeWidth, double pressure) =>
+    strokeWidth * (0.4 + 1.2 * pressure.clamp(0.0, 1.0));
+
 /// Annotation authoring (§12.5): each method creates an annotation with a
 /// generated appearance stream (/AP → /N), so the result displays the same
 /// in this renderer and in other viewers.
@@ -34,8 +41,8 @@ extension PdfAnnotationEditing on PdfEditor {
       _markupDict('Highlight', rect, color, contents, author)
         ..['QuadPoints'] = _quadPoints(quads),
       _form(rect, w,
-          resources: _resources(
-              extGState: _alphaState(opacity, multiply: true))),
+          resources:
+              _resources(extGState: _alphaState(opacity, multiply: true))),
     );
   }
 
@@ -45,8 +52,9 @@ extension PdfAnnotationEditing on PdfEditor {
           double opacity = 1,
           String? contents,
           String? author}) =>
-      _addLineMarkup('Underline', pageIndex, quads, color, opacity, contents,
-          author, atHeight: 0.08);
+      _addLineMarkup(
+          'Underline', pageIndex, quads, color, opacity, contents, author,
+          atHeight: 0.08);
 
   /// Adds a strike-out through each quad in [quads].
   void addStrikeOut(int pageIndex, List<PdfRect> quads,
@@ -54,8 +62,9 @@ extension PdfAnnotationEditing on PdfEditor {
           double opacity = 1,
           String? contents,
           String? author}) =>
-      _addLineMarkup('StrikeOut', pageIndex, quads, color, opacity, contents,
-          author, atHeight: 0.45);
+      _addLineMarkup(
+          'StrikeOut', pageIndex, quads, color, opacity, contents, author,
+          atHeight: 0.45);
 
   /// Adds a squiggly (jagged) underline beneath each quad in [quads].
   void addSquiggly(int pageIndex, List<PdfRect> quads,
@@ -89,17 +98,46 @@ extension PdfAnnotationEditing on PdfEditor {
 
   /// Adds a freehand ink annotation. Each stroke is a polyline of
   /// `(x, y)` points in page space.
+  ///
+  /// [pressures] optionally gives one normalized pressure (0–1) per point
+  /// of the corresponding stroke (a null entry leaves that stroke at the
+  /// uniform [strokeWidth]). Pressured strokes render with a varying
+  /// width — [pdfInkStrokeWidth] per segment — the natural look for
+  /// stylus (Apple Pencil) drawings. The /InkList always stores the
+  /// centerline points; the variable width lives in the appearance
+  /// stream, which conforming viewers prefer.
   void addInk(
     int pageIndex,
     List<List<(double, double)>> strokes, {
     int color = 0xD02020,
     double strokeWidth = 2,
     double opacity = 1,
+    List<List<double>?>? pressures,
     String? contents,
     String? author,
   }) {
     if (strokes.isEmpty || strokes.any((s) => s.isEmpty)) {
       throw ArgumentError.value(strokes, 'strokes', 'must be non-empty');
+    }
+    if (pressures != null &&
+        (pressures.length != strokes.length ||
+            [
+              for (var i = 0; i < strokes.length; i++)
+                if (pressures[i] != null &&
+                    pressures[i]!.length != strokes[i].length)
+                  i
+            ].isNotEmpty)) {
+      throw ArgumentError.value(
+          pressures, 'pressures', 'must parallel strokes point for point');
+    }
+    var maxWidth = strokeWidth;
+    if (pressures != null) {
+      for (final list in pressures) {
+        for (final p in list ?? const <double>[]) {
+          final width = pdfInkStrokeWidth(strokeWidth, p);
+          if (width > maxWidth) maxWidth = width;
+        }
+      }
     }
     var minX = double.infinity, minY = double.infinity;
     var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
@@ -111,9 +149,8 @@ extension PdfAnnotationEditing on PdfEditor {
         if (y > maxY) maxY = y;
       }
     }
-    final pad = strokeWidth / 2 + 1;
-    final rect =
-        PdfRect(minX - pad, minY - pad, maxX + pad, maxY + pad);
+    final pad = maxWidth / 2 + 1;
+    final rect = PdfRect(minX - pad, minY - pad, maxX + pad, maxY + pad);
 
     final w = ContentWriter();
     final gs = _alphaState(opacity);
@@ -122,17 +159,42 @@ extension PdfAnnotationEditing on PdfEditor {
       ..strokeColor(color)
       ..lineWidth(strokeWidth)
       ..roundLines();
-    for (final stroke in strokes) {
+    for (var s = 0; s < strokes.length; s++) {
+      final stroke = strokes[s];
+      final pressure = pressures?[s];
       final (x0, y0) = stroke.first;
-      w.moveTo(x0, y0);
+      if (pressure == null) {
+        w.moveTo(x0, y0);
+        if (stroke.length == 1) {
+          // a dot: zero-length segment with round caps paints a circle
+          w.lineTo(x0, y0);
+        }
+        for (final (x, y) in stroke.skip(1)) {
+          w.lineTo(x, y);
+        }
+        w.stroke();
+        continue;
+      }
       if (stroke.length == 1) {
-        // a dot: zero-length segment with round caps paints a circle
-        w.lineTo(x0, y0);
+        w
+          ..lineWidth(pdfInkStrokeWidth(strokeWidth, pressure.first))
+          ..moveTo(x0, y0)
+          ..lineTo(x0, y0)
+          ..stroke();
+        continue;
       }
-      for (final (x, y) in stroke.skip(1)) {
-        w.lineTo(x, y);
+      // one stroked segment per point pair, each at its own width; the
+      // round caps and joins hide the seams
+      for (var i = 0; i < stroke.length - 1; i++) {
+        final (xa, ya) = stroke[i];
+        final (xb, yb) = stroke[i + 1];
+        w
+          ..lineWidth(pdfInkStrokeWidth(
+              strokeWidth, (pressure[i] + pressure[i + 1]) / 2))
+          ..moveTo(xa, ya)
+          ..lineTo(xb, yb)
+          ..stroke();
       }
-      w.stroke();
     }
 
     _addAnnotation(
@@ -161,8 +223,8 @@ extension PdfAnnotationEditing on PdfEditor {
     String? contents,
     String? author,
   }) =>
-      _addShape('Square', pageIndex, rect, strokeColor, strokeWidth,
-          fillColor, opacity, contents, author);
+      _addShape('Square', pageIndex, rect, strokeColor, strokeWidth, fillColor,
+          opacity, contents, author);
 
   /// Adds an ellipse annotation inscribed in [rect]. At least one of
   /// [strokeColor] and [fillColor] must be given.
@@ -176,8 +238,8 @@ extension PdfAnnotationEditing on PdfEditor {
     String? contents,
     String? author,
   }) =>
-      _addShape('Circle', pageIndex, rect, strokeColor, strokeWidth,
-          fillColor, opacity, contents, author);
+      _addShape('Circle', pageIndex, rect, strokeColor, strokeWidth, fillColor,
+          opacity, contents, author);
 
   /// Adds a free-text annotation: [text] rendered directly on the page in
   /// 12pt-default Helvetica, wrapped to fit [rect] and clipped to it.
@@ -228,7 +290,8 @@ extension PdfAnnotationEditing on PdfEditor {
       ..endText()
       ..restore();
 
-    final da = '${ContentWriter.rgbComponents(color).map(ContentWriter.fmt).join(' ')} rg '
+    final da =
+        '${ContentWriter.rgbComponents(color).map(ContentWriter.fmt).join(' ')} rg '
         '/Helv ${ContentWriter.fmt(fontSize)} Tf';
     _addAnnotation(
       pageIndex,
@@ -318,8 +381,7 @@ extension PdfAnnotationEditing on PdfEditor {
       _markupDict('Stamp', rect, color, text, author),
       _form(rect, w,
           resources: _resources(
-              extGState: gs,
-              font: _helvetica(bold: true, name: 'HelvB'))),
+              extGState: gs, font: _helvetica(bold: true, name: 'HelvB'))),
     );
   }
 
@@ -367,8 +429,7 @@ extension PdfAnnotationEditing on PdfEditor {
     final ink = document.cos.resolve(dict['InkList']);
     if (ink is CosArray) {
       dict['InkList'] = CosArray([
-        for (final stroke in ink.items)
-          _shiftPoints(stroke, dx, dy) ?? stroke,
+        for (final stroke in ink.items) _shiftPoints(stroke, dx, dy) ?? stroke,
       ]);
     }
     _markAnnotationChanged(pageIndex, dict);
@@ -384,7 +445,9 @@ extension PdfAnnotationEditing on PdfEditor {
   /// /Rect (§12.5.5), stretching the existing artwork.
   void resizeAnnotation(int pageIndex, PdfAnnotation annotation, PdfRect to) {
     final from = annotation.rect;
-    if (from.width <= 0 || from.height <= 0 || to.width <= 0 ||
+    if (from.width <= 0 ||
+        from.height <= 0 ||
+        to.width <= 0 ||
         to.height <= 0) {
       throw ArgumentError('resizeAnnotation needs non-degenerate rects');
     }
@@ -524,8 +587,8 @@ extension PdfAnnotationEditing on PdfEditor {
       xObjects[name] = cos.referenceTo(form) ?? _updater.addObject(form);
       w
         ..save()
-        ..concatMatrix(sx, 0, 0, sy, rect.left - minX * sx,
-            rect.bottom - minY * sy)
+        ..concatMatrix(
+            sx, 0, 0, sy, rect.left - minX * sx, rect.bottom - minY * sy)
         ..drawXObject(name)
         ..restore();
       flattened.add(annot.dict);
@@ -672,8 +735,8 @@ extension PdfAnnotationEditing on PdfEditor {
         for (final c in ContentWriter.rgbComponents(fillColor)) CosReal(c),
       ]);
     }
-    _addAnnotation(pageIndex, dict,
-        _form(rect, w, resources: _resources(extGState: gs)));
+    _addAnnotation(
+        pageIndex, dict, _form(rect, w, resources: _resources(extGState: gs)));
   }
 
   /// The common annotation dictionary: /C carries [color], /F sets Print

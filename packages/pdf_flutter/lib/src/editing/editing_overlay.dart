@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:pdf_document/pdf_document.dart';
 
 import '../page_geometry.dart';
+import '../renderer.dart';
 import 'editing_controller.dart';
 import 'text_prompt.dart';
 
@@ -36,9 +37,14 @@ class EditingPageOverlay extends StatefulWidget {
 typedef _Handle = ({int dx, int dy});
 
 const List<_Handle> _handles = [
-  (dx: -1, dy: -1), (dx: 0, dy: -1), (dx: 1, dy: -1),
-  (dx: -1, dy: 0), (dx: 1, dy: 0),
-  (dx: -1, dy: 1), (dx: 0, dy: 1), (dx: 1, dy: 1),
+  (dx: -1, dy: -1),
+  (dx: 0, dy: -1),
+  (dx: 1, dy: -1),
+  (dx: -1, dy: 0),
+  (dx: 1, dy: 0),
+  (dx: -1, dy: 1),
+  (dx: 0, dy: 1),
+  (dx: 1, dy: 1),
 ];
 
 const double _handleSize = 8;
@@ -52,6 +58,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
 
   // ink
   List<(double, double)>? _activeStroke;
+  List<double>? _activeStrokePressures;
+
+  /// The latest normalized pressure of the pointer being tracked, or null
+  /// for devices that don't report pressure (finger, mouse).
+  double? _pointerPressure;
 
   // select-tool drags
   Offset? _moveStart;
@@ -63,7 +74,35 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
 
   PdfEditingController get _controller => widget.controller;
   PdfPageGeometry get _geometry => widget.geometry;
-  PdfEditTool get _tool => _controller.tool!;
+
+  /// Null only while the eyedropper is armed without a tool.
+  PdfEditTool? get _tool => _controller.tool;
+
+  static double? _normalizedPressure(PointerEvent event) =>
+      event.pressureMax > event.pressureMin
+          ? ((event.pressure - event.pressureMin) /
+                  (event.pressureMax - event.pressureMin))
+              .clamp(0.0, 1.0)
+          : null;
+
+  /// Raw-pointer bookkeeping the pan callbacks can't see: the pressure
+  /// stream, and stylus detection for palm rejection.
+  void _onPointerDown(PointerDownEvent event) {
+    _pointerPressure = _normalizedPressure(event);
+    if (_tool == PdfEditTool.ink &&
+        _controller.fingerDrawsInk &&
+        (event.kind == PointerDeviceKind.stylus ||
+            event.kind == PointerDeviceKind.invertedStylus)) {
+      // an Apple Pencil (or other stylus) is in play: from now on the
+      // pen draws and fingers scroll, until the user toggles it back
+      _controller.fingerDrawsInk = false;
+    }
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    final pressure = _normalizedPressure(event);
+    if (pressure != null) _pointerPressure = pressure;
+  }
 
   /// The selected annotation's view rect when it lives on this page.
   Rect? get _selectedViewRect {
@@ -123,6 +162,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   void _panStart(DragStartDetails details) {
     final position = details.localPosition;
     switch (_tool) {
+      case null:
+        break; // eyedropper only — taps, no drags
       case PdfEditTool.select:
         final selected = _selectedViewRect;
         if (selected == null) return;
@@ -141,8 +182,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
           });
         }
       case PdfEditTool.ink:
-        setState(
-            () => _activeStroke = [_geometry.toPagePoint(position)]);
+        final pressure = _pointerPressure;
+        setState(() {
+          _activeStroke = [_geometry.toPagePoint(position)];
+          // the first event decides: a pressure device varies the whole
+          // stroke, anything else stays uniform
+          _activeStrokePressures = pressure == null ? null : [pressure];
+        });
       case PdfEditTool.rectangle ||
             PdfEditTool.ellipse ||
             PdfEditTool.freeText ||
@@ -167,7 +213,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     } else if (_moveStart != null) {
       setState(() => _moveCurrent = position);
     } else if (_activeStroke != null) {
-      setState(() => _activeStroke!.add(_geometry.toPagePoint(position)));
+      setState(() {
+        _activeStroke!.add(_geometry.toPagePoint(position));
+        _activeStrokePressures
+            ?.add(_pointerPressure ?? _activeStrokePressures!.last);
+      });
     } else if (_dragStart != null) {
       setState(() => _dragCurrent = position);
     }
@@ -175,6 +225,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
 
   void _panEnd(DragEndDetails details) {
     final stroke = _activeStroke;
+    final strokePressures = _activeStrokePressures;
     final dragStart = _dragStart;
     final dragCurrent = _dragCurrent;
     final moveStart = _moveStart;
@@ -182,6 +233,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     final resizeRect = _resizeHandle != null ? _resizeRect : null;
     setState(() {
       _activeStroke = null;
+      _activeStrokePressures = null;
       _dragStart = null;
       _dragCurrent = null;
       _moveStart = null;
@@ -199,7 +251,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       final (x1, y1) = _geometry.toPagePoint(moveCurrent);
       _controller.moveSelected(x1 - x0, y1 - y0);
     } else if (stroke != null && stroke.isNotEmpty) {
-      _controller.addInkStroke(widget.pageIndex, stroke);
+      _controller.addInkStroke(widget.pageIndex, stroke,
+          pressures: strokePressures);
     } else if (dragStart != null && dragCurrent != null) {
       final viewRect = Rect.fromPoints(dragStart, dragCurrent);
       if (viewRect.width < 4 || viewRect.height < 4) return; // a click
@@ -228,9 +281,25 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     }
   }
 
+  /// Samples the rendered page color under the eyedropper tap. The page
+  /// raster at scale 1 shares the view's orientation, so view → raster is
+  /// just the geometry scale.
+  Future<void> _pickColor(Offset position) async {
+    final page = _controller.document.page(widget.pageIndex);
+    final color =
+        await PdfPageRenderer.sampleColor(page, position / _geometry.scale);
+    if (color != null) _controller.finishColorPick(color);
+  }
+
   Future<void> _onTapUp(TapUpDetails details) async {
+    if (_controller.isPickingColor) {
+      await _pickColor(details.localPosition);
+      return;
+    }
     final (x, y) = _geometry.toPagePoint(details.localPosition);
     switch (_tool) {
+      case null:
+        break;
       case PdfEditTool.select:
         _controller.selectAnnotationAt(widget.pageIndex, x, y);
       case PdfEditTool.content:
@@ -247,7 +316,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
 
   void _onHover(PointerHoverEvent event) {
     final MouseCursor cursor;
-    if (_tool == PdfEditTool.select) {
+    if (_controller.isPickingColor) {
+      cursor = SystemMouseCursors.precise;
+    } else if (_tool == PdfEditTool.select) {
       final selected = _selectedViewRect;
       final handle =
           selected == null ? null : _handleAt(selected, event.localPosition);
@@ -258,8 +329,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
           (-1, -1) || (1, 1) => SystemMouseCursors.resizeUpLeftDownRight,
           _ => SystemMouseCursors.resizeUpRightDownLeft,
         };
-      } else if (selected != null &&
-          selected.contains(event.localPosition)) {
+      } else if (selected != null && selected.contains(event.localPosition)) {
         cursor = SystemMouseCursors.move;
       } else {
         cursor = SystemMouseCursors.basic;
@@ -268,12 +338,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       cursor = SystemMouseCursors.click;
     } else if (_tool == PdfEditTool.content) {
       final (x, y) = _geometry.toPagePoint(event.localPosition);
-      cursor = _controller
-              .elementsOn(widget.pageIndex)
-              .elementsAt(x, y)
-              .isNotEmpty
-          ? SystemMouseCursors.click
-          : SystemMouseCursors.basic;
+      cursor =
+          _controller.elementsOn(widget.pageIndex).elementsAt(x, y).isNotEmpty
+              ? SystemMouseCursors.click
+              : SystemMouseCursors.basic;
     } else {
       cursor = SystemMouseCursors.precise;
     }
@@ -283,45 +351,65 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   @override
   Widget build(BuildContext context) {
     final selected = _selectedViewRect;
-    final moveDelta = _resizeHandle == null &&
-            _moveStart != null &&
-            _moveCurrent != null
-        ? _moveCurrent! - _moveStart!
-        : Offset.zero;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      // anchor drags at the press point, not where the recognizer won the
-      // arena — a shape should start exactly where the pointer went down
-      dragStartBehavior: DragStartBehavior.down,
-      onPanStart: _panStart,
-      onPanUpdate: _panUpdate,
-      onPanEnd: _panEnd,
-      onTapUp: _onTapUp,
-      child: MouseRegion(
-        cursor: _cursor,
-        onHover: _onHover,
-        child: CustomPaint(
-          painter: _EditingPreviewPainter(
-            tool: _tool,
-            color: _controller.color,
-            strokeWidth: _controller.strokeWidth * _geometry.scale,
-            geometry: _geometry,
-            strokes: [
-              ..._controller.strokesOn(widget.pageIndex),
-              if (_activeStroke != null) _activeStroke!,
-            ],
-            dragRect: _dragStart != null && _dragCurrent != null
-                ? Rect.fromPoints(_dragStart!, _dragCurrent!)
+    final moveDelta =
+        _resizeHandle == null && _moveStart != null && _moveCurrent != null
+            ? _moveCurrent! - _moveStart!
+            : Offset.zero;
+    return Listener(
+      // raw events carry what pan callbacks drop: pressure and the
+      // device kind (for Apple Pencil palm rejection)
+      onPointerDown: _onPointerDown,
+      onPointerMove: _onPointerMove,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        // with finger drawing off, touch falls through to the scroll
+        // view and only pen-like devices reach the ink recognizers
+        supportedDevices:
+            _tool == PdfEditTool.ink && !_controller.fingerDrawsInk
+                ? const {
+                    PointerDeviceKind.stylus,
+                    PointerDeviceKind.invertedStylus,
+                    PointerDeviceKind.mouse,
+                    PointerDeviceKind.trackpad,
+                  }
                 : null,
-            selectionRect: _resizeHandle != null
-                ? _resizeRect
-                : selected?.shift(moveDelta),
-            showHandles: selected != null &&
-                _controller.canResizeSelected &&
-                _moveStart == null,
-            elementRect: _selectedElementViewRect,
+        // anchor drags at the press point, not where the recognizer won the
+        // arena — a shape should start exactly where the pointer went down
+        dragStartBehavior: DragStartBehavior.down,
+        onPanStart: _panStart,
+        onPanUpdate: _panUpdate,
+        onPanEnd: _panEnd,
+        onTapUp: _onTapUp,
+        child: MouseRegion(
+          cursor: _cursor,
+          onHover: _onHover,
+          child: CustomPaint(
+            painter: _EditingPreviewPainter(
+              tool: _tool,
+              color: _controller.color,
+              strokeWidth: _controller.strokeWidth * _geometry.scale,
+              geometry: _geometry,
+              strokes: [
+                ..._controller.strokesOn(widget.pageIndex),
+                if (_activeStroke != null) _activeStroke!,
+              ],
+              pressures: [
+                ..._controller.strokePressuresOn(widget.pageIndex),
+                if (_activeStroke != null) _activeStrokePressures,
+              ],
+              dragRect: _dragStart != null && _dragCurrent != null
+                  ? Rect.fromPoints(_dragStart!, _dragCurrent!)
+                  : null,
+              selectionRect: _resizeHandle != null
+                  ? _resizeRect
+                  : selected?.shift(moveDelta),
+              showHandles: selected != null &&
+                  _controller.canResizeSelected &&
+                  _moveStart == null,
+              elementRect: _selectedElementViewRect,
+            ),
+            size: Size.infinite,
           ),
-          size: Size.infinite,
         ),
       ),
     );
@@ -335,17 +423,23 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.strokeWidth,
     required this.geometry,
     required this.strokes,
+    required this.pressures,
     required this.dragRect,
     required this.selectionRect,
     required this.showHandles,
     required this.elementRect,
   });
 
-  final PdfEditTool tool;
+  final PdfEditTool? tool;
   final Color color;
   final double strokeWidth;
   final PdfPageGeometry geometry;
   final List<List<(double, double)>> strokes;
+
+  /// Parallels [strokes]: per-point normalized pressures, or null for a
+  /// uniform-width stroke.
+  final List<List<double>?> pressures;
+
   final Rect? dragRect;
   final Rect? selectionRect;
   final bool showHandles;
@@ -366,11 +460,32 @@ class _EditingPreviewPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
 
-    for (final stroke in strokes) {
+    for (var s = 0; s < strokes.length; s++) {
+      final stroke = strokes[s];
+      final pressure = s < pressures.length ? pressures[s] : null;
       if (stroke.length == 1) {
         final p = geometry.toViewOffset(stroke.single.$1, stroke.single.$2);
-        canvas.drawCircle(p, strokeWidth / 2,
-            Paint()..color = color);
+        final width = pressure == null
+            ? strokeWidth
+            : pdfInkStrokeWidth(strokeWidth, pressure.first);
+        canvas.drawCircle(p, width / 2, Paint()..color = color);
+        continue;
+      }
+      if (pressure != null) {
+        // matches the committed appearance: a stroked segment per point
+        // pair at its own pressure-mapped width, round caps as the seams
+        final segment = Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round;
+        for (var i = 0; i < stroke.length - 1; i++) {
+          final (xa, ya) = stroke[i];
+          final (xb, yb) = stroke[i + 1];
+          segment.strokeWidth = pdfInkStrokeWidth(
+              strokeWidth, (pressure[i] + pressure[i + 1]) / 2);
+          canvas.drawLine(geometry.toViewOffset(xa, ya),
+              geometry.toViewOffset(xb, yb), segment);
+        }
         continue;
       }
       final path = Path();
@@ -420,8 +535,7 @@ class _EditingPreviewPainter extends CustomPainter {
             box.center.dx + handle.dx * box.width / 2,
             box.center.dy + handle.dy * box.height / 2,
           );
-          final knob =
-              Rect.fromCircle(center: center, radius: _handleSize / 2);
+          final knob = Rect.fromCircle(center: center, radius: _handleSize / 2);
           canvas.drawRect(knob, fill);
           canvas.drawRect(knob, stroke);
         }

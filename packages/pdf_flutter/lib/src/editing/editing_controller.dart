@@ -134,9 +134,8 @@ class PdfEditingController extends ChangeNotifier {
     _document = PdfDocument.open(bytes, password: _password);
     // annotations keep their /Annots slot across move/resize edits, so a
     // still-valid selection survives the document swap
-    _selected = selected != null && _annotationAt(selected) != null
-        ? selected
-        : null;
+    _selected =
+        selected != null && _annotationAt(selected) != null ? selected : null;
     _invalidateElements();
     notifyListeners();
     return true;
@@ -204,20 +203,76 @@ class PdfEditingController extends ChangeNotifier {
   int get _colorValue => _color.toARGB32() & 0xFFFFFF;
 
   // ---------------------------------------------------------------------
+  // eyedropper
+
+  bool _pickingColor = false;
+
+  /// Whether the eyedropper is armed: the next tap on a page samples the
+  /// rendered color there and becomes [color].
+  bool get isPickingColor => _pickingColor;
+
+  /// Arms the eyedropper. The viewer's page overlays take the next tap.
+  void startColorPick() {
+    if (_pickingColor) return;
+    _pickingColor = true;
+    notifyListeners();
+  }
+
+  void cancelColorPick() {
+    if (!_pickingColor) return;
+    _pickingColor = false;
+    notifyListeners();
+  }
+
+  /// Disarms the eyedropper and adopts [picked] (forced opaque — alpha is
+  /// [opacity]'s job) as the annotation [color].
+  void finishColorPick(Color picked) {
+    _pickingColor = false;
+    _color = Color(0xFF000000 | (picked.toARGB32() & 0xFFFFFF));
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------------
   // ink
 
   final Map<int, List<List<(double, double)>>> _ink = {};
+  final Map<int, List<List<double>?>> _inkPressures = {};
+
+  bool _fingerDrawsInk = true;
+
+  /// Whether touch pointers draw with the ink tool. When false they
+  /// scroll and zoom as usual and only stylus (and mouse) input draws —
+  /// palm rejection. The viewer turns this off automatically the first
+  /// time a stylus (Apple Pencil) touches a page with the ink tool armed.
+  bool get fingerDrawsInk => _fingerDrawsInk;
+
+  set fingerDrawsInk(bool value) {
+    if (value == _fingerDrawsInk) return;
+    _fingerDrawsInk = value;
+    notifyListeners();
+  }
 
   /// Drawn-but-uncommitted ink strokes on [pageIndex], in page space.
   List<List<(double, double)>> strokesOn(int pageIndex) =>
       List.unmodifiable(_ink[pageIndex] ?? const []);
 
+  /// Per-point normalized pressures paralleling [strokesOn] — null for
+  /// strokes drawn without pressure (finger, mouse).
+  List<List<double>?> strokePressuresOn(int pageIndex) =>
+      List.unmodifiable(_inkPressures[pageIndex] ?? const []);
+
   bool get hasPendingInk => _ink.values.any((s) => s.isNotEmpty);
 
   /// Buffers one drawn stroke; [finishInk] commits the buffer.
-  void addInkStroke(int pageIndex, List<(double, double)> stroke) {
+  /// [pressures], when given, must hold one 0–1 value per stroke point.
+  void addInkStroke(int pageIndex, List<(double, double)> stroke,
+      {List<double>? pressures}) {
     if (stroke.isEmpty) return;
+    assert(pressures == null || pressures.length == stroke.length);
     _ink.putIfAbsent(pageIndex, () => []).add(List.of(stroke));
+    _inkPressures
+        .putIfAbsent(pageIndex, () => [])
+        .add(pressures == null ? null : List.of(pressures));
     notifyListeners();
   }
 
@@ -225,14 +280,17 @@ class PdfEditingController extends ChangeNotifier {
   void finishInk() {
     if (!hasPendingInk) return;
     final strokes = Map.of(_ink);
+    final pressures = Map.of(_inkPressures);
     _ink.clear();
+    _inkPressures.clear();
     apply((editor) {
       strokes.forEach((page, pageStrokes) {
         if (pageStrokes.isNotEmpty) {
           editor.addInk(page, pageStrokes,
               color: _colorValue,
               strokeWidth: _strokeWidth,
-              opacity: _opacity);
+              opacity: _opacity,
+              pressures: pressures[page]);
         }
       });
     });
@@ -242,6 +300,7 @@ class PdfEditingController extends ChangeNotifier {
   void discardInk() {
     if (_ink.isEmpty) return;
     _ink.clear();
+    _inkPressures.clear();
     notifyListeners();
   }
 
@@ -289,9 +348,8 @@ class PdfEditingController extends ChangeNotifier {
       apply((e) => e.addFreeText(pageIndex, rect, text,
           fontSize: _fontSize, color: _colorValue));
 
-  void addStamp(int pageIndex, PdfRect rect, String text) =>
-      apply((e) => e.addStamp(pageIndex, rect, text,
-          color: _colorValue, opacity: _opacity));
+  void addStamp(int pageIndex, PdfRect rect, String text) => apply((e) =>
+      e.addStamp(pageIndex, rect, text, color: _colorValue, opacity: _opacity));
 
   /// Adds a sticky note with its top-left corner at ([x], [y]).
   void addNote(int pageIndex, double x, double y, String text) =>
@@ -377,8 +435,7 @@ class PdfEditingController extends ChangeNotifier {
     // later /Annots entries draw on top, so they win the hit test
     for (var i = annotations.length - 1; i >= 0; i--) {
       final annotation = annotations[i];
-      if (annotation.isHidden ||
-          _unselectable.contains(annotation.subtype)) {
+      if (annotation.isHidden || _unselectable.contains(annotation.subtype)) {
         continue;
       }
       if (annotation.rect.contains(x, y)) {

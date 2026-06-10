@@ -125,3 +125,24 @@ repainted via `viewportChanges` (a separate Listenable so scrolling
 doesn't spam controller listeners). `PdfViewer.initialFit` defaults to
 `PdfViewerFit.page` (whole first page visible, Chrome-style) — widget
 tests that do view-coordinate math pin `initialFit: PdfViewerFit.width`.
+Color + stylus round: `PdfColorPicker`/`showPdfColorPicker`
+(editing_color_picker.dart — HSV area, hue slider, hex field; opaque
+colors only, opacity stays a controller property) and an eyedropper:
+`controller.startColorPick()` arms it, the page overlay's next tap
+samples via `PdfPageRenderer.sampleColor` (3×3-point patch through
+`rasterizeRegion`+`toByteData`; view→raster is position/geometry.scale)
+and calls `finishColorPick` (forced opaque). The overlay is injected
+when `tool != null || isPickingColor`, so `_tool` is nullable there;
+Escape cancels picking first. Apple Pencil: ink strokes carry per-point
+normalized pressure (raw `Listener` feeds `_pointerPressure`, since pan
+callbacks drop it; null when pressureMax == pressureMin, i.e. finger/
+mouse — uniform width). `addInk(pressures:)` writes one stroked segment
+per point pair at `pdfInkStrokeWidth(base, p)` = base×(0.4+1.2p) (round
+caps hide seams; InkList stays the centerline; rect pads by the widest
+point). Palm rejection: first stylus down with ink armed flips
+`controller.fingerDrawsInk` false → GestureDetector `supportedDevices`
+excludes touch, so fingers scroll under the overlay (toolbar touch_app
+button toggles back). Test gotchas: TestGesture can't set pressure —
+dispatch raw PointerDown/Move/Up via tester.binding.handlePointerEvent
+(supply delta); the eyedropper's toImage needs `tester.runAsync` after
+the tap (poll isPickingColor with real delays).

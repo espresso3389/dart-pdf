@@ -80,7 +80,12 @@ in-place text replacement), keyboard shortcuts, style controls (stroke
 width, opacity, font size), an annotation list sidebar
 (`PdfAnnotationSidebar`), a page thumbnail sidebar
 (`PdfThumbnailSidebar` — tap to jump, drag to reorder pages, delete,
-with a live viewport indicator), and a ready-made `PdfEditingToolbar`.
+with a live viewport indicator), a full-spectrum color picker with an
+eyedropper that samples colors from the rendered page
+(`PdfColorPicker`), and a ready-made `PdfEditingToolbar`.
+Apple Pencil (and any stylus) is first-class for ink: strokes record
+pressure and render with variable width, and the first pen contact
+turns on palm rejection — fingers scroll while the pen draws.
 The viewer opens fitted to the whole page like desktop browser viewers
 (`PdfViewer.initialFit`). Still
 open: richer text editing (reflow),

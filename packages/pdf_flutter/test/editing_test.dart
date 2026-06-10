@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/gestures.dart'
     show PointerDeviceKind, kLongPressTimeout;
@@ -73,6 +74,44 @@ void main() {
       expect(editing.strokesOn(0), isEmpty);
       final ink = editing.document.page(0).annotations.single;
       expect(ink.subtype, 'Ink');
+    });
+
+    test('ink pressures are buffered and committed with the annotation', () {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..strokeWidth = 4
+        ..addInkStroke(0, [(100, 100), (150, 130), (200, 100)],
+            pressures: [0.0, 0.5, 1.0])
+        ..addInkStroke(0, [(120, 90), (140, 95)]);
+      expect(editing.strokePressuresOn(0), [
+        [0.0, 0.5, 1.0],
+        null,
+      ]);
+
+      editing.finishInk();
+      expect(editing.strokePressuresOn(0), isEmpty);
+      final ink = editing.document.page(0).annotations.single;
+      final content = latin1
+          .decode(editing.document.cos.decodeStreamData(ink.normalAppearance!));
+      // pressure-mapped segment widths next to the uniform 4pt stroke
+      expect(content, contains('2.8 w'));
+      expect(content, contains('5.2 w'));
+      expect(content, contains('4 w'));
+    });
+
+    test('the eyedropper arms, cancels, and adopts a sampled color', () {
+      final editing = PdfEditingController(buildMultiPagePdf(1));
+      expect(editing.isPickingColor, isFalse);
+
+      editing.startColorPick();
+      expect(editing.isPickingColor, isTrue);
+      editing.cancelColorPick();
+      expect(editing.isPickingColor, isFalse);
+
+      editing.startColorPick();
+      editing.finishColorPick(const Color(0x8000A040));
+      expect(editing.isPickingColor, isFalse);
+      // the sample is adopted opaque — annotation alpha is [opacity]'s job
+      expect(editing.color, const Color(0xFF00A040));
     });
 
     test('discardInk throws the buffer away without a revision', () {
@@ -356,6 +395,104 @@ void main() {
       expect(editing.isModified, isFalse);
       editing.finishInk();
       expect(editing.document.page(0).annotations.single.subtype, 'Ink');
+      await settle(tester);
+    });
+
+    testWidgets('a stylus draws with pressure and parks finger drawing',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing.tool = PdfEditTool.ink;
+      await tester.pump();
+      expect(editing.fingerDrawsInk, isTrue);
+
+      // TestGesture can't carry pressure, so dispatch the Apple Pencil
+      // contact as raw events: pressure rising over the stroke
+      const pointer = 71;
+      final binding = tester.binding;
+      final p0 = view(100, 700);
+      final p1 = view(150, 690);
+      final p2 = view(200, 700);
+      binding.handlePointerEvent(PointerDownEvent(
+        pointer: pointer,
+        kind: PointerDeviceKind.stylus,
+        position: p0,
+        pressure: 0.2,
+        pressureMin: 0,
+        pressureMax: 1,
+      ));
+      await tester.pump();
+      // the first stylus contact turns palm rejection on
+      expect(editing.fingerDrawsInk, isFalse);
+      binding.handlePointerEvent(PointerMoveEvent(
+        pointer: pointer,
+        kind: PointerDeviceKind.stylus,
+        position: p1,
+        delta: p1 - p0,
+        pressure: 0.6,
+        pressureMin: 0,
+        pressureMax: 1,
+      ));
+      await tester.pump();
+      binding.handlePointerEvent(PointerMoveEvent(
+        pointer: pointer,
+        kind: PointerDeviceKind.stylus,
+        position: p2,
+        delta: p2 - p1,
+        pressure: 1.0,
+        pressureMin: 0,
+        pressureMax: 1,
+      ));
+      await tester.pump();
+      binding.handlePointerEvent(PointerUpEvent(
+        pointer: pointer,
+        kind: PointerDeviceKind.stylus,
+        position: p2,
+      ));
+      await tester.pump();
+
+      expect(editing.strokesOn(0), hasLength(1));
+      final pressures = editing.strokePressuresOn(0).single;
+      expect(pressures, isNotNull, reason: 'stylus strokes carry pressure');
+      expect(pressures, hasLength(editing.strokesOn(0).single.length));
+      expect(pressures!.last, 1.0);
+      expect(pressures.first, lessThan(pressures.last));
+
+      // palm rejection: a finger drag now scrolls instead of drawing
+      await drag(tester, view(300, 700), view(300, 650));
+      expect(editing.strokesOn(0), hasLength(1));
+
+      editing.finishInk();
+      expect(editing.document.page(0).annotations.single.subtype, 'Ink');
+      await settle(tester);
+    });
+
+    testWidgets('the eyedropper picks up the rendered page color',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester, pages: 1);
+      editing.apply((e) => e.addSquare(
+            0,
+            const PdfRect(200, 500, 400, 700),
+            strokeColor: null,
+            fillColor: 0x00A040,
+          ));
+      await tester.pump();
+
+      editing.startColorPick();
+      await tester.pump();
+      await tester.tapAt(view(300, 600));
+      await settle(tester);
+
+      // sampling rasterizes through toImage, which only completes on the
+      // real event loop
+      await tester.runAsync(() async {
+        for (var i = 0; i < 40 && editing.isPickingColor; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+      });
+      await tester.pump();
+
+      expect(editing.isPickingColor, isFalse);
+      expect(editing.color, const Color(0xFF00A040));
       await settle(tester);
     });
 
@@ -691,6 +828,43 @@ void main() {
       await settle(tester);
       expect(shown(0), 'Page 3');
       expect(shown(1), 'Page 1');
+    });
+  });
+
+  group('PdfColorPicker', () {
+    testWidgets('hex entry, the SV area, and the hue slider drive onChanged',
+        (tester) async {
+      Color? last;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: PdfColorPicker(
+              color: const Color(0xFFE53935),
+              onChanged: (color) => last = color,
+            ),
+          ),
+        ),
+      ));
+
+      await tester.enterText(find.byType(TextField), '00A040');
+      expect(last, const Color(0xFF00A040));
+
+      // layout: 260×160 SV area, 12 gap, 20 hue slider
+      final origin = tester.getTopLeft(find.byType(PdfColorPicker));
+
+      // top-right of the SV area: full saturation and brightness
+      await tester.tapAt(origin + const Offset(258, 2));
+      var hsv = HSVColor.fromColor(last!);
+      expect(hsv.saturation, greaterThan(0.95));
+      expect(hsv.value, greaterThan(0.95));
+
+      // middle of the hue slider ≈ 180° (the hex field follows along)
+      await tester.tapAt(origin + const Offset(130, 160 + 12 + 10));
+      hsv = HSVColor.fromColor(last!);
+      expect(hsv.hue, closeTo(180, 10));
+      final hex = tester.widget<TextField>(find.byType(TextField)).controller!;
+      expect('#${hex.text}',
+          '#${(last!.toARGB32() & 0xFFFFFF).toRadixString(16).toUpperCase().padLeft(6, '0')}');
     });
   });
 }

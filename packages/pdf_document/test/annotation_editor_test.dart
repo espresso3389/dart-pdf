@@ -18,8 +18,7 @@ void main() {
     return latin1.decode(doc.cos.decodeStreamData(stream!));
   }
 
-  test('highlight round-trips with quad points and a Multiply appearance',
-      () {
+  test('highlight round-trips with quad points and a Multiply appearance', () {
     final doc = roundTrip((e) => e.addHighlight(
           0,
           const [PdfRect(72, 700, 200, 712), PdfRect(72, 686, 150, 698)],
@@ -47,8 +46,8 @@ void main() {
     final gs0 = doc.cos.resolve(gstates['GS0']) as CosDictionary;
     expect((doc.cos.resolve(gs0['BM']) as CosName).value, 'Multiply');
 
-    expect((doc.cos.resolve(hl.dict['Contents']) as CosString).text,
-        'important');
+    expect(
+        (doc.cos.resolve(hl.dict['Contents']) as CosString).text, 'important');
     expect((doc.cos.resolve(hl.dict['T']) as CosString).text, 'Ben');
   });
 
@@ -88,6 +87,50 @@ void main() {
     final content = appearanceText(doc, ink);
     expect(content, contains('1 J'));
     expect(content, contains('4 w'));
+  });
+
+  test('ink pressures vary the appearance width per segment', () {
+    final doc = roundTrip((e) => e.addInk(
+          0,
+          [
+            [(100, 100), (150, 130), (200, 100)],
+          ],
+          strokeWidth: 4,
+          pressures: [
+            [0.0, 0.5, 1.0],
+          ],
+        ));
+    final ink = doc.page(0).annotations.single;
+
+    // segment widths use the average of the endpoint pressures:
+    // (0+0.5)/2 → 4×0.7 = 2.8, (0.5+1)/2 → 4×1.3 = 5.2
+    final content = appearanceText(doc, ink);
+    expect(content, contains('2.8 w'));
+    expect(content, contains('5.2 w'));
+    expect('S'.allMatches(content).length, greaterThanOrEqualTo(2),
+        reason: 'one stroked segment per point pair');
+
+    // the InkList still stores the centerline; the rect pads by the
+    // widest possible point (pressure 1 → 6.4/2 + 1 = 4.2)
+    final inkList = doc.cos.resolve(ink.dict['InkList']) as CosArray;
+    expect((doc.cos.resolve(inkList[0]) as CosArray).length, 6);
+    expect(ink.rect.left, closeTo(100 - 4.2, 1e-9));
+    expect(ink.rect.top, closeTo(130 + 4.2, 1e-9));
+
+    expect(pdfInkStrokeWidth(4, 0.5), 4);
+    expect(pdfInkStrokeWidth(4, 0), closeTo(1.6, 1e-9));
+    expect(pdfInkStrokeWidth(4, 1), closeTo(6.4, 1e-9));
+  });
+
+  test('mismatched ink pressures are rejected', () {
+    final editor = PdfEditor(PdfDocument.open(buildClassicPdf()));
+    expect(
+        () => editor.addInk(0, [
+              [(100, 100), (150, 130)],
+            ], pressures: [
+              [0.5],
+            ]),
+        throwsArgumentError);
   });
 
   test('square and circle render stroke and fill', () {
@@ -140,8 +183,8 @@ void main() {
   });
 
   test('note builds a 20pt icon at the given top-left corner', () {
-    final doc =
-        roundTrip((e) => e.addNote(0, 500, 700, 'remember this', author: 'Ben'));
+    final doc = roundTrip(
+        (e) => e.addNote(0, 500, 700, 'remember this', author: 'Ben'));
     final note = doc.page(0).annotations.single;
     expect(note.subtype, 'Text');
     expect(note.rect, const PdfRect(500, 680, 520, 700));
@@ -184,10 +227,11 @@ void main() {
   });
 
   test('appearance BBox equals the annotation rect (identity mapping)', () {
-    final doc = roundTrip(
-        (e) => e.addSquare(0, const PdfRect(10, 20, 110, 70)));
+    final doc =
+        roundTrip((e) => e.addSquare(0, const PdfRect(10, 20, 110, 70)));
     final annot = doc.page(0).annotations.single;
-    final bbox = pdfRectFrom(doc.cos, annot.normalAppearance!.dictionary['BBox']);
+    final bbox =
+        pdfRectFrom(doc.cos, annot.normalAppearance!.dictionary['BBox']);
     expect(bbox, annot.rect);
   });
 
@@ -239,7 +283,8 @@ void main() {
 
     final highlight = reopened.page(0).annotations[0];
     expect(highlight.rect, const PdfRect(82, 680, 210, 692));
-    final quads = reopened.cos.resolve(highlight.dict['QuadPoints']) as CosArray;
+    final quads =
+        reopened.cos.resolve(highlight.dict['QuadPoints']) as CosArray;
     expect((reopened.cos.resolve(quads[0]) as CosReal).value, 82); // left
     expect((reopened.cos.resolve(quads[1]) as CosReal).value, 692); // top
 
@@ -289,7 +334,8 @@ void main() {
     // left edge, y unchanged
     final inkRect = ink.rect;
     final resizedInk = reopened.page(0).annotations[1];
-    final inkList = reopened.cos.resolve(resizedInk.dict['InkList']) as CosArray;
+    final inkList =
+        reopened.cos.resolve(resizedInk.dict['InkList']) as CosArray;
     final stroke = reopened.cos.resolve(inkList[0]) as CosArray;
     double at(int i) => (reopened.cos.resolve(stroke[i]) as CosReal).value;
     expect(at(0), closeTo(inkRect.left + (100 - inkRect.left) * 2, 1e-6));
@@ -309,8 +355,8 @@ void main() {
   });
 
   test('print flag is set so annotations survive printing', () {
-    final doc = roundTrip(
-        (e) => e.addHighlight(0, const [PdfRect(72, 700, 200, 712)]));
+    final doc =
+        roundTrip((e) => e.addHighlight(0, const [PdfRect(72, 700, 200, 712)]));
     expect(doc.page(0).annotations.single.flags & 4, 4);
   });
 }

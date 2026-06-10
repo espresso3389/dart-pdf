@@ -789,6 +789,10 @@ class _PdfViewerState extends State<PdfViewer>
   void _onEscape() {
     final editing = widget.editing;
     if (editing != null) {
+      if (editing.isPickingColor) {
+        editing.cancelColorPick();
+        return;
+      }
       if (editing.selectedAnnotation != null) {
         editing.clearAnnotationSelection();
         return;
@@ -1372,16 +1376,17 @@ class _PdfViewerPage extends StatelessWidget {
               if (editing != null)
                 ListenableBuilder(
                   listenable: editing!,
-                  builder: (context, _) => editing!.tool == null
-                      ? const SizedBox.shrink()
-                      : Positioned.fill(
-                          child: EditingPageOverlay(
-                            controller: editing!,
-                            pageIndex: index,
-                            geometry: geometry,
-                            textPrompt: editingTextPrompt,
-                          ),
-                        ),
+                  builder: (context, _) =>
+                      editing!.tool == null && !editing!.isPickingColor
+                          ? const SizedBox.shrink()
+                          : Positioned.fill(
+                              child: EditingPageOverlay(
+                                controller: editing!,
+                                pageIndex: index,
+                                geometry: geometry,
+                                textPrompt: editingTextPrompt,
+                              ),
+                            ),
                 ),
             ]);
           }),

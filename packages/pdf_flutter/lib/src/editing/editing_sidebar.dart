@@ -87,8 +87,7 @@ class PdfAnnotationSidebar extends StatelessWidget {
               for (var i = 0; i < annotations.length; i++) {
                 final annotation = annotations[i];
                 if (_unlisted.contains(annotation.subtype)) continue;
-                final selectable =
-                    !_unselectable.contains(annotation.subtype);
+                final selectable = !_unselectable.contains(annotation.subtype);
                 final contents = annotation.contents;
                 final pageIndex = page, index = i;
                 tiles.add(ListTile(

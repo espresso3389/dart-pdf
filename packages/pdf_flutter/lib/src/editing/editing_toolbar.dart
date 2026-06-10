@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../pdf_viewer.dart';
+import 'editing_color_picker.dart';
 import 'editing_controller.dart';
 import 'text_prompt.dart';
 
@@ -110,8 +111,7 @@ class PdfEditingToolbar extends StatelessWidget {
                 onPressed: () => _toggleTool(value),
               );
 
-          Widget markupButton(
-                  PdfMarkupKind kind, IconData icon, String tip) =>
+          Widget markupButton(PdfMarkupKind kind, IconData icon, String tip) =>
               IconButton(
                 icon: Icon(icon),
                 tooltip: tip,
@@ -136,8 +136,8 @@ class PdfEditingToolbar extends StatelessWidget {
                   'Highlight selection'),
               markupButton(PdfMarkupKind.underline, Icons.format_underlined,
                   'Underline selection'),
-              markupButton(PdfMarkupKind.strikeOut,
-                  Icons.format_strikethrough, 'Strike out selection'),
+              markupButton(PdfMarkupKind.strikeOut, Icons.format_strikethrough,
+                  'Strike out selection'),
               markupButton(PdfMarkupKind.squiggly, Icons.gesture,
                   'Squiggly-underline selection'),
               const VerticalDivider(width: 16),
@@ -156,6 +156,16 @@ class PdfEditingToolbar extends StatelessWidget {
                   ),
               ],
               toolButton(PdfEditTool.ink, Icons.draw, 'Draw'),
+              if (controller.tool == PdfEditTool.ink)
+                IconButton(
+                  icon: const Icon(Icons.touch_app),
+                  tooltip: controller.fingerDrawsInk
+                      ? 'Finger draws — tap so it scrolls instead'
+                      : 'Finger scrolls (pen draws) — tap so it draws',
+                  isSelected: controller.fingerDrawsInk,
+                  onPressed: () =>
+                      controller.fingerDrawsInk = !controller.fingerDrawsInk,
+                ),
               if (controller.hasPendingInk) ...[
                 IconButton(
                   icon: const Icon(Icons.check),
@@ -213,6 +223,23 @@ class PdfEditingToolbar extends StatelessWidget {
                     ),
                   ),
                 ),
+              IconButton(
+                icon: Icon(Icons.palette, color: controller.color),
+                tooltip: 'More colors…',
+                onPressed: () async {
+                  final picked = await showPdfColorPicker(context,
+                      initial: controller.color);
+                  if (picked != null) controller.color = picked;
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.colorize),
+                tooltip: 'Pick a color from the page',
+                isSelected: controller.isPickingColor,
+                onPressed: () => controller.isPickingColor
+                    ? controller.cancelColorPick()
+                    : controller.startColorPick(),
+              ),
               _StyleMenu(controller: controller),
               const VerticalDivider(width: 16),
               IconButton(

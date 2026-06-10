@@ -109,6 +109,35 @@ class PdfPageRenderer {
     }
   }
 
+  /// Samples the rendered color of [page] at [point] — page raster space,
+  /// i.e. post-rotation points with y down (view coordinates divided by
+  /// the view scale). Averages a 3×3-point patch so anti-aliased strokes
+  /// still read as their color. Returns null off the page.
+  static Future<ui.Color?> sampleColor(PdfPage page, ui.Offset point) async {
+    final picture = await renderPicture(page);
+    try {
+      final image = await rasterizeRegion(
+          picture, Rect.fromCenter(center: point, width: 3, height: 3), 1);
+      try {
+        final data = await image.toByteData();
+        if (data == null) return null;
+        var r = 0, g = 0, b = 0, n = 0;
+        for (var i = 0; i + 3 < data.lengthInBytes; i += 4) {
+          if (data.getUint8(i + 3) == 0) continue; // past the page edge
+          r += data.getUint8(i);
+          g += data.getUint8(i + 1);
+          b += data.getUint8(i + 2);
+          n++;
+        }
+        return n == 0 ? null : ui.Color.fromARGB(255, r ~/ n, g ~/ n, b ~/ n);
+      } finally {
+        image.dispose();
+      }
+    } finally {
+      picture.dispose();
+    }
+  }
+
   /// Page size in points after applying /Rotate.
   static Size pageSize(PdfPage page) {
     final box = page.cropBox;

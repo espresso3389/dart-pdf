@@ -331,8 +331,12 @@ class _ViewerScreenState extends State<ViewerScreen> {
       ],
     );
     if (location == null) return;
-    await File(location.path).writeAsBytes(bytes);
-    _toast('Saved to ${location.path}');
+    try {
+      await File(location.path).writeAsBytes(bytes);
+      _toast('Saved to ${location.path}');
+    } catch (e) {
+      _toast('Save failed: $e');
+    }
   }
 
   List<Widget> _pageOverlays(

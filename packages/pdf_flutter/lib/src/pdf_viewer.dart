@@ -132,6 +132,12 @@ class PdfViewerController extends ChangeNotifier {
       [for (final m in _matches) if (m.pageIndex == pageIndex) m];
 }
 
+/// Signature for [PdfViewer.onAction]: the user activated [annotation]
+/// (tapped a link or form button) and the viewer doesn't handle its
+/// [action] itself.
+typedef PdfActionHandler = void Function(
+    PdfAction action, PdfAnnotation annotation);
+
 /// A scrolling, zoomable PDF viewer.
 ///
 /// Supports pinch zoom, double-tap zoom toggle, page tracking, and document
@@ -142,6 +148,7 @@ class PdfViewer extends StatefulWidget {
     super.key,
     required this.document,
     this.controller,
+    this.onAction,
     this.pageSpacing = 12,
     this.maxZoom = 6,
     this.doubleTapZoom = 2.5,
@@ -149,6 +156,15 @@ class PdfViewer extends StatefulWidget {
 
   final PdfDocument document;
   final PdfViewerController? controller;
+
+  /// Called when a tapped link or button carries an action the viewer
+  /// doesn't follow itself. /GoTo destinations and the four standard
+  /// /Named page actions navigate internally and never reach this; URI,
+  /// JavaScript, and everything else is the app's call — the conventional
+  /// bridge for PDFs that drive the app is a URI action with a custom
+  /// scheme, dispatched here.
+  final PdfActionHandler? onAction;
+
   final double pageSpacing;
   final double maxZoom;
   final double doubleTapZoom;
@@ -177,6 +193,7 @@ class _PdfViewerState extends State<PdfViewer>
   late List<PdfPage> _pages;
   late List<double> _aspects; // height / width, after /Rotate
   final Map<int, PdfPageText> _textCache = {};
+  final Map<int, List<PdfAnnotation>> _annotCache = {};
   double _viewWidth = 0;
 
   final _focusNode = FocusNode(debugLabel: 'PdfViewer');
@@ -251,6 +268,7 @@ class _PdfViewerState extends State<PdfViewer>
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.document, widget.document)) {
       _textCache.clear();
+      _annotCache.clear();
       _controller.clearSearch();
       _clearSelection();
       _loadPages();
@@ -339,9 +357,9 @@ class _PdfViewerState extends State<PdfViewer>
       _textCache[index] ??= PdfTextExtractor.extract(widget.document, index);
 
   /// Maps a pointer position (list coordinates, inside the
-  /// InteractiveViewer transform) to a text position. [tolerance] is in
-  /// page units; pass infinity to snap to the nearest text while dragging.
-  (int, int)? _textPositionAt(Offset local, {required double tolerance}) {
+  /// InteractiveViewer transform) to (page index, x, y) in that page's
+  /// user space.
+  (int, double, double)? _pagePointAt(Offset local) {
     if (_viewWidth <= 0 || !_scroll.hasClients || _pages.isEmpty) return null;
     final contentY = _scroll.offset + local.dy;
     var top = 0.0;
@@ -350,22 +368,106 @@ class _PdfViewerState extends State<PdfViewer>
       if (contentY <= top + height || i == _pages.length - 1) {
         final box = _pages[i].cropBox;
         if (box.width <= 0) return null;
-        // TODO: selection on /Rotate'd pages needs the rotation transform
+        // TODO: /Rotate'd pages need the rotation transform
         final scale = _viewWidth / box.width;
         final x = box.left + local.dx / scale;
         final y = box.top - (contentY - top) / scale;
-        final offset = _pageText(i).positionNear(x, y, tolerance: tolerance);
-        return offset < 0 ? null : (i, offset);
+        return (i, x, y);
       }
       top += height + widget.pageSpacing;
     }
     return null;
   }
 
+  /// Maps a pointer position to a text position. [tolerance] is in page
+  /// units; pass infinity to snap to the nearest text while dragging.
+  (int, int)? _textPositionAt(Offset local, {required double tolerance}) {
+    final point = _pagePointAt(local);
+    if (point == null) return null;
+    final (i, x, y) = point;
+    final offset = _pageText(i).positionNear(x, y, tolerance: tolerance);
+    return offset < 0 ? null : (i, offset);
+  }
+
+  /// Visible annotations with an action on a page, cached.
+  List<PdfAnnotation> _interactiveAnnots(int index) =>
+      _annotCache[index] ??= [
+        for (final a in _pages[index].annotations)
+          if (!a.isHidden && !a.isNoView && a.action != null) a,
+      ];
+
+  PdfAnnotation? _annotationAt(Offset local) {
+    final point = _pagePointAt(local);
+    if (point == null) return null;
+    final (i, x, y) = point;
+    // later /Annots entries paint on top, so they win the hit test
+    for (final annotation in _interactiveAnnots(i).reversed) {
+      if (annotation.rect.contains(x, y)) return annotation;
+    }
+    return null;
+  }
+
+  void _onTapUp(TapUpDetails details) {
+    _clearSelection();
+    final annotation = _annotationAt(details.localPosition);
+    if (annotation != null) _activate(annotation);
+  }
+
+  void _activate(PdfAnnotation annotation) {
+    final action = annotation.action;
+    if (action == null) return;
+    switch (action) {
+      case PdfGoToAction(:final destination):
+        _scrollToDestination(destination);
+      case PdfNamedAction(:final name) when _handleNamedAction(name):
+        break; // handled internally
+      default:
+        widget.onAction?.call(action, annotation);
+    }
+  }
+
+  bool _handleNamedAction(String name) {
+    switch (name) {
+      case 'NextPage':
+        _jumpToPage(_controller.currentPage + 1);
+      case 'PrevPage':
+        _jumpToPage(_controller.currentPage - 1);
+      case 'FirstPage':
+        _jumpToPage(0);
+      case 'LastPage':
+        _jumpToPage(_pages.length - 1);
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  void _scrollToDestination(PdfDestination destination) {
+    if (!_scroll.hasClients) return;
+    final index = destination.pageIndex.clamp(0, _pages.length - 1);
+    var target = _pageOffset(index);
+    final box = _pages[index].cropBox;
+    final top = destination.top;
+    if (top != null && box.height > 0) {
+      final fractionDown = ((box.top - top) / box.height).clamp(0.0, 1.0);
+      target += fractionDown * _pageHeight(index);
+    }
+    _scroll.animateTo(
+      target.clamp(0.0, _scroll.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+    );
+  }
+
   void _onHover(PointerHoverEvent event) {
-    final overText =
-        _textPositionAt(event.localPosition, tolerance: 8) != null;
-    final cursor = overText ? SystemMouseCursors.text : MouseCursor.defer;
+    final MouseCursor cursor;
+    if (_annotationAt(event.localPosition) != null) {
+      cursor = SystemMouseCursors.click;
+    } else if (_textPositionAt(event.localPosition, tolerance: 8) != null) {
+      cursor = SystemMouseCursors.text;
+    } else {
+      cursor = MouseCursor.defer;
+    }
     if (cursor != _hoverCursor) setState(() => _hoverCursor = cursor);
   }
 
@@ -620,7 +722,7 @@ class _PdfViewerState extends State<PdfViewer>
                 child: Listener(
                   onPointerDown: _onPointerDown,
                   child: GestureDetector(
-                    onTap: _clearSelection,
+                    onTapUp: _onTapUp,
                     onPanStart: _onSelectionStart,
                     onPanUpdate: _onSelectionUpdate,
                     child: ColoredBox(

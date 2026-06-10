@@ -9,13 +9,16 @@ import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 
 void main() {
   Future<PdfViewerController> pumpViewer(WidgetTester tester,
-      {int pages = 5}) async {
+      {int pages = 5,
+      Uint8List? bytes,
+      PdfActionHandler? onAction}) async {
     final controller = PdfViewerController();
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: PdfViewer(
-          document: PdfDocument.open(buildMultiPagePdf(pages)),
+          document: PdfDocument.open(bytes ?? buildMultiPagePdf(pages)),
           controller: controller,
+          onAction: onAction,
         ),
       ),
     ));
@@ -242,6 +245,96 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     expect(controller.zoom, greaterThan(1));
+  });
+
+  // buildAnnotatedPdf link geometry, in view coordinates (800px viewport
+  // over a 612pt page): centers of the annotation rects on page 1
+  const annotScale = 800 / 612;
+  Offset annotView(double x, double y) =>
+      Offset(x * annotScale, (792 - y) * annotScale);
+
+  testWidgets('tapping a URI link surfaces the action', (tester) async {
+    final actions = <PdfAction>[];
+    final annotations = <PdfAnnotation>[];
+    await pumpViewer(tester, bytes: buildAnnotatedPdf(), onAction: (a, an) {
+      actions.add(a);
+      annotations.add(an);
+    });
+
+    await tester.tapAt(annotView(136, 652)); // URI link center
+    // the tap fires once the competing double-tap recognizer times out
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(actions, hasLength(1));
+    expect((actions.single as PdfUriAction).uri, 'app://invoice/42');
+    expect(annotations.single, isA<PdfLinkAnnotation>());
+  });
+
+  testWidgets('tapping a GoTo link navigates instead of surfacing it',
+      (tester) async {
+    final actions = <PdfAction>[];
+    final controller = await pumpViewer(tester,
+        bytes: buildAnnotatedPdf(), onAction: (a, _) => actions.add(a));
+
+    await tester.tapAt(annotView(136, 612)); // GoTo link center
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(controller.currentPage, 2);
+    expect(actions, isEmpty);
+  });
+
+  testWidgets('standard named page actions navigate internally',
+      (tester) async {
+    final actions = <PdfAction>[];
+    final controller = await pumpViewer(tester,
+        bytes: buildAnnotatedPdf(), onAction: (a, _) => actions.add(a));
+
+    await tester.tapAt(annotView(350, 652)); // /Named /NextPage link
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(controller.currentPage, 1);
+    expect(actions, isEmpty);
+  });
+
+  testWidgets('hidden annotations neither fire nor change the cursor',
+      (tester) async {
+    final actions = <PdfAction>[];
+    await pumpViewer(tester,
+        bytes: buildAnnotatedPdf(), onAction: (a, _) => actions.add(a));
+
+    await tester.tapAt(annotView(350, 612)); // hidden URI link center
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(actions, isEmpty);
+  });
+
+  testWidgets('hovering a link shows the click cursor', (tester) async {
+    await pumpViewer(tester, bytes: buildAnnotatedPdf());
+
+    MouseRegion region() => tester.widget<MouseRegion>(find
+        .descendant(
+            of: find.byType(PdfViewer), matching: find.byType(MouseRegion))
+        .first);
+
+    final gesture =
+        await tester.createGesture(kind: PointerDeviceKind.mouse, pointer: 9);
+    await gesture.addPointer(location: annotView(400, 300)); // empty area
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    expect(region().cursor, MouseCursor.defer);
+
+    await gesture.moveTo(annotView(136, 652)); // over the URI link
+    await tester.pump();
+    expect(region().cursor, SystemMouseCursors.click);
+
+    await gesture.moveTo(annotView(100, 725)); // over 'Page 1' text
+    await tester.pump();
+    expect(region().cursor, SystemMouseCursors.text);
+
+    await gesture.moveTo(annotView(350, 612)); // hidden link: no cursor
+    await tester.pump();
+    expect(region().cursor, MouseCursor.defer);
   });
 
   testWidgets('jumpToPage scrolls to the requested page', (tester) async {

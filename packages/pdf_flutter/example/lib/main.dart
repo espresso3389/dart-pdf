@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_flutter/pdf_flutter.dart';
+
+import 'demo_document.dart';
 
 void main() => runApp(const ViewerApp());
 
@@ -33,24 +36,117 @@ class _ViewerScreenState extends State<ViewerScreen> {
   PdfDocument? _document;
   String _title = '';
   String? _error;
-  bool _showOverlays = false;
 
+  // app state the interactive demo's PDF links and overlays manipulate
+  bool _isDemo = false;
+  int _counter = 0;
+  bool _switchOn = false;
+  final _noteField = TextEditingController();
+
+  /// GoTo and the standard named page actions never get here (the viewer
+  /// follows them itself). Custom-scheme URIs are dispatched as app
+  /// commands — the conventional way a PDF drives its host app — and
+  /// anything else just gets described in a snackbar.
   void _onAction(PdfAction action, PdfAnnotation annotation) {
-    // GoTo and the standard named page actions never get here (the viewer
-    // follows them itself); this is where an app dispatches its own
-    // custom-scheme URIs, opens external links, etc.
-    final description = switch (action) {
+    if (action is PdfUriAction) {
+      final uri = Uri.tryParse(action.uri);
+      if (uri?.scheme == 'app') {
+        switch (uri!.host) {
+          case 'counter':
+            setState(() => _counter++);
+            return;
+          case 'message':
+            _toast(uri.queryParameters['text'] ?? 'No message');
+            return;
+        }
+      }
+    }
+    _toast(switch (action) {
       PdfUriAction(:final uri) => 'Link: $uri',
       PdfJavaScriptAction(:final script) =>
-        'JavaScript action: ${script.length > 60 ? script.substring(0, 60) : script}',
+        'JavaScript surfaced to the app: $script',
       PdfNamedAction(:final name) => 'Named action: $name',
       PdfUnknownAction(:final type) => 'Unhandled action type: $type',
       PdfGoToAction() => 'GoTo', // unreachable
-    };
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(description),
-      duration: const Duration(seconds: 2),
-    ));
+    });
+  }
+
+  void _toast(String message) {
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+      ));
+  }
+
+  void _openDemo() {
+    setState(() {
+      _document = PdfDocument.open(buildDemoPdf());
+      _title = 'Interactive demo';
+      _error = null;
+      _isDemo = true;
+      _counter = 0;
+      _searchField.clear();
+    });
+  }
+
+  /// Flutter widgets pinned into the slots the demo document draws.
+  List<Widget> _demoOverlays(
+      BuildContext context, int pageIndex, PdfPageGeometry geometry) {
+    switch (pageIndex) {
+      case 0:
+        return [
+          Positioned.fromRect(
+            rect: geometry.toViewRect(DemoLayout.counterBadge),
+            child: _CounterBadge(count: _counter),
+          ),
+        ];
+      case 1:
+        return [
+          Positioned.fromRect(
+            rect: geometry.toViewRect(DemoLayout.clock),
+            child: const _ClockTile(),
+          ),
+          Positioned.fromRect(
+            rect: geometry.toViewRect(DemoLayout.counter),
+            child: _CounterControl(
+              count: _counter,
+              onChanged: (value) => setState(() => _counter = value),
+            ),
+          ),
+          Positioned.fromRect(
+            rect: geometry.toViewRect(DemoLayout.toggle),
+            child: FittedBox(
+              child: Switch(
+                value: _switchOn,
+                onChanged: (value) => setState(() => _switchOn = value),
+              ),
+            ),
+          ),
+          Positioned.fromRect(
+            rect: geometry.toViewRect(DemoLayout.note),
+            child: Material(
+              color: const Color(0xF2FFFFFF),
+              shape: RoundedRectangleBorder(
+                side: BorderSide(color: Colors.indigo.shade200),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: TextField(
+                controller: _noteField,
+                decoration: const InputDecoration(
+                  hintText: 'Type here - this text box floats above the page',
+                  isDense: true,
+                  contentPadding: EdgeInsets.all(10),
+                  border: InputBorder.none,
+                ),
+              ),
+            ),
+          ),
+        ];
+      default:
+        return const [];
+    }
   }
 
   @override
@@ -66,6 +162,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
   void dispose() {
     _controller.dispose();
     _searchField.dispose();
+    _noteField.dispose();
     super.dispose();
   }
 
@@ -84,6 +181,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
         _document = document;
         _title = path.split(Platform.pathSeparator).last;
         _error = null;
+        _isDemo = false;
         _searchField.clear();
       });
     } catch (e) {
@@ -132,12 +230,11 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     },
                   ),
           ),
-          if (_document != null)
-            IconButton(
-              icon: Icon(_showOverlays ? Icons.layers : Icons.layers_outlined),
-              tooltip: 'Toggle widget overlay demo',
-              onPressed: () => setState(() => _showOverlays = !_showOverlays),
-            ),
+          IconButton(
+            icon: const Icon(Icons.auto_awesome),
+            tooltip: 'Open the interactive demo',
+            onPressed: _openDemo,
+          ),
           IconButton(
             icon: const Icon(Icons.folder_open),
             tooltip: 'Open PDF',
@@ -157,68 +254,133 @@ class _ViewerScreenState extends State<ViewerScreen> {
             child: Text(error, textAlign: TextAlign.center),
           ),
         (null, _) => Center(
-            child: FilledButton.icon(
-              onPressed: _pickFile,
-              icon: const Icon(Icons.folder_open),
-              label: const Text('Open a PDF'),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FilledButton.icon(
+                  onPressed: _pickFile,
+                  icon: const Icon(Icons.folder_open),
+                  label: const Text('Open a PDF'),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  onPressed: _openDemo,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('Try the interactive demo'),
+                ),
+              ],
             ),
           ),
         (final PdfDocument document, _) => PdfViewer(
             document: document,
             controller: _controller,
             onAction: _onAction,
-            pageOverlayBuilder: !_showOverlays
-                ? null
-                : (context, pageIndex, geometry) => [
-                      // a live Flutter widget pinned to page coordinates:
-                      // a sticky note at 1in from the page's top-left
-                      if (pageIndex == _controller.currentPage)
-                        Positioned.fromRect(
-                          rect: geometry.toViewRect(PdfRect(
-                            geometry.cropBox.left + 72,
-                            geometry.cropBox.top - 144,
-                            geometry.cropBox.left + 216,
-                            geometry.cropBox.top - 72,
-                          )),
-                          child: _StickyNote(pageIndex: pageIndex),
-                        ),
-                    ],
+            pageOverlayBuilder: _isDemo ? _demoOverlays : null,
           ),
       },
     );
   }
 }
 
-/// Overlay demo: an interactive Material widget living on the page,
-/// scrolling and zooming with it.
-class _StickyNote extends StatefulWidget {
-  const _StickyNote({required this.pageIndex});
+/// Shows the counter the PDF's "Increment" link annotation drives —
+/// PDF → app state → widget, completing the loop on the same page.
+class _CounterBadge extends StatelessWidget {
+  const _CounterBadge({required this.count});
 
-  final int pageIndex;
-
-  @override
-  State<_StickyNote> createState() => _StickyNoteState();
-}
-
-class _StickyNoteState extends State<_StickyNote> {
-  int _taps = 0;
+  final int count;
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xEEFFF59D),
-      elevation: 2,
-      borderRadius: BorderRadius.circular(4),
-      child: InkWell(
-        onTap: () => setState(() => _taps++),
-        child: Center(
-          child: Text(
-            'Flutter widget on page ${widget.pageIndex + 1}\n'
-            'taps: $_taps',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12, color: Colors.black87),
+      color: Colors.indigo,
+      borderRadius: BorderRadius.circular(6),
+      child: Center(
+        child: Text(
+          '$count',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Ticks every second — proof the overlay is a live widget, not artwork.
+class _ClockTile extends StatefulWidget {
+  const _ClockTile();
+
+  @override
+  State<_ClockTile> createState() => _ClockTileState();
+}
+
+class _ClockTileState extends State<_ClockTile> {
+  late final Timer _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer =
+        Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    String pad(int v) => v.toString().padLeft(2, '0');
+    return Material(
+      color: Colors.black87,
+      borderRadius: BorderRadius.circular(6),
+      child: Center(
+        child: Text(
+          '${pad(now.hour)}:${pad(now.minute)}:${pad(now.second)}',
+          style: const TextStyle(
+            color: Colors.greenAccent,
+            fontSize: 18,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Edits the same counter the PDF link on page 1 increments.
+class _CounterControl extends StatelessWidget {
+  const _CounterControl({required this.count, required this.onChanged});
+
+  final int count;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xF2FFFFFF),
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: Colors.indigo.shade200),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.remove),
+            onPressed: () => onChanged(count - 1),
+          ),
+          Text('$count', style: Theme.of(context).textTheme.titleMedium),
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () => onChanged(count + 1),
+          ),
+        ],
       ),
     );
   }

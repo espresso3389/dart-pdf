@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
+import 'page_geometry.dart';
 import 'pdf_page_view.dart';
 
 /// Drives a [PdfViewer] and reports its state: current page, zoom, and
@@ -138,6 +139,12 @@ class PdfViewerController extends ChangeNotifier {
 typedef PdfActionHandler = void Function(
     PdfAction action, PdfAnnotation annotation);
 
+/// Signature for [PdfViewer.pageOverlayBuilder]: returns widgets stacked
+/// over one page. Use [geometry] to convert PDF coordinates to view
+/// coordinates, e.g. `Positioned.fromRect(rect: geometry.toViewRect(...))`.
+typedef PdfPageOverlayBuilder = List<Widget> Function(
+    BuildContext context, int pageIndex, PdfPageGeometry geometry);
+
 /// A scrolling, zoomable PDF viewer.
 ///
 /// Supports pinch zoom, double-tap zoom toggle, page tracking, and document
@@ -149,6 +156,7 @@ class PdfViewer extends StatefulWidget {
     required this.document,
     this.controller,
     this.onAction,
+    this.pageOverlayBuilder,
     this.pageSpacing = 12,
     this.maxZoom = 6,
     this.doubleTapZoom = 2.5,
@@ -164,6 +172,12 @@ class PdfViewer extends StatefulWidget {
   /// bridge for PDFs that drive the app is a URI action with a custom
   /// scheme, dispatched here.
   final PdfActionHandler? onAction;
+
+  /// Stacks app widgets over each page, positioned in PDF coordinates via
+  /// the provided geometry. Overlays live in the page's transformed space,
+  /// so they scroll and zoom with the page; they receive pointer events
+  /// before the viewer's own selection and link handling.
+  final PdfPageOverlayBuilder? pageOverlayBuilder;
 
   final double pageSpacing;
   final double maxZoom;
@@ -675,12 +689,14 @@ class _PdfViewerState extends State<PdfViewer>
           padding: EdgeInsets.only(top: index == 0 ? 0 : widget.pageSpacing),
           child: _PdfViewerPage(
             page: _pages[index],
+            index: index,
             scale: _renderScale,
             matches: _controller._matchesOn(index),
             currentMatch: _controller._currentMatch >= 0
                 ? _controller._matches[_controller._currentMatch]
                 : null,
             selection: _selectionRectsOn(index),
+            overlayBuilder: widget.pageOverlayBuilder,
           ),
         ),
       );
@@ -749,35 +765,52 @@ class _PdfViewerState extends State<PdfViewer>
 class _PdfViewerPage extends StatelessWidget {
   const _PdfViewerPage({
     required this.page,
+    required this.index,
     required this.scale,
     required this.matches,
     required this.currentMatch,
     required this.selection,
+    required this.overlayBuilder,
   });
 
   final PdfPage page;
+  final int index;
   final double scale;
   final List<PdfTextMatch> matches;
   final PdfTextMatch? currentMatch;
   final List<PdfRect> selection;
+  final PdfPageOverlayBuilder? overlayBuilder;
 
   @override
   Widget build(BuildContext context) {
     // the Stack is always present — toggling it when highlights appear
     // would reshape the element tree and recreate PdfPageView's state
     // (dropping its rendered image: a white flash)
+    final builder = overlayBuilder;
     return Stack(children: [
       PdfPageView(page: page, scale: scale),
       Positioned.fill(
         child: CustomPaint(
           painter: _HighlightPainter(
             box: page.cropBox,
+            rotation: page.rotation,
             matches: matches,
             currentMatch: currentMatch,
             selection: selection,
           ),
         ),
       ),
+      if (builder != null)
+        Positioned.fill(
+          child: LayoutBuilder(builder: (context, constraints) {
+            final geometry = PdfPageGeometry(
+              cropBox: page.cropBox,
+              rotation: page.rotation,
+              viewSize: constraints.biggest,
+            );
+            return Stack(children: builder(context, index, geometry));
+          }),
+        ),
     ]);
   }
 }
@@ -785,12 +818,14 @@ class _PdfViewerPage extends StatelessWidget {
 class _HighlightPainter extends CustomPainter {
   _HighlightPainter({
     required this.box,
+    required this.rotation,
     required this.matches,
     required this.currentMatch,
     required this.selection,
   });
 
   final PdfRect box;
+  final int rotation;
   final List<PdfTextMatch> matches;
   final PdfTextMatch? currentMatch;
   final List<PdfRect> selection;
@@ -798,28 +833,21 @@ class _HighlightPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (box.width <= 0 || box.height <= 0) return;
-    // TODO: highlights on /Rotate'd pages need the rotation transform
-    final scale = size.width / box.width;
+    final geometry =
+        PdfPageGeometry(cropBox: box, rotation: rotation, viewSize: size);
     final selected = Paint()..color = const Color(0x4D2196F3);
     for (final rect in selection) {
-      canvas.drawRect(_toViewRect(rect, scale), selected);
+      canvas.drawRect(geometry.toViewRect(rect), selected);
     }
     final normal = Paint()..color = const Color(0x66FFEB3B);
     final current = Paint()..color = const Color(0x88FF9800);
     for (final match in matches) {
       final paint = identical(match, currentMatch) ? current : normal;
       for (final rect in match.rects) {
-        canvas.drawRect(_toViewRect(rect, scale), paint);
+        canvas.drawRect(geometry.toViewRect(rect), paint);
       }
     }
   }
-
-  Rect _toViewRect(PdfRect rect, double scale) => Rect.fromLTRB(
-        (rect.left - box.left) * scale,
-        (box.top - rect.top) * scale,
-        (rect.right - box.left) * scale,
-        (box.top - rect.bottom) * scale,
-      );
 
   @override
   bool shouldRepaint(_HighlightPainter oldDelegate) =>

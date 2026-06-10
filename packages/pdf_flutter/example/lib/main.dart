@@ -33,6 +33,25 @@ class _ViewerScreenState extends State<ViewerScreen> {
   PdfDocument? _document;
   String _title = '';
   String? _error;
+  bool _showOverlays = false;
+
+  void _onAction(PdfAction action, PdfAnnotation annotation) {
+    // GoTo and the standard named page actions never get here (the viewer
+    // follows them itself); this is where an app dispatches its own
+    // custom-scheme URIs, opens external links, etc.
+    final description = switch (action) {
+      PdfUriAction(:final uri) => 'Link: $uri',
+      PdfJavaScriptAction(:final script) =>
+        'JavaScript action: ${script.length > 60 ? script.substring(0, 60) : script}',
+      PdfNamedAction(:final name) => 'Named action: $name',
+      PdfUnknownAction(:final type) => 'Unhandled action type: $type',
+      PdfGoToAction() => 'GoTo', // unreachable
+    };
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(description),
+      duration: const Duration(seconds: 2),
+    ));
+  }
 
   @override
   void initState() {
@@ -113,6 +132,12 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     },
                   ),
           ),
+          if (_document != null)
+            IconButton(
+              icon: Icon(_showOverlays ? Icons.layers : Icons.layers_outlined),
+              tooltip: 'Toggle widget overlay demo',
+              onPressed: () => setState(() => _showOverlays = !_showOverlays),
+            ),
           IconButton(
             icon: const Icon(Icons.folder_open),
             tooltip: 'Open PDF',
@@ -141,8 +166,60 @@ class _ViewerScreenState extends State<ViewerScreen> {
         (final PdfDocument document, _) => PdfViewer(
             document: document,
             controller: _controller,
+            onAction: _onAction,
+            pageOverlayBuilder: !_showOverlays
+                ? null
+                : (context, pageIndex, geometry) => [
+                      // a live Flutter widget pinned to page coordinates:
+                      // a sticky note at 1in from the page's top-left
+                      if (pageIndex == _controller.currentPage)
+                        Positioned.fromRect(
+                          rect: geometry.toViewRect(PdfRect(
+                            geometry.cropBox.left + 72,
+                            geometry.cropBox.top - 144,
+                            geometry.cropBox.left + 216,
+                            geometry.cropBox.top - 72,
+                          )),
+                          child: _StickyNote(pageIndex: pageIndex),
+                        ),
+                    ],
           ),
       },
+    );
+  }
+}
+
+/// Overlay demo: an interactive Material widget living on the page,
+/// scrolling and zooming with it.
+class _StickyNote extends StatefulWidget {
+  const _StickyNote({required this.pageIndex});
+
+  final int pageIndex;
+
+  @override
+  State<_StickyNote> createState() => _StickyNoteState();
+}
+
+class _StickyNoteState extends State<_StickyNote> {
+  int _taps = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xEEFFF59D),
+      elevation: 2,
+      borderRadius: BorderRadius.circular(4),
+      child: InkWell(
+        onTap: () => setState(() => _taps++),
+        child: Center(
+          child: Text(
+            'Flutter widget on page ${widget.pageIndex + 1}\n'
+            'taps: $_taps',
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Colors.black87),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -343,4 +343,44 @@ void main() {
     await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(controller.currentPage, 4);
   });
+
+  testWidgets('page overlays sit at PDF coordinates and stay interactive',
+      (tester) async {
+    var taps = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PdfViewer(
+          document: PdfDocument.open(buildMultiPagePdf(2)),
+          pageOverlayBuilder: (context, pageIndex, geometry) => [
+            if (pageIndex == 0)
+              Positioned.fromRect(
+                rect: geometry.toViewRect(const PdfRect(72, 692, 172, 742)),
+                child: TextButton(
+                  key: const Key('overlay'),
+                  onPressed: () => taps++,
+                  child: const Text('go'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    // page 0 starts at scroll offset 0, so view space == page view space
+    const scale = 800 / 612;
+    final rect = tester.getRect(find.byKey(const Key('overlay')));
+    expect(rect.left, moreOrLessEquals(72 * scale, epsilon: 0.1));
+    expect(rect.top, moreOrLessEquals((792 - 742) * scale, epsilon: 0.1));
+    expect(rect.width, moreOrLessEquals(100 * scale, epsilon: 0.1));
+    expect(rect.height, moreOrLessEquals(50 * scale, epsilon: 0.1));
+
+    // the overlay's own recognizer beats the viewer's tap/selection handling
+    await tester.tap(find.byKey(const Key('overlay')));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(taps, 1);
+
+    // only page 0 got an overlay
+    expect(find.byType(TextButton), findsOneWidget);
+  });
 }

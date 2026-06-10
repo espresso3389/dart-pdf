@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:pdf_cos/pdf_cos.dart';
 
+import 'annotation.dart';
 import 'document.dart';
 import 'rect.dart';
 
@@ -43,6 +44,19 @@ class PdfPage {
   }
 
   CosDictionary get resources => _resources ?? CosDictionary();
+
+  List<PdfAnnotation>? _annotations;
+
+  /// The page's annotations (/Annots), parsed lazily and cached.
+  List<PdfAnnotation> get annotations => _annotations ??= () {
+        final raw = document.cos.resolve(dict['Annots']);
+        if (raw is! CosArray) return const <PdfAnnotation>[];
+        return <PdfAnnotation>[
+          for (final item in raw.items)
+            if (document.cos.resolve(item) case final CosDictionary d)
+              PdfAnnotation.fromDict(document, d),
+        ];
+      }();
 
   /// The page's content streams, decoded and concatenated.
   Uint8List contentBytes() {

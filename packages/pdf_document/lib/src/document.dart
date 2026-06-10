@@ -63,6 +63,38 @@ class PdfDocument {
     return found;
   }
 
+  List<CosDictionary>? _leafCache;
+
+  /// Zero-based index of a page dictionary, or -1 if it isn't a leaf of
+  /// this document's page tree. Resolved objects are cached by reference,
+  /// so identity comparison is sound. Used to resolve link destinations.
+  int pageIndexOf(CosDictionary pageDict) {
+    final leaves = _leafCache ??= () {
+      final out = <CosDictionary>[];
+      _collectLeaves(_pagesRoot, out, <CosDictionary>{});
+      return out;
+    }();
+    for (var i = 0; i < leaves.length; i++) {
+      if (identical(leaves[i], pageDict)) return i;
+    }
+    return -1;
+  }
+
+  void _collectLeaves(CosDictionary node, List<CosDictionary> out,
+      Set<CosDictionary> visited) {
+    if (!visited.add(node)) return;
+    if (_isLeaf(node)) {
+      out.add(node);
+      return;
+    }
+    final kids = cos.resolve(node['Kids']);
+    if (kids is! CosArray) return;
+    for (final kid in kids.items) {
+      final child = cos.resolve(kid);
+      if (child is CosDictionary) _collectLeaves(child, out, visited);
+    }
+  }
+
   bool _isLeaf(CosDictionary node) =>
       node.typeName == 'Page' || !node.containsKey('Kids');
 

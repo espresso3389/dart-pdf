@@ -125,6 +125,73 @@ Uint8List buildMultiPagePdf(int pageCount) {
   return ascii(buffer.toString());
 }
 
+/// Builds a 3-page PDF whose first page carries interactive annotations:
+///
+/// - a URI link at rect (72,640)-(200,664) → `app://invoice/42`
+/// - a GoTo link at (72,600)-(200,624) → page 3, /XYZ top
+/// - a named-destination link at (72,560)-(200,584) → "Target", resolved
+///   through the /Names → /Dests name tree to page 2, /FitH 700
+/// - a Widget push button "actions.launch" at (72,520)-(200,544) with a
+///   JavaScript action
+/// - a Named-action link at (300,640)-(400,664) → /NextPage
+/// - a hidden (/F 2) URI link at (300,600)-(400,624)
+///
+/// Page N shows the text "Page N" at 72,720 (24pt Helvetica), as in
+/// [buildMultiPagePdf].
+Uint8List buildAnnotatedPdf() {
+  // objects: 1 catalog, 2 pages, 3/5/7 page 1..3, 4/6/8 contents, 9 font,
+  // 10 the button's parent field (exercises the /Parent name chain)
+  const annots = '/Annots [ '
+      '<< /Type /Annot /Subtype /Link /Rect [72 640 200 664] '
+      '/A << /S /URI /URI (app://invoice/42) >> >> '
+      '<< /Type /Annot /Subtype /Link /Rect [72 600 200 624] '
+      '/A << /S /GoTo /D [7 0 R /XYZ 0 792 0] >> >> '
+      '<< /Type /Annot /Subtype /Link /Rect [72 560 200 584] '
+      '/Dest (Target) >> '
+      '<< /Type /Annot /Subtype /Widget /FT /Btn /T (launch) '
+      '/Parent 10 0 R /Rect [72 520 200 544] '
+      '/A << /S /JavaScript /JS (app.alert\\(42\\)) >> >> '
+      '<< /Type /Annot /Subtype /Link /Rect [300 640 400 664] '
+      '/A << /S /Named /N /NextPage >> >> '
+      '<< /Type /Annot /Subtype /Link /Rect [300 600 400 624] /F 2 '
+      '/A << /S /URI /URI (app://hidden) >> >> '
+      ']';
+  final objects = <String>[
+    '<< /Type /Catalog /Pages 2 0 R '
+        '/Names << /Dests << /Names [ (Target) [5 0 R /FitH 700] ] >> >> >>',
+    '<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R] /Count 3 >>',
+  ];
+  for (var i = 0; i < 3; i++) {
+    final content = 'BT /F1 24 Tf 72 720 Td (Page ${i + 1}) Tj ET';
+    objects.add('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+        '/Contents ${4 + i * 2} 0 R '
+        '/Resources << /Font << /F1 9 0 R >> >> '
+        '${i == 0 ? annots : ''}>>');
+    objects
+        .add('<< /Length ${content.length} >>\nstream\n$content\nendstream');
+  }
+  objects.add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  objects.add('<< /T (actions) >>');
+
+  final buffer = StringBuffer('%PDF-1.4\n');
+  final offsets = <int>[];
+  for (var i = 0; i < objects.length; i++) {
+    offsets.add(buffer.length);
+    buffer.write('${i + 1} 0 obj\n${objects[i]}\nendobj\n');
+  }
+  final xrefOffset = buffer.length;
+  buffer
+    ..write('xref\n0 ${objects.length + 1}\n')
+    ..write('0000000000 65535 f \n');
+  for (final offset in offsets) {
+    buffer.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  buffer
+    ..write('trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n')
+    ..write('startxref\n$xrefOffset\n%%EOF\n');
+  return ascii(buffer.toString());
+}
+
 /// Builds a minimal TrueType font, unitsPerEm 1000, three glyphs:
 /// 0 = .notdef (empty), 1 = 'A' (triangle, advance 600),
 /// 2 = 'B' (square, advance 1000). The cmap is a (3,1) format 4 table.

@@ -1,0 +1,353 @@
+import 'dart:convert';
+
+import 'package:pdf_cos/pdf_cos.dart';
+
+import 'document.dart';
+import 'rect.dart';
+
+/// An entry in a page's /Annots array (§12.5).
+///
+/// Interactive subtypes get their own classes ([PdfLinkAnnotation],
+/// [PdfWidgetAnnotation]); everything else (highlights, stamps, ink, ...)
+/// parses as a plain [PdfAnnotation] until those kinds grow richer models.
+class PdfAnnotation {
+  PdfAnnotation._({
+    required this.document,
+    required this.dict,
+    required this.subtype,
+    required this.rect,
+    required this.flags,
+  });
+
+  factory PdfAnnotation.fromDict(PdfDocument document, CosDictionary dict) {
+    final cos = document.cos;
+    final subtypeName = cos.resolve(dict['Subtype']);
+    final subtype = subtypeName is CosName ? subtypeName.value : '';
+    final rect =
+        pdfRectFrom(cos, dict['Rect']) ?? const PdfRect(0, 0, 0, 0);
+    final f = cos.resolve(dict['F']);
+    final flags = f is CosInteger ? f.value : 0;
+
+    switch (subtype) {
+      case 'Link':
+        return PdfLinkAnnotation._(
+          document: document,
+          dict: dict,
+          rect: rect,
+          flags: flags,
+          action: PdfAction.parse(document, dict['A']) ??
+              _destAsGoTo(document, dict['Dest']),
+        );
+      case 'Widget':
+        return PdfWidgetAnnotation._parse(
+            document: document, dict: dict, rect: rect, flags: flags);
+      default:
+        return PdfAnnotation._(
+          document: document,
+          dict: dict,
+          subtype: subtype,
+          rect: rect,
+          flags: flags,
+        );
+    }
+  }
+
+  final PdfDocument document;
+
+  /// The raw annotation dictionary, for entries not surfaced here yet.
+  final CosDictionary dict;
+
+  /// The /Subtype name without the slash ('Link', 'Widget', 'Highlight'...).
+  final String subtype;
+
+  /// Bounds in page space (PDF user space, y up).
+  final PdfRect rect;
+
+  /// The /F flag word (§12.5.3).
+  final int flags;
+
+  bool get isHidden => flags & 2 != 0;
+  bool get isNoView => flags & 32 != 0;
+
+  /// The action this annotation triggers when activated, if any.
+  PdfAction? get action => null;
+
+  static PdfGoToAction? _destAsGoTo(PdfDocument document, CosObject? raw) {
+    final destination = PdfDestination.parse(document, raw);
+    return destination == null ? null : PdfGoToAction(destination);
+  }
+}
+
+/// A /Link annotation: a clickable region with an action (§12.5.6.5).
+///
+/// A bare /Dest entry (the pre-action way to express "go to page X")
+/// surfaces as a [PdfGoToAction] so consumers handle one shape.
+class PdfLinkAnnotation extends PdfAnnotation {
+  PdfLinkAnnotation._({
+    required super.document,
+    required super.dict,
+    required super.rect,
+    required super.flags,
+    required PdfAction? action,
+  })  : _action = action,
+        super._(subtype: 'Link');
+
+  final PdfAction? _action;
+
+  @override
+  PdfAction? get action => _action;
+}
+
+/// A /Widget annotation: the visible incarnation of an AcroForm field
+/// (§12.5.6.19). Push buttons carry actions; other field kinds will grow
+/// value accessors when form filling lands.
+class PdfWidgetAnnotation extends PdfAnnotation {
+  PdfWidgetAnnotation._({
+    required super.document,
+    required super.dict,
+    required super.rect,
+    required super.flags,
+    required PdfAction? action,
+    required this.fieldType,
+    required this.fieldName,
+  })  : _action = action,
+        super._(subtype: 'Widget');
+
+  factory PdfWidgetAnnotation._parse({
+    required PdfDocument document,
+    required CosDictionary dict,
+    required PdfRect rect,
+    required int flags,
+  }) {
+    // /FT and /T live on the widget itself when field and widget are
+    // merged, otherwise up the /Parent field chain; /T parts join into the
+    // fully qualified field name (§12.7.4.2)
+    final cos = document.cos;
+    String? fieldType;
+    final parts = <String>[];
+    CosDictionary? node = dict;
+    final visited = <CosDictionary>{};
+    while (node != null && visited.add(node)) {
+      final t = cos.resolve(node['T']);
+      if (t is CosString) parts.insert(0, t.text);
+      if (fieldType == null) {
+        final ft = cos.resolve(node['FT']);
+        if (ft is CosName) fieldType = ft.value;
+      }
+      final parent = cos.resolve(node['Parent']);
+      node = parent is CosDictionary ? parent : null;
+    }
+    return PdfWidgetAnnotation._(
+      document: document,
+      dict: dict,
+      rect: rect,
+      flags: flags,
+      action: PdfAction.parse(document, dict['A']),
+      fieldType: fieldType,
+      fieldName: parts.isEmpty ? null : parts.join('.'),
+    );
+  }
+
+  final PdfAction? _action;
+
+  /// The field type name without the slash ('Btn', 'Tx', 'Ch', 'Sig').
+  final String? fieldType;
+
+  /// Fully qualified field name (partial names joined with dots).
+  final String? fieldName;
+
+  @override
+  PdfAction? get action => _action;
+}
+
+/// An action dictionary (§12.6). Unrecognized types parse as
+/// [PdfUnknownAction] with the raw dictionary attached, so apps can still
+/// inspect /Launch, /GoToR, /SubmitForm, ... themselves.
+sealed class PdfAction {
+  const PdfAction();
+
+  static PdfAction? parse(PdfDocument document, CosObject? raw) {
+    final cos = document.cos;
+    final dict = cos.resolve(raw);
+    if (dict is! CosDictionary) return null;
+    final s = cos.resolve(dict['S']);
+    final type = s is CosName ? s.value : '';
+    switch (type) {
+      case 'URI':
+        final uri = cos.resolve(dict['URI']);
+        return uri is CosString ? PdfUriAction(uri.text) : null;
+      case 'GoTo':
+        final destination = PdfDestination.parse(document, dict['D']);
+        return destination == null ? null : PdfGoToAction(destination);
+      case 'Named':
+        final name = cos.resolve(dict['N']);
+        return name is CosName ? PdfNamedAction(name.value) : null;
+      case 'JavaScript':
+        final js = cos.resolve(dict['JS']);
+        if (js is CosString) return PdfJavaScriptAction(js.text);
+        if (js is CosStream) {
+          return PdfJavaScriptAction(
+              utf8.decode(cos.decodeStreamData(js), allowMalformed: true));
+        }
+        return null;
+      default:
+        return PdfUnknownAction(type, dict);
+    }
+  }
+}
+
+/// /URI: open a (possibly app-defined) URI. The conventional bridge for
+/// "a button in the PDF drives the host app": author links with a custom
+/// scheme and dispatch on it in the viewer's action callback.
+class PdfUriAction extends PdfAction {
+  const PdfUriAction(this.uri);
+  final String uri;
+}
+
+/// /GoTo: jump to a destination in this document.
+class PdfGoToAction extends PdfAction {
+  const PdfGoToAction(this.destination);
+  final PdfDestination destination;
+}
+
+/// /Named: a viewer-defined action (NextPage, PrevPage, FirstPage,
+/// LastPage are the standard four).
+class PdfNamedAction extends PdfAction {
+  const PdfNamedAction(this.name);
+  final String name;
+}
+
+/// /JavaScript: the script is surfaced verbatim — there is deliberately no
+/// JS engine here. Apps that author their own PDFs can pattern-match the
+/// source; everything else should be ignored.
+class PdfJavaScriptAction extends PdfAction {
+  const PdfJavaScriptAction(this.script);
+  final String script;
+}
+
+/// Any /S type without a dedicated class yet.
+class PdfUnknownAction extends PdfAction {
+  const PdfUnknownAction(this.type, this.dict);
+  final String type;
+  final CosDictionary dict;
+}
+
+/// An explicit destination (§12.3.2.2): a target page plus how to fit it.
+class PdfDestination {
+  const PdfDestination({
+    required this.pageIndex,
+    required this.fit,
+    required this.params,
+  });
+
+  /// Zero-based page index, already resolved from the page reference.
+  final int pageIndex;
+
+  /// The fit style name without the slash: XYZ, Fit, FitH, FitV, FitR,
+  /// FitB, FitBH, or FitBV.
+  final String fit;
+
+  /// The numeric operands after the fit name; null entries were /null in
+  /// the file (meaning "keep the current value").
+  final List<double?> params;
+
+  double? get left => switch (fit) {
+        'XYZ' || 'FitV' || 'FitBV' => _param(0),
+        'FitR' => _param(0),
+        _ => null,
+      };
+
+  double? get top => switch (fit) {
+        'XYZ' => _param(1),
+        'FitH' || 'FitBH' => _param(0),
+        'FitR' => _param(3),
+        _ => null,
+      };
+
+  double? get zoom => fit == 'XYZ' ? _param(2) : null;
+
+  double? _param(int i) => i < params.length ? params[i] : null;
+
+  /// Parses any destination form: an explicit array, a name or string
+  /// resolved through the catalog's /Dests dictionary or the /Names →
+  /// /Dests name tree, or a dictionary wrapping the array under /D.
+  static PdfDestination? parse(PdfDocument document, CosObject? raw) {
+    final cos = document.cos;
+    var value = cos.resolve(raw);
+    if (value is CosName) value = cos.resolve(_lookupNamed(document, value.value));
+    if (value is CosString) value = cos.resolve(_lookupNamed(document, value.text));
+    if (value is CosDictionary) value = cos.resolve(value['D']);
+    if (value is! CosArray || value.length == 0) return null;
+
+    final pageObj = cos.resolve(value[0]);
+    final int pageIndex;
+    if (pageObj is CosDictionary) {
+      pageIndex = document.pageIndexOf(pageObj);
+    } else if (pageObj is CosInteger) {
+      // remote destinations count pages instead of referencing them; some
+      // broken in-document destinations do too
+      pageIndex = pageObj.value;
+    } else {
+      return null;
+    }
+    if (pageIndex < 0) return null;
+
+    var fit = 'Fit';
+    if (value.length > 1) {
+      final f = cos.resolve(value[1]);
+      if (f is CosName) fit = f.value;
+    }
+    final params = <double?>[];
+    for (var i = 2; i < value.length; i++) {
+      final n = cos.resolve(value[i]);
+      params.add(n is CosInteger
+          ? n.value.toDouble()
+          : n is CosReal
+              ? n.value
+              : null);
+    }
+    return PdfDestination(pageIndex: pageIndex, fit: fit, params: params);
+  }
+
+  static CosObject? _lookupNamed(PdfDocument document, String name) {
+    final cos = document.cos;
+    // PDF 1.1 kept named destinations in a plain catalog /Dests dictionary
+    final dests = cos.resolve(document.catalog['Dests']);
+    if (dests is CosDictionary && dests.containsKey(name)) {
+      return dests[name];
+    }
+    final names = cos.resolve(document.catalog['Names']);
+    if (names is CosDictionary) {
+      final tree = cos.resolve(names['Dests']);
+      if (tree is CosDictionary) {
+        return _searchNameTree(cos, tree, name, <CosDictionary>{});
+      }
+    }
+    return null;
+  }
+
+  /// Linear name-tree walk; /Limits-guided binary search is an
+  /// optimization real-world files often get wrong, so stay lenient.
+  static CosObject? _searchNameTree(CosDocument cos, CosDictionary node,
+      String name, Set<CosDictionary> visited) {
+    if (!visited.add(node)) return null;
+    final entries = cos.resolve(node['Names']);
+    if (entries is CosArray) {
+      for (var i = 0; i + 1 < entries.length; i += 2) {
+        final key = cos.resolve(entries[i]);
+        if (key is CosString && key.text == name) return entries[i + 1];
+      }
+    }
+    final kids = cos.resolve(node['Kids']);
+    if (kids is CosArray) {
+      for (final kid in kids.items) {
+        final child = cos.resolve(kid);
+        if (child is CosDictionary) {
+          final found = _searchNameTree(cos, child, name, visited);
+          if (found != null) return found;
+        }
+      }
+    }
+    return null;
+  }
+}

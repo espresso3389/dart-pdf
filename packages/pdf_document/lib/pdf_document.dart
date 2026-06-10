@@ -2,6 +2,7 @@
 /// inherited attributes, and metadata.
 library;
 
+export 'src/annotation.dart';
 export 'src/document.dart';
 export 'src/editor.dart';
 export 'src/page.dart';

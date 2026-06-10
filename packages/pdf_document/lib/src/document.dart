@@ -69,6 +69,10 @@ class PdfDocument {
 
   List<CosDictionary>? _leafCache;
 
+  /// Drops cached page-tree state. Editing code calls this after structural
+  /// changes (reorder, removal, insertion) so lookups re-walk the tree.
+  void invalidatePageCache() => _leafCache = null;
+
   /// Zero-based index of a page dictionary, or -1 if it isn't a leaf of
   /// this document's page tree. Resolved objects are cached by reference,
   /// so identity comparison is sound. Used to resolve link destinations.

@@ -52,4 +52,8 @@ generated appearance streams (`annotation_editor.dart`) and can flatten
 them into page content. AcroForm support is in: `PdfAcroForm`/`PdfFormField`
 model (`form.dart`) plus filling with regenerated appearances
 (`form_editor.dart` — text/checkbox/radio/choice, auto-size, quadding).
-Current frontier: page manipulation (reorder, merge, split).
+Page manipulation is in (`page_editor.dart`): reorder/move/remove flatten
+the page tree (materializing inherited attributes), `appendPagesFrom`
+deep-copies pages across documents, `extractPages` splits into a fresh
+file via `CosDocumentBuilder` (pdf_cos's from-scratch writer).
+Current frontier: digital signatures (signing and validation).

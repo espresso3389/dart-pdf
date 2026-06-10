@@ -41,10 +41,14 @@ class CosIncrementalUpdater {
   }
 
   /// Allocates a fresh object number for [object] and returns its reference.
+  /// The object is also adopted into the document's cache, so references to
+  /// it resolve immediately — edits can build on each other before [save].
   CosReference addObject(CosObject object) {
     final number = _nextObjectNumber++;
     _changed[number] = object;
-    return CosReference(number, 0);
+    final ref = CosReference(number, 0);
+    document.adoptObject(ref, object);
+    return ref;
   }
 
   /// Marks an object that was loaded (and then mutated in place) as changed,

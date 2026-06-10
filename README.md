@@ -47,9 +47,10 @@ core runs on servers and in plain Dart tests.
 9. ✅ AcroForm: field model (text, check box, radio, choice), filling
    with regenerated appearances (auto-size, multiline wrap, quadding,
    /MK decorations)
-10. **Page manipulation: reorder, merge, split (cross-document object
-    copying)** — next
-11. Digital signatures: signing and validation
+10. ✅ Page manipulation: reorder/move, remove, merge with cross-document
+    object copying (`appendPagesFrom`), and split (`extractPages` writes a
+    standalone file; extracting from an encrypted document decrypts)
+11. **Digital signatures: signing and validation** — next
 12. Content editing tiers: stamping → element deletion → text editing
 
 ## Development

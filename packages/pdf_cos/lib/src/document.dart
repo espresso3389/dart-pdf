@@ -142,6 +142,14 @@ class CosDocument {
     return null;
   }
 
+  /// Registers an in-memory [object] under [ref] as if it had been loaded
+  /// from the file, so it resolves (and [referenceTo] finds it) before the
+  /// pending update is saved. [CosIncrementalUpdater.addObject] calls this
+  /// for every object it allocates.
+  void adoptObject(CosReference ref, CosObject object) {
+    _cache[ref] = object;
+  }
+
   /// Loads an object by number, parsing it on first access.
   CosObject getObject(int objectNumber, int generation) {
     final ref = CosReference(objectNumber, generation);

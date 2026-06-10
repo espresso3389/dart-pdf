@@ -2,6 +2,7 @@
 /// tokenizer, parser, filters, cross-reference machinery, and serializer.
 library;
 
+export 'src/builder.dart';
 export 'src/crypto/aes.dart';
 export 'src/crypto/rc4.dart';
 export 'src/crypto/standard_security_handler.dart';

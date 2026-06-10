@@ -127,6 +127,57 @@ Uint8List buildMultiPagePdf(int pageCount) {
   return ascii(buffer.toString());
 }
 
+/// Builds a 3-page PDF with a nested page tree exercising attribute
+/// inheritance (§7.7.3.4):
+///
+/// - the root /Pages node carries /MediaBox [0 0 612 792] and the shared
+///   /Resources (/F1 Helvetica)
+/// - an inner /Pages node holds pages 1 and 2 and overrides
+///   /MediaBox [0 0 400 400] and /Rotate 90
+/// - page 3 sits directly under the root
+///
+/// No page dictionary carries any inheritable attribute of its own. Page N
+/// shows the text "Page N". The trailer has an /Info with /Title (Nested).
+Uint8List buildNestedPageTreePdf() {
+  final objects = <String>[
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R 6 0 R] /Count 3 '
+        '/MediaBox [0 0 612 792] '
+        '/Resources << /Font << /F1 10 0 R >> >> >>',
+    '<< /Type /Pages /Parent 2 0 R /Kids [4 0 R 5 0 R] /Count 2 '
+        '/MediaBox [0 0 400 400] /Rotate 90 >>',
+    '<< /Type /Page /Parent 3 0 R /Contents 7 0 R >>',
+    '<< /Type /Page /Parent 3 0 R /Contents 8 0 R >>',
+    '<< /Type /Page /Parent 2 0 R /Contents 9 0 R >>',
+  ];
+  for (var i = 0; i < 3; i++) {
+    final content = 'BT /F1 24 Tf 72 320 Td (Page ${i + 1}) Tj ET';
+    objects
+        .add('<< /Length ${content.length} >>\nstream\n$content\nendstream');
+  }
+  objects.add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  objects.add('<< /Title (Nested) >>');
+
+  final buffer = StringBuffer('%PDF-1.4\n');
+  final offsets = <int>[];
+  for (var i = 0; i < objects.length; i++) {
+    offsets.add(buffer.length);
+    buffer.write('${i + 1} 0 obj\n${objects[i]}\nendobj\n');
+  }
+  final xrefOffset = buffer.length;
+  buffer
+    ..write('xref\n0 ${objects.length + 1}\n')
+    ..write('0000000000 65535 f \n');
+  for (final offset in offsets) {
+    buffer.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  buffer
+    ..write('trailer\n<< /Size ${objects.length + 1} /Root 1 0 R '
+        '/Info ${objects.length} 0 R >>\n')
+    ..write('startxref\n$xrefOffset\n%%EOF\n');
+  return ascii(buffer.toString());
+}
+
 /// Builds a 3-page PDF whose first page carries interactive annotations:
 ///
 /// - a URI link at rect (72,640)-(200,664) → `app://invoice/42`

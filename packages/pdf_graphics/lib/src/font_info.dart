@@ -22,6 +22,9 @@ class PdfFontInfo {
     Uint8List? cidToGid,
     bool symbolic = false,
     Map<int, int>? cffCodeToGid,
+    Map<int, CosStream> type3Procs = const {},
+    this.type3Resources,
+    List<double>? type3Matrix,
   })  : _widths = widths,
         _defaultWidth = defaultWidth,
         _toUnicode = toUnicode,
@@ -29,7 +32,9 @@ class PdfFontInfo {
         _cff = cff,
         _cidToGid = cidToGid,
         _symbolic = symbolic,
-        _cffCodeToGid = cffCodeToGid;
+        _cffCodeToGid = cffCodeToGid,
+        _type3Procs = type3Procs,
+        _type3Matrix = type3Matrix;
 
   final String? baseFont;
 
@@ -50,6 +55,22 @@ class PdfFontInfo {
   /// overrides the font's built-in encoding when present.
   final Map<int, int>? _cffCodeToGid;
 
+  /// Type3 glyph procedures by character code, with their resources and
+  /// glyph-space matrix. Type3 text renders by executing these tiny content
+  /// streams — never by substitution (blank procs are intentional, e.g.
+  /// invisible text layers).
+  final Map<int, CosStream> _type3Procs;
+  final CosDictionary? type3Resources;
+  final List<double>? _type3Matrix;
+
+  bool get isType3 => _type3Matrix != null;
+
+  /// Glyph space → text space, for Type3 fonts (§9.6.5).
+  List<double> get type3Matrix =>
+      _type3Matrix ?? const [0.001, 0, 0, 0.001, 0, 0];
+
+  CosStream? type3ProcFor(int code) => _type3Procs[code];
+
   /// True when embedded glyph outlines are available.
   bool get hasOutlines => _trueType != null || _cff != null;
 
@@ -63,12 +84,21 @@ class PdfFontInfo {
     // Widths are in thousandths of an em — except for Type3 fonts, whose
     // glyph space is defined by /FontMatrix (§9.6.5).
     var widthScale = 0.001;
+    List<double>? type3Matrix;
+    var type3Procs = const <int, CosStream>{};
+    CosDictionary? type3Resources;
     if (subtypeName == 'Type3') {
+      type3Matrix = const [0.001, 0, 0, 0.001, 0, 0];
       final matrix = cos.resolve(font['FontMatrix']);
       if (matrix is CosArray && matrix.length >= 6) {
-        final a = _toNum(cos.resolve(matrix[0]));
-        if (a != 0) widthScale = a.abs();
+        type3Matrix = [
+          for (var i = 0; i < 6; i++) _toNum(cos.resolve(matrix[i])),
+        ];
+        if (type3Matrix[0] != 0) widthScale = type3Matrix[0].abs();
       }
+      type3Procs = _loadType3Procs(cos, font);
+      final resources = cos.resolve(font['Resources']);
+      if (resources is CosDictionary) type3Resources = resources;
     }
 
     final widths = <int, double>{};
@@ -145,7 +175,43 @@ class PdfFontInfo {
       cidToGid: cidToGid,
       symbolic: symbolic,
       cffCodeToGid: cffCodeToGid,
+      type3Procs: type3Procs,
+      type3Resources: type3Resources,
+      type3Matrix: type3Matrix,
     );
+  }
+
+  /// Maps character codes to /CharProcs streams via /Encoding /Differences.
+  static Map<int, CosStream> _loadType3Procs(
+      CosDocument cos, CosDictionary font) {
+    final procsDict = cos.resolve(font['CharProcs']);
+    if (procsDict is! CosDictionary) return const {};
+    final result = <int, CosStream>{};
+    _parseDifferences(cos, font['Encoding']).forEach((code, name) {
+      final proc = cos.resolve(procsDict[name]);
+      if (proc is CosStream) result[code] = proc;
+    });
+    return result;
+  }
+
+  /// Parses an /Encoding dictionary's /Differences into code → glyph name.
+  static Map<int, String> _parseDifferences(
+      CosDocument cos, CosObject? encoding) {
+    final dict = cos.resolve(encoding);
+    if (dict is! CosDictionary) return const {};
+    final differences = cos.resolve(dict['Differences']);
+    if (differences is! CosArray) return const {};
+    final result = <int, String>{};
+    var code = 0;
+    for (final item in differences.items) {
+      final resolved = cos.resolve(item);
+      if (resolved is CosInteger) {
+        code = resolved.value;
+      } else if (resolved is CosName) {
+        result[code++] = resolved.value;
+      }
+    }
+    return result;
   }
 
   /// When the PDF declares its own /Encoding, codes map by glyph name
@@ -163,22 +229,10 @@ class PdfFontInfo {
       final gid = cff.gidForName(name);
       if (gid != 0) result[code] = gid;
     }
-    if (encoding is CosDictionary) {
-      final differences = cos.resolve(encoding['Differences']);
-      if (differences is CosArray) {
-        var code = 0;
-        for (final item in differences.items) {
-          final resolved = cos.resolve(item);
-          if (resolved is CosInteger) {
-            code = resolved.value;
-          } else if (resolved is CosName) {
-            final gid = cff.gidForName(resolved.value);
-            if (gid != 0) result[code] = gid;
-            code++;
-          }
-        }
-      }
-    }
+    _parseDifferences(cos, font['Encoding']).forEach((code, name) {
+      final gid = cff.gidForName(name);
+      if (gid != 0) result[code] = gid;
+    });
     return result.isEmpty ? null : result;
   }
 

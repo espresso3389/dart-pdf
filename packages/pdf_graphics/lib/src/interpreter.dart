@@ -47,6 +47,8 @@ class _GraphicsState {
         strokeComponents = other.strokeComponents,
         fillPattern = other.fillPattern,
         fillPatternComponents = other.fillPatternComponents,
+        softMask = other.softMask,
+        blendMode = other.blendMode,
         font = other.font,
         fontDict = other.fontDict,
         fontSize = other.fontSize,
@@ -75,6 +77,11 @@ class _GraphicsState {
   CosObject? fillPattern;
   List<double> fillPatternComponents;
 
+  /// The active ExtGState /SMask, shared by reference across q/Q clones so
+  /// the interpreter can tell inherited masks from newly opened ones.
+  _ActiveSoftMask? softMask;
+  PdfBlendMode blendMode = PdfBlendMode.normal;
+
   PdfFontInfo? font;
   CosDictionary? fontDict;
   double fontSize;
@@ -84,6 +91,21 @@ class _GraphicsState {
   double leading;
   double rise;
   int renderMode;
+}
+
+class _ActiveSoftMask {
+  _ActiveSoftMask(this.form, this.matrix, this.luminosity, this.frameDepth);
+
+  final CosStream form;
+
+  /// The CTM at the moment the mask was set — mask coordinates live there.
+  final PdfMatrix matrix;
+  final bool luminosity;
+
+  /// q-nesting depth where the mask was opened; it closes when that frame
+  /// pops (or when replaced at the same depth).
+  final int frameDepth;
+  bool closed = false;
 }
 
 /// Executes page content streams against a [PdfDevice].
@@ -123,6 +145,8 @@ class PdfInterpreter {
     device.save();
     try {
       _run(ContentStreamParser.parse(page.contentBytes()), page.resources, 0);
+      final mask = _state.softMask;
+      if (mask != null) _finalizeSoftMask(mask);
     } finally {
       device.restore();
     }
@@ -156,7 +180,15 @@ class PdfInterpreter {
           device.save();
         case 'Q':
           if (_stateStack.isNotEmpty) {
-            _state = _stateStack.removeLast();
+            final restored = _stateStack.removeLast();
+            final mask = _state.softMask;
+            if (mask != null && !identical(mask, restored.softMask)) {
+              _finalizeSoftMask(mask);
+            }
+            if (_state.blendMode != restored.blendMode) {
+              device.setBlendMode(restored.blendMode);
+            }
+            _state = restored;
             device.restore();
           }
         case 'cm':
@@ -487,6 +519,112 @@ class PdfInterpreter {
     if (lw is CosInteger || lw is CosReal) {
       _state.stroke = _state.stroke.copyWith(width: _numOf(lw));
     }
+    _applyBlendMode(cos.resolve(gs['BM']));
+    _applySoftMask(cos.resolve(gs['SMask']));
+  }
+
+  void _applyBlendMode(CosObject? bm) {
+    var name = bm;
+    if (name is CosArray && name.length > 0) name = cos.resolve(name[0]);
+    if (name is! CosName) return;
+    final mode = switch (name.value) {
+      'Multiply' => PdfBlendMode.multiply,
+      'Screen' => PdfBlendMode.screen,
+      'Overlay' => PdfBlendMode.overlay,
+      'Darken' => PdfBlendMode.darken,
+      'Lighten' => PdfBlendMode.lighten,
+      'ColorDodge' => PdfBlendMode.colorDodge,
+      'ColorBurn' => PdfBlendMode.colorBurn,
+      'HardLight' => PdfBlendMode.hardLight,
+      'SoftLight' => PdfBlendMode.softLight,
+      'Difference' => PdfBlendMode.difference,
+      'Exclusion' => PdfBlendMode.exclusion,
+      'Hue' => PdfBlendMode.hue,
+      'Saturation' => PdfBlendMode.saturation,
+      'Color' => PdfBlendMode.color,
+      'Luminosity' => PdfBlendMode.luminosity,
+      _ => PdfBlendMode.normal, // incl. /Normal and /Compatible
+    };
+    if (mode != _state.blendMode) {
+      _state.blendMode = mode;
+      device.setBlendMode(mode);
+    }
+  }
+
+  void _applySoftMask(CosObject? smask) {
+    if (smask is CosName && smask.value == 'None') {
+      final mask = _state.softMask;
+      if (mask != null && mask.frameDepth == _stateStack.length) {
+        _finalizeSoftMask(mask);
+      }
+      _state.softMask = null;
+      return;
+    }
+    if (smask is! CosDictionary) return;
+    final form = cos.resolve(smask['G']);
+    if (form is! CosStream) return;
+    final mask = _state.softMask;
+    if (mask != null && mask.frameDepth == _stateStack.length) {
+      _finalizeSoftMask(mask);
+    }
+    final s = cos.resolve(smask['S']);
+    _state.softMask = _ActiveSoftMask(
+      form,
+      _state.ctm,
+      s is CosName && s.value == 'Luminosity',
+      _stateStack.length,
+    );
+    device.beginSoftMasked();
+  }
+
+  void _finalizeSoftMask(_ActiveSoftMask mask) {
+    if (mask.closed) return;
+    mask.closed = true;
+    device.endSoftMasked(
+      luminosity: mask.luminosity,
+      backdrop: _pageBox ?? const PdfRect(-1e5, -1e5, 1e5, 1e5),
+      drawMask: () => _runSoftMaskForm(mask),
+    );
+  }
+
+  /// Runs the mask group's content with a fresh graphics state in the
+  /// coordinate space captured when the mask was set.
+  void _runSoftMaskForm(_ActiveSoftMask mask) {
+    if (_currentFormDepth >= _maxFormDepth) return;
+    final Uint8List content;
+    try {
+      content = cos.decodeStreamData(mask.form);
+    } on Exception {
+      return;
+    }
+    final savedState = _state;
+    final savedStackDepth = _stateStack.length;
+    device.save();
+    try {
+      _state = _GraphicsState()..ctm = mask.matrix;
+      final matrix = cos.resolve(mask.form.dictionary['Matrix']);
+      if (matrix is CosArray && matrix.length >= 6) {
+        _state.ctm = _matrixFrom(matrix.items).concat(_state.ctm);
+      }
+      final bbox = cos.resolve(mask.form.dictionary['BBox']);
+      if (bbox is CosArray && bbox.length >= 4) {
+        _clipToBox([for (var i = 0; i < 4; i++) _numOf(cos.resolve(bbox[i]))]);
+      }
+      final resources = cos.resolve(mask.form.dictionary['Resources']);
+      _run(
+        ContentStreamParser.parse(content),
+        resources is CosDictionary ? resources : CosDictionary(),
+        _currentFormDepth + 1,
+      );
+      final nested = _state.softMask;
+      if (nested != null) _finalizeSoftMask(nested);
+    } finally {
+      while (_stateStack.length > savedStackDepth) {
+        _stateStack.removeLast();
+      }
+      _state = savedState;
+      device.restore();
+    }
   }
 
   // ---------- text ----------
@@ -515,8 +653,11 @@ class PdfInterpreter {
     final codes = font.codesOf(bytes);
     final buffer = StringBuffer();
     final emScale = size * _state.horizontalScale;
-    final glyphs =
-        font.hasOutlines && emScale != 0 ? <PdfGlyphPlacement>[] : null;
+    // a non-null (possibly empty-outlined) glyph list tells devices the font
+    // is embedded, so they must not substitute
+    final glyphs = (font.hasOutlines || font.isType3) && emScale != 0
+        ? <PdfGlyphPlacement>[]
+        : null;
     var advance = 0.0; // in unscaled text-space units
     for (final code in codes) {
       buffer.write(font.charFor(code));
@@ -524,6 +665,9 @@ class PdfInterpreter {
         offset: advance / emScale,
         outline: font.outlineFor(code),
       ));
+      if (font.isType3 && _state.renderMode != 3 && size != 0) {
+        _drawType3Glyph(font, code, advance);
+      }
       var tx = font.widthOf(code) * size + _state.charSpacing;
       if (!font.isCid && code == 0x20) tx += _state.wordSpacing;
       advance += tx * _state.horizontalScale;
@@ -537,9 +681,7 @@ class PdfInterpreter {
         0, _state.rise,
       ).concat(_textMatrix).concat(_state.ctm);
       final text = buffer.toString();
-      final hasOutlines =
-          glyphs != null && glyphs.any((g) => g.outline != null);
-      if (text.trim().isNotEmpty || hasOutlines) {
+      if (text.trim().isNotEmpty || glyphs != null) {
         device.drawText(PdfTextRun(
           text: text,
           transform: transform,
@@ -554,6 +696,48 @@ class PdfInterpreter {
       }
     }
     _textMatrix = PdfMatrix.translation(advance, 0).concat(_textMatrix);
+  }
+
+  /// Executes a Type3 glyph procedure: a tiny content stream in glyph space,
+  /// mapped through /FontMatrix and the text rendering matrix (§9.6.5).
+  void _drawType3Glyph(PdfFontInfo font, int code, double penAdvance) {
+    final proc = font.type3ProcFor(code);
+    if (proc == null || _currentFormDepth >= _maxFormDepth) return;
+    final List<ContentOperation> ops;
+    try {
+      ops = _patternOpsCache.putIfAbsent(
+          proc, () => ContentStreamParser.parse(cos.decodeStreamData(proc)));
+    } on Exception {
+      return;
+    }
+    if (ops.isEmpty) return;
+
+    final m = font.type3Matrix;
+    final glyphToText = PdfMatrix(m[0], m[1], m[2], m[3], m[4], m[5]);
+    final size = _state.fontSize;
+    final ctm = glyphToText
+        .concat(PdfMatrix(
+            size * _state.horizontalScale, 0, 0, size, 0, _state.rise))
+        .concat(PdfMatrix.translation(penAdvance, 0))
+        .concat(_textMatrix)
+        .concat(_state.ctm);
+
+    final savedState = _state;
+    final savedStackDepth = _stateStack.length;
+    device.save();
+    try {
+      _state = _GraphicsState.from(savedState)
+        ..ctm = ctm
+        ..font = null
+        ..softMask = savedState.softMask;
+      _run(ops, font.type3Resources ?? CosDictionary(), _currentFormDepth + 1);
+    } finally {
+      while (_stateStack.length > savedStackDepth) {
+        _stateStack.removeLast();
+      }
+      _state = savedState;
+      device.restore();
+    }
   }
 
   // ---------- patterns and shadings ----------
@@ -683,6 +867,8 @@ class PdfInterpreter {
           try {
             _run(ops, patternResources, _currentFormDepth + 1);
           } finally {
+            final mask = _state.softMask;
+            if (mask != null) _finalizeSoftMask(mask);
             device.restore();
           }
         }
@@ -769,6 +955,7 @@ class PdfInterpreter {
     }
     if (name != 'Form' || formDepth >= _maxFormDepth) return;
 
+    final outerMask = _state.softMask;
     _stateStack.add(_GraphicsState.from(_state));
     device.save();
     try {
@@ -793,6 +980,11 @@ class PdfInterpreter {
         formDepth + 1,
       );
     } finally {
+      // masks opened inside the form must close before its device.restore
+      final mask = _state.softMask;
+      if (mask != null && !identical(mask, outerMask)) {
+        _finalizeSoftMask(mask);
+      }
       _state = _stateStack.removeLast();
       device.restore();
     }

@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
 import 'package:pdf_cos/pdf_cos.dart';
+import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
 /// Paints interpreter callbacks onto a Flutter [Canvas].
@@ -18,6 +19,17 @@ class CanvasPdfDevice implements PdfDevice {
   final Canvas canvas;
   final Map<CosStream, ui.Image> images;
 
+  BlendMode _blend = BlendMode.srcOver;
+
+  /// Converts rendered luminance into alpha — the compositing core of a
+  /// /Luminosity soft mask.
+  static const _luminanceToAlpha = ColorFilter.matrix([
+    0, 0, 0, 0, 0, //
+    0, 0, 0, 0, 0, //
+    0, 0, 0, 0, 0, //
+    0.2126, 0.7152, 0.0722, 0, 0,
+  ]);
+
   @override
   void save() => canvas.save();
 
@@ -25,12 +37,61 @@ class CanvasPdfDevice implements PdfDevice {
   void restore() => canvas.restore();
 
   @override
+  void setBlendMode(PdfBlendMode mode) {
+    _blend = switch (mode) {
+      PdfBlendMode.normal => BlendMode.srcOver,
+      PdfBlendMode.multiply => BlendMode.multiply,
+      PdfBlendMode.screen => BlendMode.screen,
+      PdfBlendMode.overlay => BlendMode.overlay,
+      PdfBlendMode.darken => BlendMode.darken,
+      PdfBlendMode.lighten => BlendMode.lighten,
+      PdfBlendMode.colorDodge => BlendMode.colorDodge,
+      PdfBlendMode.colorBurn => BlendMode.colorBurn,
+      PdfBlendMode.hardLight => BlendMode.hardLight,
+      PdfBlendMode.softLight => BlendMode.softLight,
+      PdfBlendMode.difference => BlendMode.difference,
+      PdfBlendMode.exclusion => BlendMode.exclusion,
+      PdfBlendMode.hue => BlendMode.hue,
+      PdfBlendMode.saturation => BlendMode.saturation,
+      PdfBlendMode.color => BlendMode.color,
+      PdfBlendMode.luminosity => BlendMode.luminosity,
+    };
+  }
+
+  @override
+  void beginSoftMasked() {
+    canvas.saveLayer(null, Paint());
+  }
+
+  @override
+  void endSoftMasked(
+      {required bool luminosity,
+      required PdfRect backdrop,
+      required void Function() drawMask}) {
+    final paint = Paint()..blendMode = BlendMode.dstIn;
+    if (luminosity) paint.colorFilter = _luminanceToAlpha;
+    canvas.saveLayer(null, paint);
+    if (luminosity) {
+      // unpainted mask area has luminance 0 → fully transparent content
+      canvas.drawRect(
+        Rect.fromLTRB(
+            backdrop.left, backdrop.bottom, backdrop.right, backdrop.top),
+        Paint()..color = const Color(0xFF000000),
+      );
+    }
+    drawMask();
+    canvas.restore(); // composite the mask into the content (dstIn)
+    canvas.restore(); // composite the masked content into the page
+  }
+
+  @override
   void fillPath(PdfPath path, PdfColor color, PdfFillRule rule, double alpha) {
     canvas.drawPath(
       _toUiPath(path, rule),
       Paint()
         ..style = PaintingStyle.fill
-        ..color = _toColor(color, alpha),
+        ..color = _toColor(color, alpha)
+        ..blendMode = _blend,
     );
   }
 
@@ -49,6 +110,7 @@ class CanvasPdfDevice implements PdfDevice {
       _toUiPath(path, rule),
       Paint()
         ..shader = shader
+        ..blendMode = _blend
         ..color = Color.from(
             alpha: alpha.clamp(0, 1), red: 0, green: 0, blue: 0),
     );
@@ -74,7 +136,8 @@ class CanvasPdfDevice implements PdfDevice {
           2 => StrokeJoin.bevel,
           _ => StrokeJoin.miter,
         }
-        ..strokeMiterLimit = stroke.miterLimit,
+        ..strokeMiterLimit = stroke.miterLimit
+        ..blendMode = _blend,
     );
   }
 
@@ -85,13 +148,16 @@ class CanvasPdfDevice implements PdfDevice {
 
   @override
   void drawText(PdfTextRun run) {
-    if (run.hasOutlines) {
+    if (run.glyphs != null) {
+      // embedded font: draw its real outlines, never substitute — blank
+      // glyphs (invisible text layers, Type3 procs drawn by the
+      // interpreter) stay blank
       _drawGlyphOutlines(run);
       return;
     }
-    // No embedded outlines: substitute a system font, drawn at 100px and
-    // scaled down 100x (TextPainter quality degrades at tiny sizes; the run
-    // transform already encodes the real size).
+    // No embedded font program: substitute a system font, drawn at 100px
+    // and scaled down 100x (TextPainter quality degrades at tiny sizes; the
+    // run transform already encodes the real size).
     const renderSize = 100.0;
     final painter = TextPainter(
       text: TextSpan(text: run.text, style: _styleFor(run)),
@@ -115,7 +181,9 @@ class CanvasPdfDevice implements PdfDevice {
   /// Draws real glyph outlines from the embedded font. The run transform
   /// maps em space (y-up) to page space, so no unflip is needed.
   void _drawGlyphOutlines(PdfTextRun run) {
-    final paint = Paint()..color = _toColor(run.color, 1);
+    final paint = Paint()
+      ..color = _toColor(run.color, 1)
+      ..blendMode = _blend;
     canvas.save();
     canvas.transform(_toFloat64(run.transform));
     for (final glyph in run.glyphs!) {
@@ -137,7 +205,8 @@ class CanvasPdfDevice implements PdfDevice {
     // (PowerPoint and scanners split large images into strips)
     final paint = Paint()
       ..filterQuality = FilterQuality.medium
-      ..isAntiAlias = false;
+      ..isAntiAlias = false
+      ..blendMode = _blend;
     if (request.isStencil) {
       // stencil masks paint the fill color through the mask's alpha
       paint.colorFilter = ColorFilter.mode(

@@ -90,4 +90,14 @@ class _ClipDevice implements PdfDevice {
   void strokePath(PdfPath path, PdfColor color, PdfStroke stroke, double a) {}
   @override
   void drawImage(PdfImageRequest request) {}
+
+  @override
+  void setBlendMode(PdfBlendMode mode) {}
+  @override
+  void beginSoftMasked() {}
+  @override
+  void endSoftMasked(
+      {required bool luminosity,
+      required PdfRect backdrop,
+      required void Function() drawMask}) {}
 }

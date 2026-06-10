@@ -59,6 +59,27 @@ class RecordingDevice implements PdfDevice {
     calls.add('image');
     images.add(request);
   }
+
+  final blendModes = <PdfBlendMode>[];
+  final softMaskEnds = <(bool, void Function())>[];
+
+  @override
+  void setBlendMode(PdfBlendMode mode) {
+    calls.add('blend:${mode.name}');
+    blendModes.add(mode);
+  }
+
+  @override
+  void beginSoftMasked() => calls.add('beginSoftMasked');
+
+  @override
+  void endSoftMasked(
+      {required bool luminosity,
+      required PdfRect backdrop,
+      required void Function() drawMask}) {
+    calls.add('endSoftMasked');
+    softMaskEnds.add((luminosity, drawMask));
+  }
 }
 
 RecordingDevice interpret(String content) {
@@ -269,6 +290,86 @@ void main() {
         resources,
       );
       expect(device.gradients, hasLength(1));
+    });
+  });
+
+  group('soft masks and blend modes', () {
+    CosDictionary maskResources({String type = 'Luminosity'}) {
+      const maskContent = '1 g 0 0 50 100 re f';
+      return CosDictionary({
+        'ExtGState': CosDictionary({
+          'GS1': CosDictionary({
+            'SMask': CosDictionary({
+              'Type': const CosName('Mask'),
+              'S': CosName(type),
+              'G': CosStream(
+                CosDictionary({
+                  'Subtype': const CosName('Form'),
+                  'BBox': CosArray([
+                    const CosInteger(0),
+                    const CosInteger(0),
+                    const CosInteger(100),
+                    const CosInteger(100),
+                  ]),
+                  'Length': CosInteger(maskContent.length),
+                }),
+                Uint8List.fromList(maskContent.codeUnits),
+              ),
+            }),
+          }),
+        }),
+      });
+    }
+
+    test('q /gs ... Q wraps content in a masked group', () {
+      final doc = CosDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc, device: device).run(
+        ContentStreamParser.parse(Uint8List.fromList(
+            'q /GS1 gs 0 0 100 100 re f Q 0 0 1 1 re f'.codeUnits)),
+        maskResources(),
+      );
+      expect(
+        device.calls.where((c) => c.contains('SoftMasked')),
+        ['beginSoftMasked', 'endSoftMasked'],
+      );
+      // begin before the masked fill, end before the unmasked one
+      expect(device.calls.indexOf('beginSoftMasked'),
+          lessThan(device.calls.indexOf('fill')));
+      final (luminosity, drawMask) = device.softMaskEnds.single;
+      expect(luminosity, isTrue);
+      // the mask painter emits the mask group's content
+      final fillsBefore = device.fills.length;
+      drawMask();
+      expect(device.fills.length, greaterThan(fillsBefore));
+    });
+
+    test('alpha masks report luminosity=false', () {
+      final doc = CosDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc, device: device).run(
+        ContentStreamParser.parse(
+            Uint8List.fromList('q /GS1 gs 0 0 9 9 re f Q'.codeUnits)),
+        maskResources(type: 'Alpha'),
+      );
+      expect(device.softMaskEnds.single.$1, isFalse);
+    });
+
+    test('blend modes reach the device and restore on Q', () {
+      final doc = CosDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      final resources = CosDictionary({
+        'ExtGState': CosDictionary({
+          'GS1': CosDictionary({'BM': const CosName('Multiply')}),
+        }),
+      });
+      PdfInterpreter(cos: doc, device: device).run(
+        ContentStreamParser.parse(Uint8List.fromList(
+            'q /GS1 gs 0 0 9 9 re f Q 0 0 9 9 re f'.codeUnits)),
+        resources,
+      );
+      expect(device.blendModes,
+          [PdfBlendMode.multiply, PdfBlendMode.normal]);
     });
   });
 

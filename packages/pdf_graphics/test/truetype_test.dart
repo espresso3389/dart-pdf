@@ -104,4 +104,14 @@ class _TextRecorder implements PdfDevice {
   void clipPath(PdfPath path, PdfFillRule rule) {}
   @override
   void drawImage(PdfImageRequest request) {}
+
+  @override
+  void setBlendMode(PdfBlendMode mode) {}
+  @override
+  void beginSoftMasked() {}
+  @override
+  void endSoftMasked(
+      {required bool luminosity,
+      required PdfRect backdrop,
+      required void Function() drawMask}) {}
 }

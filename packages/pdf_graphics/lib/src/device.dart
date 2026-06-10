@@ -1,9 +1,30 @@
 import 'package:pdf_cos/pdf_cos.dart';
+import 'package:pdf_document/pdf_document.dart';
 
 import 'color.dart';
 import 'matrix.dart';
 import 'path.dart';
 import 'shading.dart';
+
+/// PDF blend modes (§11.3.5). Devices map these to their compositor.
+enum PdfBlendMode {
+  normal,
+  multiply,
+  screen,
+  overlay,
+  darken,
+  lighten,
+  colorDodge,
+  colorBurn,
+  hardLight,
+  softLight,
+  difference,
+  exclusion,
+  hue,
+  saturation,
+  color,
+  luminosity,
+}
 
 /// One glyph within a [PdfTextRun]: its outline (when the font is embedded
 /// and parsed) and its pen offset, both in em units.
@@ -109,4 +130,24 @@ abstract interface class PdfDevice {
   void drawText(PdfTextRun run);
 
   void drawImage(PdfImageRequest request);
+
+  /// Sets the blend mode for subsequent painting (gs /BM). Non-compositing
+  /// devices can ignore it.
+  void setBlendMode(PdfBlendMode mode);
+
+  /// Starts capturing painted content that an ExtGState /SMask will mask.
+  /// Visual devices open an offscreen layer; others can ignore the pair.
+  void beginSoftMasked();
+
+  /// Ends the capture opened by [beginSoftMasked]. [drawMask] paints the
+  /// mask group's content through this same device; for luminosity masks
+  /// the device converts the result's luminance to alpha over a black
+  /// [backdrop], then composites it into the captured content (dstIn).
+  /// Devices that collect content from [drawMask] (e.g. image collectors)
+  /// should invoke it even if they do no compositing.
+  void endSoftMasked({
+    required bool luminosity,
+    required PdfRect backdrop,
+    required void Function() drawMask,
+  });
 }

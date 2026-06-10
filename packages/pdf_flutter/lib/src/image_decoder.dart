@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:pdf_cos/pdf_cos.dart';
+import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
 /// Collects every image a page references, without painting anything.
@@ -27,6 +28,17 @@ class ImageCollector implements PdfDevice {
   void clipPath(PdfPath path, PdfFillRule rule) {}
   @override
   void drawText(PdfTextRun run) {}
+  @override
+  void setBlendMode(PdfBlendMode mode) {}
+  @override
+  void beginSoftMasked() {}
+  @override
+  void endSoftMasked(
+      {required bool luminosity,
+      required PdfRect backdrop,
+      required void Function() drawMask}) {
+    drawMask(); // mask groups can reference images that need decoding
+  }
 }
 
 /// Decodes image XObjects to [ui.Image]s ahead of the (synchronous) paint.

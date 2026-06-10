@@ -190,6 +190,15 @@ class _PdfViewerState extends State<PdfViewer>
   /// InteractiveViewer instead (the standard ctrl+wheel zoom).
   bool _zoomModifierDown = false;
 
+  // double-click-and-drag selects by whole words. The double-tap
+  // recognizer rejects as soon as the pointer moves, so the drag arrives
+  // as a plain pan — a raw pointer listener spots that the press was the
+  // second click of a double-click.
+  Duration? _lastMouseDownStamp;
+  Offset? _lastMouseDownLocal;
+  bool _wordDrag = false;
+  ((int, int), (int, int))? _wordAnchor;
+
   @override
   void initState() {
     super.initState();
@@ -360,8 +369,36 @@ class _PdfViewerState extends State<PdfViewer>
     if (cursor != _hoverCursor) setState(() => _hoverCursor = cursor);
   }
 
+  void _onPointerDown(PointerDownEvent event) {
+    if (event.kind != PointerDeviceKind.mouse) {
+      _wordDrag = false;
+      return;
+    }
+    final lastStamp = _lastMouseDownStamp;
+    final lastLocal = _lastMouseDownLocal;
+    _wordDrag = lastStamp != null &&
+        lastLocal != null &&
+        event.timeStamp - lastStamp < kDoubleTapTimeout &&
+        (event.localPosition - lastLocal).distance < kDoubleTapSlop;
+    _lastMouseDownStamp = event.timeStamp;
+    _lastMouseDownLocal = event.localPosition;
+  }
+
   void _onSelectionStart(DragStartDetails details) {
     _focusNode.requestFocus();
+    if (_wordDrag) {
+      // double-click-and-drag: anchor on the word under the original
+      // press (the drag start has already moved past the touch slop)
+      final anchor = _wordRangeAt(_lastMouseDownLocal ?? details.localPosition);
+      _wordAnchor = anchor;
+      setState(() {
+        _selAnchor = anchor?.$1;
+        _selFocus = anchor?.$2;
+      });
+      _controller._setSelection(anchor == null ? '' : _selectedText());
+      return;
+    }
+    _wordAnchor = null;
     final position =
         _textPositionAt(details.localPosition, tolerance: 14);
     setState(() {
@@ -372,6 +409,23 @@ class _PdfViewerState extends State<PdfViewer>
   }
 
   void _onSelectionUpdate(DragUpdateDetails details) {
+    final wordAnchor = _wordAnchor;
+    if (wordAnchor != null) {
+      // word granularity: span from the anchor word through the word
+      // under the pointer
+      final range =
+          _wordRangeAt(details.localPosition, tolerance: double.infinity);
+      if (range == null) return;
+      final start = _isBefore(range.$1, wordAnchor.$1) ? range.$1 : wordAnchor.$1;
+      final end = _isBefore(wordAnchor.$2, range.$2) ? range.$2 : wordAnchor.$2;
+      if (start == _selAnchor && end == _selFocus) return;
+      setState(() {
+        _selAnchor = start;
+        _selFocus = end;
+      });
+      _controller._setSelection(_selectedText());
+      return;
+    }
     if (_selAnchor == null) return;
     final position = _textPositionAt(details.localPosition,
         tolerance: double.infinity);
@@ -381,6 +435,7 @@ class _PdfViewerState extends State<PdfViewer>
   }
 
   void _clearSelection() {
+    _wordAnchor = null;
     if (_selAnchor != null || _selFocus != null) {
       setState(() {
         _selAnchor = null;
@@ -443,13 +498,11 @@ class _PdfViewerState extends State<PdfViewer>
     setState(() {}); // repaint highlights with the new current match
   }
 
-  /// Selects the whitespace-delimited word at a point (list coordinates).
-  void _selectWordAt(Offset local) {
-    final position = _textPositionAt(local, tolerance: 14);
-    if (position == null) {
-      _clearSelection();
-      return;
-    }
+  /// The whitespace-delimited word range at a point (list coordinates).
+  ((int, int), (int, int))? _wordRangeAt(Offset local,
+      {double tolerance = 14}) {
+    final position = _textPositionAt(local, tolerance: tolerance);
+    if (position == null) return null;
     final text = _pageText(position.$1).text;
     var start = position.$2.clamp(0, text.length);
     var end = start;
@@ -460,14 +513,24 @@ class _PdfViewerState extends State<PdfViewer>
     while (end < text.length && isWordChar(text[end])) {
       end++;
     }
-    if (start == end) {
+    if (start == end) return null;
+    return ((position.$1, start), (position.$1, end));
+  }
+
+  static bool _isBefore((int, int) a, (int, int) b) =>
+      a.$1 < b.$1 || (a.$1 == b.$1 && a.$2 < b.$2);
+
+  /// Selects the whitespace-delimited word at a point (list coordinates).
+  void _selectWordAt(Offset local) {
+    final range = _wordRangeAt(local);
+    if (range == null) {
       _clearSelection();
       return;
     }
     _focusNode.requestFocus();
     setState(() {
-      _selAnchor = (position.$1, start);
-      _selFocus = (position.$1, end);
+      _selAnchor = range.$1;
+      _selFocus = range.$2;
     });
     _controller._setSelection(_selectedText());
   }
@@ -554,18 +617,21 @@ class _PdfViewerState extends State<PdfViewer>
                     setState(() => _hoverCursor = MouseCursor.defer);
                   }
                 },
-                child: GestureDetector(
-                  onTap: _clearSelection,
-                  onPanStart: _onSelectionStart,
-                  onPanUpdate: _onSelectionUpdate,
-                  child: ColoredBox(
+                child: Listener(
+                  onPointerDown: _onPointerDown,
+                  child: GestureDetector(
+                    onTap: _clearSelection,
+                    onPanStart: _onSelectionStart,
+                    onPanUpdate: _onSelectionUpdate,
+                    child: ColoredBox(
                     color: const Color(0xFF404347),
-                    // with ctrl/cmd held the list stops claiming wheel
-                    // events, so they reach the InteractiveViewer, which
-                    // zooms around the pointer
-                    child: IgnorePointer(
-                      ignoring: _zoomModifierDown,
-                      child: list,
+                      // with ctrl/cmd held the list stops claiming wheel
+                      // events, so they reach the InteractiveViewer, which
+                      // zooms around the pointer
+                      child: IgnorePointer(
+                        ignoring: _zoomModifierDown,
+                        child: list,
+                      ),
                     ),
                   ),
                 ),

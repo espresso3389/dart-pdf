@@ -197,6 +197,34 @@ void main() {
     expect(controller.zoom, 1);
   });
 
+  testWidgets('double-click and drag selects whole words', (tester) async {
+    final controller = await pumpViewer(tester);
+    const scale = 800 / 612;
+    Offset view(double x, double y) => Offset(x * scale, (792 - y) * scale);
+    // 'Page 1' at 24pt: 'Page' spans x 72..120, '1' spans x 132..144
+
+    // first click
+    await tester.tapAt(view(100, 720), kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 80));
+    // second press, held and dragged: anchor word 'Page', extend over '1'
+    final gesture = await tester.startGesture(view(100, 720),
+        kind: PointerDeviceKind.mouse);
+    await gesture.moveBy(const Offset(25, 0)); // pass the drag slop
+    await tester.pump();
+    await gesture.moveTo(view(140, 720));
+    await tester.pump();
+    expect(controller.selectedText, 'Page 1');
+
+    // dragging back to the anchor word shrinks to just that word
+    await gesture.moveTo(view(100, 720));
+    await tester.pump();
+    expect(controller.selectedText, 'Page');
+
+    await gesture.up();
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(controller.selectedText, 'Page');
+  });
+
   testWidgets('ctrl+wheel zooms, plain wheel scrolls', (tester) async {
     final controller = await pumpViewer(tester);
     final pointer = TestPointer(11, PointerDeviceKind.mouse);

@@ -113,6 +113,16 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
 }
 
 Future<ui.Image> _imageFromPixels(Uint8List rgba, int width, int height) {
+  // decodeImageFromPixels treats rgba8888 as premultiplied; straight
+  // alpha would make transparent-but-colored pixels (a white backdrop
+  // under an /SMask cutout) composite additively as solid color
+  for (var i = 0; i < rgba.length; i += 4) {
+    final a = rgba[i + 3];
+    if (a == 255) continue;
+    rgba[i] = rgba[i] * a ~/ 255;
+    rgba[i + 1] = rgba[i + 1] * a ~/ 255;
+    rgba[i + 2] = rgba[i + 2] * a ~/ 255;
+  }
   final completer = Completer<ui.Image>();
   ui.decodeImageFromPixels(
       rgba, width, height, ui.PixelFormat.rgba8888, completer.complete);

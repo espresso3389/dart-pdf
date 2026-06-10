@@ -111,6 +111,37 @@ void main() {
     });
   });
 
+  testWidgets('masked-out pixels premultiply to transparent black',
+      (tester) async {
+    await tester.runAsync(() async {
+      // a white image whose SMask hides the first pixel: rgba8888 is
+      // premultiplied, so (255,255,255,0) would composite as additive
+      // white instead of disappearing
+      final smask = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(2),
+          'Height': const CosInteger(1),
+          'BitsPerComponent': const CosInteger(8),
+        }),
+        Uint8List.fromList([0, 255]),
+      );
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(2),
+          'Height': const CosInteger(1),
+          'BitsPerComponent': const CosInteger(8),
+          'ColorSpace': const CosName('DeviceRGB'),
+          'SMask': smask,
+        }),
+        Uint8List.fromList([255, 255, 255, 255, 255, 255]),
+      );
+      final images = await decodeImages(cos, [image]);
+      final pixels = await pixelsOf(images[image]!);
+      expect(pixels.sublist(0, 4), [0, 0, 0, 0]);
+      expect(pixels.sublist(4, 8), [255, 255, 255, 255]);
+    });
+  });
+
   testWidgets('indexed palettes resolve through an ICCBased base',
       (tester) async {
     await tester.runAsync(() async {

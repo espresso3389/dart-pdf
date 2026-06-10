@@ -230,6 +230,11 @@ class _PdfViewerState extends State<PdfViewer>
   bool _wordDrag = false;
   ((int, int), (int, int))? _wordAnchor;
 
+  /// Set when a raw-pointer gesture (mouse double-click word select) has
+  /// consumed the press, so the tap recognizer's late-firing callback for
+  /// the same press must not clear it again. Reset on every pointer down.
+  bool _suppressTap = false;
+
   @override
   void initState() {
     super.initState();
@@ -428,6 +433,10 @@ class _PdfViewerState extends State<PdfViewer>
   }
 
   void _onTapUp(TapUpDetails details) {
+    if (_suppressTap) {
+      _suppressTap = false;
+      return;
+    }
     _clearSelection();
     final annotation = _annotationAt(details.localPosition);
     if (annotation != null) _activate(annotation);
@@ -492,6 +501,7 @@ class _PdfViewerState extends State<PdfViewer>
   }
 
   void _onPointerDown(PointerDownEvent event) {
+    _suppressTap = false;
     if (event.kind != PointerDeviceKind.mouse) {
       _wordDrag = false;
       return;
@@ -504,6 +514,25 @@ class _PdfViewerState extends State<PdfViewer>
         (event.localPosition - lastLocal).distance < kDoubleTapSlop;
     _lastMouseDownStamp = event.timeStamp;
     _lastMouseDownLocal = event.localPosition;
+  }
+
+  /// Completes a mouse double-click (second press, released without
+  /// dragging): select the word under it. Detected from raw pointer
+  /// timing so no double-tap recognizer has to sit in the gesture arena
+  /// for mice — an arena recognizer would delay every click in the viewer
+  /// by the disambiguation timeout and claim the second of two rapid
+  /// clicks, starving buttons in page overlays.
+  void _onPointerUp(PointerUpEvent event) {
+    if (event.kind != PointerDeviceKind.mouse || !_wordDrag) return;
+    final downLocal = _lastMouseDownLocal;
+    if (downLocal == null ||
+        (event.localPosition - downLocal).distance >= kTouchSlop) {
+      return; // it became a double-click-drag, handled by the pan flow
+    }
+    // the viewer's own tap recognizer fires after this raw event and
+    // would immediately clear the selection made here
+    _suppressTap = true;
+    _selectWordAt(event.localPosition);
   }
 
   void _onSelectionStart(DragStartDetails details) {
@@ -657,15 +686,12 @@ class _PdfViewerState extends State<PdfViewer>
     _controller._setSelection(_selectedText());
   }
 
+  /// Touch double-tap: toggle zoom. Mice never reach this — the
+  /// recognizer is restricted to touch/stylus so desktop clicks resolve
+  /// instantly; mouse double-click word selection lives in [_onPointerUp].
   void _onDoubleTap() {
     final details = _doubleTapDetails;
     if (details == null) return;
-    // standard interactions: double-click with a mouse selects the word;
-    // double-tap on touch toggles zoom
-    if (details.kind == PointerDeviceKind.mouse) {
-      _selectWordAt(_transform.toScene(details.localPosition));
-      return;
-    }
     final Matrix4 end;
     if (_zoomed) {
       end = Matrix4.identity();
@@ -716,9 +742,27 @@ class _PdfViewerState extends State<PdfViewer>
         },
         child: Focus(
           focusNode: _focusNode,
-          child: GestureDetector(
-            onDoubleTapDown: (details) => _doubleTapDetails = details,
-            onDoubleTap: _onDoubleTap,
+          child: RawGestureDetector(
+            gestures: <Type, GestureRecognizerFactory>{
+              // touch/stylus only: a double-tap recognizer that accepted
+              // mice would hold every click in the gesture arena for the
+              // disambiguation timeout and steal the second of two rapid
+              // clicks — links and overlay buttons would feel dead
+              DoubleTapGestureRecognizer: GestureRecognizerFactoryWithHandlers<
+                  DoubleTapGestureRecognizer>(
+                () => DoubleTapGestureRecognizer(
+                  debugOwner: this,
+                  supportedDevices: const {
+                    PointerDeviceKind.touch,
+                    PointerDeviceKind.stylus,
+                  },
+                ),
+                (recognizer) => recognizer
+                  ..onDoubleTapDown =
+                      ((details) => _doubleTapDetails = details)
+                  ..onDoubleTap = _onDoubleTap,
+              ),
+            },
             child: InteractiveViewer(
               transformationController: _transform,
               maxScale: widget.maxZoom,
@@ -743,6 +787,7 @@ class _PdfViewerState extends State<PdfViewer>
                 },
                 child: Listener(
                   onPointerDown: _onPointerDown,
+                  onPointerUp: _onPointerUp,
                   child: GestureDetector(
                     onTapUp: _onTapUp,
                     onPanStart: _onSelectionStart,

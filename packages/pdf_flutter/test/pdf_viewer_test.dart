@@ -26,6 +26,12 @@ void main() {
     return controller;
   }
 
+  // buildAnnotatedPdf link geometry, in view coordinates (800px viewport
+  // over a 612pt page): centers of the annotation rects on page 1
+  const annotScale = 800 / 612;
+  Offset annotView(double x, double y) =>
+      Offset(x * annotScale, (792 - y) * annotScale);
+
   testWidgets('reports the page count and renders page widgets',
       (tester) async {
     final controller = await pumpViewer(tester);
@@ -252,6 +258,61 @@ void main() {
     expect(controller.selectedText, 'Page');
   });
 
+  testWidgets('rapid mouse clicks on an overlay button all land',
+      (tester) async {
+    // Regression: a double-tap recognizer that accepted mice held every
+    // click in the gesture arena for ~300ms and claimed the second of two
+    // rapid clicks, so overlay buttons dropped taps.
+    var taps = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PdfViewer(
+          document: PdfDocument.open(buildMultiPagePdf(2)),
+          pageOverlayBuilder: (context, pageIndex, geometry) => [
+            if (pageIndex == 0)
+              Positioned.fromRect(
+                rect: geometry.toViewRect(const PdfRect(72, 692, 172, 742)),
+                child: TextButton(
+                  key: const Key('overlay'),
+                  onPressed: () => taps++,
+                  child: const Text('go'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    final center = tester.getCenter(find.byKey(const Key('overlay')));
+    for (var i = 0; i < 4; i++) {
+      await tester.tapAt(center, kind: PointerDeviceKind.mouse);
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    expect(taps, 4);
+  });
+
+  testWidgets('mouse clicks activate links without double-tap delay',
+      (tester) async {
+    final actions = <PdfAction>[];
+    await pumpViewer(tester,
+        bytes: buildAnnotatedPdf(), onAction: (a, _) => actions.add(a));
+
+    await tester.tapAt(annotView(136, 652),
+        kind: PointerDeviceKind.mouse); // URI link center
+    await tester.pump(); // next frame — no disambiguation wait
+    expect(actions, hasLength(1));
+  });
+
+  testWidgets('touch double-tap still toggles zoom', (tester) async {
+    final controller = await pumpViewer(tester);
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, greaterThan(1));
+  });
+
   testWidgets('ctrl+wheel zooms, plain wheel scrolls', (tester) async {
     final controller = await pumpViewer(tester);
     final pointer = TestPointer(11, PointerDeviceKind.mouse);
@@ -270,12 +331,6 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     expect(controller.zoom, greaterThan(1));
   });
-
-  // buildAnnotatedPdf link geometry, in view coordinates (800px viewport
-  // over a 612pt page): centers of the annotation rects on page 1
-  const annotScale = 800 / 612;
-  Offset annotView(double x, double y) =>
-      Offset(x * annotScale, (792 - y) * annotScale);
 
   testWidgets('tapping a URI link surfaces the action', (tester) async {
     final actions = <PdfAction>[];

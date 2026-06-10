@@ -13,6 +13,7 @@ export 'ascii.dart';
 export 'ccitt.dart';
 export 'flate.dart';
 export 'jbig2.dart';
+export 'jpx.dart';
 export 'lzw.dart';
 export 'predictor.dart';
 export 'run_length.dart';

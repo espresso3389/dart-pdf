@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'ccitt.dart';
+import 'mq.dart';
 
 /// JBIG2 decoder for the PDF embedded profile (§7.4.7, ITU-T T.88).
 ///
@@ -157,7 +158,7 @@ class Jbig2Decoder {
     if (mmr == 1) {
       region = _decodeMmr(payload, w, h);
     } else {
-      final decoder = _MqDecoder(payload);
+      final decoder = MqDecoder(payload);
       final contexts = Int8List(1 << 16);
       final indexes = Uint8List(1 << 16);
       region = _decodeGeneric(
@@ -214,7 +215,7 @@ class Jbig2Decoder {
   static const _tpgdonContexts = [0x9B25, 0x0795, 0x00E5, 0x0195];
 
   static _Bitmap _decodeGeneric(
-    _MqDecoder decoder,
+    MqDecoder decoder,
     Int8List contexts,
     Uint8List indexes,
     int w,
@@ -278,12 +279,12 @@ class Jbig2Decoder {
       for (final segment in referred) ...?_symbolDicts[segment],
     ];
 
-    final decoder = _MqDecoder(Uint8List.sublistView(data, p));
+    final decoder = MqDecoder(Uint8List.sublistView(data, p));
     final contexts = Int8List(1 << 16);
     final indexes = Uint8List(1 << 16);
-    final iadh = _IntContext();
-    final iadw = _IntContext();
-    final iaex = _IntContext();
+    final iadh = MqIntContext();
+    final iadw = MqIntContext();
+    final iaex = MqIntContext();
 
     final newSymbols = <_Bitmap>[];
     var heightClass = 0;
@@ -362,12 +363,12 @@ class Jbig2Decoder {
     if (codeLength == 0) codeLength = 1;
 
     final strips = 1 << logStrips;
-    final decoder = _MqDecoder(Uint8List.sublistView(data, p));
-    final iadt = _IntContext();
-    final iafs = _IntContext();
-    final iads = _IntContext();
-    final iait = _IntContext();
-    final iari = _IntContext();
+    final decoder = MqDecoder(Uint8List.sublistView(data, p));
+    final iadt = MqIntContext();
+    final iafs = MqIntContext();
+    final iads = MqIntContext();
+    final iait = MqIntContext();
+    final iari = MqIntContext();
     final iaidContexts = Int8List(1 << (codeLength + 1));
     final iaidIndexes = Uint8List(1 << (codeLength + 1));
 
@@ -478,162 +479,5 @@ class _Bitmap {
         };
       }
     }
-  }
-}
-
-/// Adaptive contexts for the arithmetic integer decoder (Annex A).
-class _IntContext {
-  final Int8List mps = Int8List(512);
-  final Uint8List index = Uint8List(512);
-}
-
-/// The MQ arithmetic decoder (Annex E).
-class _MqDecoder {
-  _MqDecoder(this.data) {
-    _bp = 0;
-    _c = (_byte(_bp)) << 16;
-    _byteIn();
-    _c = (_c << 7) & 0xFFFFFFFF;
-    _ct -= 7;
-    _a = 0x8000;
-  }
-
-  final Uint8List data;
-  late int _bp;
-  int _c = 0;
-  int _a = 0;
-  int _ct = 0;
-
-  int _byte(int index) => index < data.length ? data[index] : 0xFF;
-
-  void _byteIn() {
-    if (_byte(_bp) == 0xFF) {
-      if (_byte(_bp + 1) > 0x8F) {
-        _c += 0xFF00;
-        _ct = 8;
-      } else {
-        _bp++;
-        _c += _byte(_bp) << 9;
-        _ct = 7;
-      }
-    } else {
-      _bp++;
-      _c += _byte(_bp) << 8;
-      _ct = 8;
-    }
-    _c &= 0xFFFFFFFF;
-  }
-
-  static const _qe = [
-    (0x5601, 1, 1, 1), (0x3401, 2, 6, 0), (0x1801, 3, 9, 0), //
-    (0x0AC1, 4, 12, 0), (0x0521, 5, 29, 0), (0x0221, 38, 33, 0),
-    (0x5601, 7, 6, 1), (0x5401, 8, 14, 0), (0x4801, 9, 14, 0),
-    (0x3801, 10, 14, 0), (0x3001, 11, 17, 0), (0x2401, 12, 18, 0),
-    (0x1C01, 13, 20, 0), (0x1601, 29, 21, 0), (0x5601, 15, 14, 1),
-    (0x5401, 16, 14, 0), (0x5101, 17, 15, 0), (0x4801, 18, 16, 0),
-    (0x3801, 19, 17, 0), (0x3401, 20, 18, 0), (0x3001, 21, 19, 0),
-    (0x2801, 22, 19, 0), (0x2401, 23, 20, 0), (0x2201, 24, 21, 0),
-    (0x1C01, 25, 22, 0), (0x1801, 26, 23, 0), (0x1601, 27, 24, 0),
-    (0x1401, 28, 25, 0), (0x1201, 29, 26, 0), (0x1101, 30, 27, 0),
-    (0x0AC1, 31, 28, 0), (0x09C1, 32, 29, 0), (0x08A1, 33, 30, 0),
-    (0x0521, 34, 31, 0), (0x0441, 35, 32, 0), (0x02A1, 36, 33, 0),
-    (0x0221, 37, 34, 0), (0x0141, 38, 35, 0), (0x0111, 39, 36, 0),
-    (0x0085, 40, 37, 0), (0x0049, 41, 38, 0), (0x0025, 42, 39, 0),
-    (0x0015, 43, 40, 0), (0x0009, 44, 41, 0), (0x0005, 45, 42, 0),
-    (0x0001, 45, 43, 0), (0x5601, 46, 46, 0),
-  ];
-
-  /// Decodes one bit in [cx] using per-context state arrays.
-  int decode(Int8List mpsTable, Uint8List indexTable, int cx) {
-    final i = indexTable[cx];
-    final mps = mpsTable[cx];
-    final (qe, nmps, nlps, sw) = _qe[i];
-
-    _a -= qe;
-    int d;
-    if (((_c >> 16) & 0xFFFF) < qe) {
-      if (_a < qe) {
-        _a = qe;
-        d = mps;
-        indexTable[cx] = nmps;
-      } else {
-        _a = qe;
-        d = 1 - mps;
-        if (sw == 1) mpsTable[cx] = 1 - mps;
-        indexTable[cx] = nlps;
-      }
-    } else {
-      _c -= qe << 16;
-      _c &= 0xFFFFFFFF;
-      if (_a & 0x8000 != 0) return mps;
-      if (_a < qe) {
-        d = 1 - mps;
-        if (sw == 1) mpsTable[cx] = 1 - mps;
-        indexTable[cx] = nlps;
-      } else {
-        d = mps;
-        indexTable[cx] = nmps;
-      }
-    }
-    do {
-      if (_ct == 0) _byteIn();
-      _a = (_a << 1) & 0xFFFF;
-      _c = (_c << 1) & 0xFFFFFFFF;
-      _ct--;
-    } while (_a & 0x8000 == 0);
-    return d;
-  }
-
-  /// Arithmetic integer decoding (Annex A.2). Null is OOB.
-  int? decodeInt(_IntContext context) {
-    var prev = 1;
-    int bit() {
-      final b = decode(context.mps, context.index, prev);
-      prev = prev < 256 ? (prev << 1) | b : ((((prev << 1) | b) & 511) | 256);
-      return b;
-    }
-
-    final sign = bit();
-    int value;
-    if (bit() == 0) {
-      value = (bit() << 1) | bit();
-    } else if (bit() == 0) {
-      value = ((((bit() << 1) | bit()) << 1 | bit()) << 1 | bit()) + 4;
-    } else if (bit() == 0) {
-      value = 0;
-      for (var i = 0; i < 6; i++) {
-        value = (value << 1) | bit();
-      }
-      value += 20;
-    } else if (bit() == 0) {
-      value = 0;
-      for (var i = 0; i < 8; i++) {
-        value = (value << 1) | bit();
-      }
-      value += 84;
-    } else if (bit() == 0) {
-      value = 0;
-      for (var i = 0; i < 12; i++) {
-        value = (value << 1) | bit();
-      }
-      value += 340;
-    } else {
-      value = 0;
-      for (var i = 0; i < 32; i++) {
-        value = (value << 1) | bit();
-      }
-      value += 4436;
-    }
-    if (sign == 1 && value == 0) return null; // OOB
-    return sign == 1 ? -value : value;
-  }
-
-  /// IAID decoding: a [codeLength]-bit symbol id.
-  int decodeId(Int8List mpsTable, Uint8List indexTable, int codeLength) {
-    var prev = 1;
-    for (var i = 0; i < codeLength; i++) {
-      prev = (prev << 1) | decode(mpsTable, indexTable, prev);
-    }
-    return prev - (1 << codeLength);
   }
 }

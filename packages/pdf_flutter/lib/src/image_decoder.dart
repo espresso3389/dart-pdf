@@ -56,8 +56,8 @@ class ImageCollector implements PdfDevice {
 /// ICCBased — real ICC profiles applied); /SMask soft-mask alpha;
 /// explicit /Mask stencil streams; color-key /Mask ranges and /Decode
 /// arrays (on raw samples and on platform-decoded JPEGs); /ImageMask
-/// stencils (decoded as alpha, tinted by the device).
-/// TODO: JPXDecode (no pure-Dart JPEG 2000 decoder yet).
+/// stencils (decoded as alpha, tinted by the device); JPXDecode via the
+/// pure-Dart JPEG 2000 decoder (gray/RGB/CMYK by component count).
 Future<Map<CosStream, ui.Image>> decodeImages(
     CosDocument cos, Iterable<CosStream> streams) async {
   final out = <CosStream, ui.Image>{};
@@ -114,7 +114,14 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
     return _imageFromPixels(rgba, base.width, base.height);
   }
   if (filters.contains('JPXDecode')) {
-    return null;
+    final jpx = JpxDecoder.decode(
+        cos.decodeStreamData(stream, stopBeforeFilter: 'JPXDecode'));
+    if (jpx == null) return null;
+    final rgba = _jpxToRgba(jpx);
+    if (rgba == null) return null;
+    final mask = await _softMaskOf(cos, dict) ?? _stencilMaskOf(cos, dict);
+    if (mask != null) _applyAlpha(rgba, jpx.width, jpx.height, mask);
+    return _imageFromPixels(rgba, jpx.width, jpx.height);
   }
   // CCITTFaxDecode runs as a regular stream filter (pure-Dart decoder in
   // pdf_cos) and lands here as 1-bit gray samples
@@ -148,6 +155,43 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
     if (mask != null) _applyAlpha(rgba, width, height, mask);
   }
   return _imageFromPixels(rgba, width, height);
+}
+
+/// JPX samples to RGBA by component count (per §7.4.9 the embedded
+/// color description governs; gray, RGB, and CMYK cover PDF practice).
+Uint8List? _jpxToRgba(JpxImage jpx) {
+  final count = jpx.width * jpx.height;
+  final out = Uint8List(count * 4);
+  final samples = jpx.samples;
+  switch (jpx.components) {
+    case 1:
+      for (var i = 0; i < count; i++) {
+        out[i * 4] = out[i * 4 + 1] = out[i * 4 + 2] = samples[i];
+        out[i * 4 + 3] = 255;
+      }
+    case 3:
+      for (var i = 0; i < count; i++) {
+        out[i * 4] = samples[i * 3];
+        out[i * 4 + 1] = samples[i * 3 + 1];
+        out[i * 4 + 2] = samples[i * 3 + 2];
+        out[i * 4 + 3] = 255;
+      }
+    case 4:
+      for (var i = 0; i < count; i++) {
+        final color = PdfColor.cmyk(
+            samples[i * 4] / 255,
+            samples[i * 4 + 1] / 255,
+            samples[i * 4 + 2] / 255,
+            samples[i * 4 + 3] / 255);
+        out[i * 4] = (color.red * 255).round();
+        out[i * 4 + 1] = (color.green * 255).round();
+        out[i * 4 + 2] = (color.blue * 255).round();
+        out[i * 4 + 3] = 255;
+      }
+    default:
+      return null;
+  }
+  return out;
 }
 
 /// The /JBIG2Globals stream from /DecodeParms (dict or filter-aligned

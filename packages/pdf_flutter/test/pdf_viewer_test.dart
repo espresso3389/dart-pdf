@@ -181,6 +181,41 @@ void main() {
     expect(region().cursor, MouseCursor.defer);
   });
 
+  testWidgets('double-click with a mouse selects the word under it',
+      (tester) async {
+    final controller = await pumpViewer(tester);
+    const scale = 800 / 612;
+    final overText = Offset(100 * scale, (792 - 720) * scale);
+
+    await tester.tapAt(overText, kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.tapAt(overText, kind: PointerDeviceKind.mouse);
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+
+    expect(controller.selectedText, 'Page');
+    // and the viewer did not zoom
+    expect(controller.zoom, 1);
+  });
+
+  testWidgets('ctrl+wheel zooms, plain wheel scrolls', (tester) async {
+    final controller = await pumpViewer(tester);
+    final pointer = TestPointer(11, PointerDeviceKind.mouse);
+    pointer.hover(const Offset(400, 300));
+
+    // plain wheel: scrolls the list, no zoom
+    await tester.sendEventToBinding(pointer.scroll(const Offset(0, 300)));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, 1);
+    expect(controller.currentPage, 0);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    await tester.sendEventToBinding(pointer.scroll(const Offset(0, -300)));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    expect(controller.zoom, greaterThan(1));
+  });
+
   testWidgets('jumpToPage scrolls to the requested page', (tester) async {
     final controller = await pumpViewer(tester);
     controller.jumpToPage(4);

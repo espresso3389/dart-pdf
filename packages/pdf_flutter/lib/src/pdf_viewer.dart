@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
@@ -25,6 +26,9 @@ class PdfViewerController extends ChangeNotifier {
 
   /// Zero-based index of the page nearest the viewport center.
   int get currentPage => _currentPage;
+
+  /// Current zoom factor (1 = fit width).
+  double get zoom => _state?._transform.value.getMaxScaleOnAxis() ?? 1;
 
   bool get isSearching => _searching;
   String get query => _query;
@@ -182,6 +186,10 @@ class _PdfViewerState extends State<PdfViewer>
   (int, int)? _selFocus;
   MouseCursor _hoverCursor = MouseCursor.defer;
 
+  /// Ctrl/Cmd held: wheel events bypass the list's scrolling and zoom the
+  /// InteractiveViewer instead (the standard ctrl+wheel zoom).
+  bool _zoomModifierDown = false;
+
   @override
   void initState() {
     super.initState();
@@ -197,6 +205,16 @@ class _PdfViewerState extends State<PdfViewer>
     _loadPages();
     _scroll.addListener(_onScroll);
     _transform.addListener(_onTransformChanged);
+    HardwareKeyboard.instance.addHandler(_onKeyEvent);
+  }
+
+  bool _onKeyEvent(KeyEvent event) {
+    final down = HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed;
+    if (down != _zoomModifierDown && mounted) {
+      setState(() => _zoomModifierDown = down);
+    }
+    return false; // observe only, never consume
   }
 
   /// During a gesture the existing rasters scale under the transform
@@ -209,6 +227,10 @@ class _PdfViewerState extends State<PdfViewer>
     _settleTimer = Timer(const Duration(milliseconds: 200), () {
       if (!mounted) return;
       final target = math.max(1.0, _transform.value.getMaxScaleOnAxis());
+      // wheel zoom never fires onInteractionEnd, so the pan flag also
+      // settles here
+      final zoomed = target > 1.01;
+      if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
       if ((target - _renderScale).abs() > 0.1 * _renderScale) {
         setState(() => _renderScale = target);
       }
@@ -246,6 +268,7 @@ class _PdfViewerState extends State<PdfViewer>
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     _settleTimer?.cancel();
     _controller._state = null;
     if (_ownsController) _controller.dispose();
@@ -420,9 +443,44 @@ class _PdfViewerState extends State<PdfViewer>
     setState(() {}); // repaint highlights with the new current match
   }
 
+  /// Selects the whitespace-delimited word at a point (list coordinates).
+  void _selectWordAt(Offset local) {
+    final position = _textPositionAt(local, tolerance: 14);
+    if (position == null) {
+      _clearSelection();
+      return;
+    }
+    final text = _pageText(position.$1).text;
+    var start = position.$2.clamp(0, text.length);
+    var end = start;
+    bool isWordChar(String c) => c.trim().isNotEmpty;
+    while (start > 0 && isWordChar(text[start - 1])) {
+      start--;
+    }
+    while (end < text.length && isWordChar(text[end])) {
+      end++;
+    }
+    if (start == end) {
+      _clearSelection();
+      return;
+    }
+    _focusNode.requestFocus();
+    setState(() {
+      _selAnchor = (position.$1, start);
+      _selFocus = (position.$1, end);
+    });
+    _controller._setSelection(_selectedText());
+  }
+
   void _onDoubleTap() {
     final details = _doubleTapDetails;
     if (details == null) return;
+    // standard interactions: double-click with a mouse selects the word;
+    // double-tap on touch toggles zoom
+    if (details.kind == PointerDeviceKind.mouse) {
+      _selectWordAt(_transform.toScene(details.localPosition));
+      return;
+    }
     final Matrix4 end;
     if (_zoomed) {
       end = Matrix4.identity();
@@ -502,7 +560,13 @@ class _PdfViewerState extends State<PdfViewer>
                   onPanUpdate: _onSelectionUpdate,
                   child: ColoredBox(
                     color: const Color(0xFF404347),
-                    child: list,
+                    // with ctrl/cmd held the list stops claiming wheel
+                    // events, so they reach the InteractiveViewer, which
+                    // zooms around the pointer
+                    child: IgnorePointer(
+                      ignoring: _zoomModifierDown,
+                      child: list,
+                    ),
                   ),
                 ),
               ),

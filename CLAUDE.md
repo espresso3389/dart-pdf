@@ -69,8 +69,7 @@ enumeration with approximate bounds, stream rewriting), and
 `PdfEditor.replaceText` (simple fonts only) — all in
 `content_editor.dart`/`content_elements.dart`; the content-stream
 tokenizer (`ContentStreamParser`) now lives in pdf_cos.
-The roadmap is complete; current frontier: the editing UI in
-pdf_flutter. Polish landed since: LZW/RunLength filters, xref recovery
+The roadmap is complete. Polish landed since: LZW/RunLength filters, xref recovery
 (`CosDocument.open` falls back to scanning for `N G obj` when the xref
 chain is broken), type 4 PostScript calculator functions, /Count-based
 page lookup with full-walk fallback, gradient /Extend semantics, JPEG
@@ -93,3 +92,14 @@ gray TRC, matrix/TRC, mft1/mft2/mAB LUTs, validated vs littleCMS;
 wired into sc/scn and image decoding). Remaining gaps: text reflow,
 RSASSA-PSS, JBIG2 Huffman/refinement, JPX subsampling + PCRL/CPRL,
 rendering intents/BPC in ICC.
+The editing UI is in (pdf_flutter `src/editing/`): `PdfEditingController`
+owns the edit session — every edit is an incremental save, so revisions
+are byte prefixes of one buffer and undo/redo is a stack of lengths;
+`PdfViewer(editing:)` injects per-page tool overlays (markup/ink/shapes/
+free text/note/stamp; select + move + resize via
+`PdfEditor.resizeAnnotation`, which rewrites /Rect and scales the point
+arrays — appearances stretch per §12.5.5), binds undo/redo/delete/escape
+shortcuts, and preserves the viewport across same-geometry document
+swaps. `PdfEditingToolbar` is the stock chrome. The host must rebuild
+the viewer with `editing.document` whenever the controller notifies
+(asserted in debug builds); the example app shows the wiring.

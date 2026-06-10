@@ -1,0 +1,206 @@
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+
+import '../pdf_viewer.dart';
+import 'editing_controller.dart';
+import 'text_prompt.dart';
+
+/// A ready-made Material toolbar for [PdfEditingController]: text-markup
+/// actions for the viewer's current selection, tool toggles, a color
+/// palette, undo/redo, selection actions, flatten, and save.
+///
+/// Place it in a Scaffold's `bottomNavigationBar` (it builds a
+/// [BottomAppBar]). Apps wanting different chrome can skip this widget
+/// entirely and drive the controller from their own UI.
+class PdfEditingToolbar extends StatelessWidget {
+  const PdfEditingToolbar({
+    super.key,
+    required this.controller,
+    required this.viewerController,
+    this.onSave,
+    this.textPrompt = showPdfTextPrompt,
+    this.palette = defaultPalette,
+  });
+
+  final PdfEditingController controller;
+
+  /// The viewer the markup buttons read the text selection from.
+  final PdfViewerController viewerController;
+
+  /// Receives the current revision's bytes when the save button is
+  /// pressed; the button is hidden when null. Writing the bytes somewhere
+  /// is the app's job.
+  final void Function(Uint8List bytes)? onSave;
+
+  /// How the edit-text button asks for replacement text.
+  final PdfTextPrompt textPrompt;
+
+  /// The colors offered for new annotations.
+  final List<Color> palette;
+
+  static const defaultPalette = [
+    Color(0xFFE53935), // red
+    Color(0xFFFFD100), // marker yellow
+    Color(0xFF43A047), // green
+    Color(0xFF1E88E5), // blue
+    Color(0xFF000000), // black
+  ];
+
+  void _markup(PdfMarkupKind kind) {
+    // capture before the edit: the document swap clears the selection
+    final quadsByPage = {
+      for (final page in viewerController.selectionPages)
+        page: viewerController.selectionRectsOn(page),
+    };
+    controller.addMarkup(kind, quadsByPage);
+  }
+
+  void _toggleTool(PdfEditTool value) {
+    controller.tool = controller.tool == value ? null : value;
+    if (controller.tool != null) viewerController.clearSelection();
+  }
+
+  Future<void> _editSelectedText(BuildContext context) async {
+    final annotation = controller.selectedAnnotation;
+    if (annotation == null) return;
+    final text = await textPrompt(
+      context,
+      title: switch (annotation.subtype) {
+        'FreeText' => 'Text',
+        'Stamp' => 'Stamp text',
+        _ => 'Note',
+      },
+      initial: controller.selectedText ?? '',
+      multiline: annotation.subtype != 'Stamp',
+    );
+    if (text == null || text.isEmpty) return;
+    controller.setSelectedText(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BottomAppBar(
+      height: 56,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: ListenableBuilder(
+        listenable: Listenable.merge([controller, viewerController]),
+        builder: (context, _) {
+          final hasTextSelection = viewerController.hasSelection;
+          final selected = controller.selectedAnnotation;
+
+          Widget toolButton(PdfEditTool value, IconData icon, String tip) =>
+              IconButton(
+                icon: Icon(icon),
+                tooltip: tip,
+                isSelected: controller.tool == value,
+                onPressed: () => _toggleTool(value),
+              );
+
+          Widget markupButton(
+                  PdfMarkupKind kind, IconData icon, String tip) =>
+              IconButton(
+                icon: Icon(icon),
+                tooltip: tip,
+                onPressed: hasTextSelection ? () => _markup(kind) : null,
+              );
+
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              IconButton(
+                icon: const Icon(Icons.undo),
+                tooltip: 'Undo (⌘Z)',
+                onPressed: controller.canUndo ? controller.undo : null,
+              ),
+              IconButton(
+                icon: const Icon(Icons.redo),
+                tooltip: 'Redo (⇧⌘Z)',
+                onPressed: controller.canRedo ? controller.redo : null,
+              ),
+              const VerticalDivider(width: 16),
+              markupButton(PdfMarkupKind.highlight, Icons.border_color,
+                  'Highlight selection'),
+              markupButton(PdfMarkupKind.underline, Icons.format_underlined,
+                  'Underline selection'),
+              markupButton(PdfMarkupKind.strikeOut,
+                  Icons.format_strikethrough, 'Strike out selection'),
+              markupButton(PdfMarkupKind.squiggly, Icons.gesture,
+                  'Squiggly-underline selection'),
+              const VerticalDivider(width: 16),
+              toolButton(PdfEditTool.select, Icons.near_me, 'Select'),
+              if (selected != null) ...[
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Delete annotation',
+                  onPressed: controller.deleteSelected,
+                ),
+                if (controller.canEditSelectedText)
+                  IconButton(
+                    icon: const Icon(Icons.edit),
+                    tooltip: 'Edit annotation text',
+                    onPressed: () => _editSelectedText(context),
+                  ),
+              ],
+              toolButton(PdfEditTool.ink, Icons.draw, 'Draw'),
+              if (controller.hasPendingInk) ...[
+                IconButton(
+                  icon: const Icon(Icons.check),
+                  tooltip: 'Add ink annotation',
+                  onPressed: controller.finishInk,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  tooltip: 'Discard drawing',
+                  onPressed: controller.discardInk,
+                ),
+              ],
+              toolButton(
+                  PdfEditTool.rectangle, Icons.rectangle_outlined, 'Rectangle'),
+              toolButton(PdfEditTool.ellipse, Icons.circle_outlined, 'Ellipse'),
+              toolButton(PdfEditTool.freeText, Icons.text_fields, 'Text box'),
+              toolButton(
+                  PdfEditTool.note, Icons.sticky_note_2_outlined, 'Note'),
+              toolButton(PdfEditTool.stamp, Icons.approval, 'Stamp'),
+              const VerticalDivider(width: 16),
+              for (final color in palette)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: InkWell(
+                    onTap: () => controller.color = color,
+                    customBorder: const CircleBorder(),
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: controller.color == color
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.black26,
+                          width: controller.color == color ? 3 : 1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              const VerticalDivider(width: 16),
+              IconButton(
+                icon: const Icon(Icons.layers),
+                tooltip: 'Flatten annotations into the pages',
+                onPressed: controller.flattenAllAnnotations,
+              ),
+              if (onSave != null)
+                IconButton(
+                  icon: const Icon(Icons.save_alt),
+                  tooltip: 'Save…',
+                  onPressed: () => onSave!(controller.bytes),
+                ),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+}

@@ -8,6 +8,9 @@ import 'package:flutter/services.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
+import 'editing/editing_controller.dart';
+import 'editing/editing_overlay.dart';
+import 'editing/text_prompt.dart';
 import 'page_geometry.dart';
 import 'pdf_page_view.dart';
 
@@ -124,7 +127,8 @@ class PdfViewerController extends ChangeNotifier {
 
   void _setPageCount(int count) {
     _pageCount = count;
-    _currentPage = 0;
+    // survive a same-size document swap (an edit revision) in place
+    if (_currentPage >= count) _currentPage = 0;
     _notifySafely();
   }
 
@@ -173,6 +177,8 @@ class PdfViewer extends StatefulWidget {
     this.controller,
     this.onAction,
     this.pageOverlayBuilder,
+    this.editing,
+    this.editingTextPrompt,
     this.pageSpacing = 12,
     this.minZoom = 0.25,
     this.maxZoom = 6,
@@ -195,6 +201,20 @@ class PdfViewer extends StatefulWidget {
   /// so they scroll and zoom with the page; they receive pointer events
   /// before the viewer's own selection and link handling.
   final PdfPageOverlayBuilder? pageOverlayBuilder;
+
+  /// Enables annotation editing: while the controller has a tool armed,
+  /// each page grows an editing layer that captures the tool's gestures,
+  /// and the viewer binds undo/redo/delete shortcuts.
+  ///
+  /// The controller owns the document revisions, so [document] must be
+  /// `editing.document` — rebuild the viewer when the controller
+  /// notifies. Because edits are incremental updates, a swap to the next
+  /// revision keeps the scroll position and zoom.
+  final PdfEditingController? editing;
+
+  /// How the editing tools ask for annotation text (free text, notes,
+  /// stamps). Defaults to [showPdfTextPrompt], a Material dialog.
+  final PdfTextPrompt? editingTextPrompt;
 
   final double pageSpacing;
 
@@ -431,21 +451,40 @@ class _PdfViewerState extends State<PdfViewer>
   void didUpdateWidget(PdfViewer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.document, widget.document)) {
+      // an edit-induced swap to a revision with the same page geometry
+      // keeps the reading position; a genuinely different document resets
+      final sameGeometry = _sameGeometryAs(widget.document);
       _textCache.clear();
       _annotCache.clear();
       _controller.clearSearch();
       _clearSelection();
       _loadPages();
-      // didUpdateWidget runs mid-build, and jumpTo synchronously
-      // dispatches a ScrollNotification — ancestors listening through a
-      // ScrollNotificationObserver (a Material AppBar's scrolled-under
-      // state, for one) would setState during build. Reset after the frame.
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
-      });
-      _transform.value = Matrix4.identity();
+      if (!sameGeometry) {
+        // didUpdateWidget runs mid-build, and jumpTo synchronously
+        // dispatches a ScrollNotification — ancestors listening through a
+        // ScrollNotificationObserver (a Material AppBar's scrolled-under
+        // state, for one) would setState during build. Reset after the frame.
+        SchedulerBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
+        });
+        _transform.value = Matrix4.identity();
+      }
       setState(() {});
     }
+  }
+
+  /// Whether [document] lays out exactly like the one on screen: same
+  /// page count, same aspect ratio per page.
+  bool _sameGeometryAs(PdfDocument document) {
+    if (document.pageCount != _pages.length) return false;
+    for (var i = 0; i < _pages.length; i++) {
+      final page = document.page(i);
+      final aspect = _isRotatedSideways(page)
+          ? page.cropBox.width / math.max(1e-6, page.cropBox.height)
+          : page.cropBox.height / math.max(1e-6, page.cropBox.width);
+      if ((aspect - _aspects[i]).abs() > 1e-6) return false;
+    }
+    return true;
   }
 
   void _loadPages() {
@@ -649,8 +688,33 @@ class _PdfViewerState extends State<PdfViewer>
     if (cursor != _hoverCursor) setState(() => _hoverCursor = cursor);
   }
 
+  /// Escape backs out of editing state layer by layer before it clears
+  /// the text selection: annotation selection → pending ink → armed tool.
+  void _onEscape() {
+    final editing = widget.editing;
+    if (editing != null) {
+      if (editing.selectedAnnotation != null) {
+        editing.clearAnnotationSelection();
+        return;
+      }
+      if (editing.hasPendingInk) {
+        editing.discardInk();
+        return;
+      }
+      if (editing.tool != null) {
+        editing.tool = null;
+        return;
+      }
+    }
+    _clearSelection();
+  }
+
   void _onPointerDown(PointerDownEvent event) {
     _suppressTap = false;
+    // a raw listener fires regardless of who wins the gesture arena, so
+    // clicking anywhere — including editing overlays — focuses the viewer
+    // and its keyboard shortcuts
+    _focusNode.requestFocus();
     if (event.kind != PointerDeviceKind.mouse) {
       _wordDrag = false;
       return;
@@ -942,11 +1006,25 @@ class _PdfViewerState extends State<PdfViewer>
 
   @override
   Widget build(BuildContext context) {
+    assert(
+        widget.editing == null ||
+            identical(widget.editing!.document, widget.document),
+        'PdfViewer.editing is set but document is not editing.document. '
+        'The editing controller owns the document revisions: rebuild the '
+        'viewer with editing.document whenever the controller notifies '
+        '(e.g. wrap it in a ListenableBuilder on the controller).');
+    final editing = widget.editing;
     return LayoutBuilder(builder: (context, constraints) {
       _viewWidth = constraints.maxWidth;
       _viewHeight = constraints.maxHeight;
       final list = ListView.builder(
         controller: _scroll,
+        // with a tool armed, touch drags belong to the editing overlay —
+        // the list's drag recognizer would win vertical-ish strokes in
+        // the arena otherwise. Wheel and trackpad scrolling are unaffected.
+        physics: editing?.tool != null
+            ? const NeverScrollableScrollPhysics()
+            : null,
         itemCount: _pages.length,
         padding: EdgeInsets.only(bottom: widget.pageSpacing),
         itemBuilder: (context, index) => Padding(
@@ -967,6 +1045,9 @@ class _PdfViewerState extends State<PdfViewer>
                     : null,
                 selection: _selectionRectsOn(index),
                 overlayBuilder: widget.pageOverlayBuilder,
+                editing: editing,
+                editingTextPrompt:
+                    widget.editingTextPrompt ?? showPdfTextPrompt,
               ),
             ),
           ),
@@ -978,7 +1059,23 @@ class _PdfViewerState extends State<PdfViewer>
               _controller.copySelection,
           const SingleActivator(LogicalKeyboardKey.keyC, control: true):
               _controller.copySelection,
-          const SingleActivator(LogicalKeyboardKey.escape): _clearSelection,
+          const SingleActivator(LogicalKeyboardKey.escape): _onEscape,
+          if (editing != null) ...{
+            const SingleActivator(LogicalKeyboardKey.keyZ, meta: true):
+                editing.undo,
+            const SingleActivator(LogicalKeyboardKey.keyZ, control: true):
+                editing.undo,
+            const SingleActivator(LogicalKeyboardKey.keyZ,
+                meta: true, shift: true): editing.redo,
+            const SingleActivator(LogicalKeyboardKey.keyZ,
+                control: true, shift: true): editing.redo,
+            const SingleActivator(LogicalKeyboardKey.keyY, control: true):
+                editing.redo,
+            const SingleActivator(LogicalKeyboardKey.delete):
+                editing.deleteSelected,
+            const SingleActivator(LogicalKeyboardKey.backspace):
+                editing.deleteSelected,
+          },
         },
         child: Focus(
           focusNode: _focusNode,
@@ -1119,6 +1216,8 @@ class _PdfViewerPage extends StatelessWidget {
     required this.currentMatch,
     required this.selection,
     required this.overlayBuilder,
+    required this.editing,
+    required this.editingTextPrompt,
   });
 
   final PdfPage page;
@@ -1129,6 +1228,8 @@ class _PdfViewerPage extends StatelessWidget {
   final PdfTextMatch? currentMatch;
   final List<PdfRect> selection;
   final PdfPageOverlayBuilder? overlayBuilder;
+  final PdfEditingController? editing;
+  final PdfTextPrompt editingTextPrompt;
 
   @override
   Widget build(BuildContext context) {
@@ -1150,7 +1251,7 @@ class _PdfViewerPage extends StatelessWidget {
           ),
         ),
       ),
-      if (builder != null)
+      if (builder != null || editing != null)
         Positioned.fill(
           child: LayoutBuilder(builder: (context, constraints) {
             final geometry = PdfPageGeometry(
@@ -1158,7 +1259,25 @@ class _PdfViewerPage extends StatelessWidget {
               rotation: page.rotation,
               viewSize: constraints.biggest,
             );
-            return Stack(children: builder(context, index, geometry));
+            return Stack(children: [
+              if (builder != null) ...builder(context, index, geometry),
+              // the editing layer sits topmost so an armed tool's
+              // gestures win over app overlays underneath
+              if (editing != null)
+                ListenableBuilder(
+                  listenable: editing!,
+                  builder: (context, _) => editing!.tool == null
+                      ? const SizedBox.shrink()
+                      : Positioned.fill(
+                          child: EditingPageOverlay(
+                            controller: editing!,
+                            pageIndex: index,
+                            geometry: geometry,
+                            textPrompt: editingTextPrompt,
+                          ),
+                        ),
+                ),
+            ]);
           }),
         ),
     ]);

@@ -374,9 +374,49 @@ extension PdfAnnotationEditing on PdfEditor {
     _markAnnotationChanged(pageIndex, dict);
   }
 
+  /// Resizes [annotation] so its /Rect becomes [to].
+  ///
+  /// The absolute-coordinate entries that travel with the rect
+  /// (/QuadPoints, /InkList, /L, /Vertices, /CL) are mapped through the
+  /// old-rect → new-rect affine, so the annotation's geometry stays
+  /// consistent for viewers that regenerate appearances. The appearance
+  /// stream itself needs no rewrite: viewers fit its BBox onto the new
+  /// /Rect (§12.5.5), stretching the existing artwork.
+  void resizeAnnotation(int pageIndex, PdfAnnotation annotation, PdfRect to) {
+    final from = annotation.rect;
+    if (from.width <= 0 || from.height <= 0 || to.width <= 0 ||
+        to.height <= 0) {
+      throw ArgumentError('resizeAnnotation needs non-degenerate rects');
+    }
+    final dict = annotation.dict;
+    dict['Rect'] = _rectArray(to);
+    final sx = to.width / from.width;
+    final sy = to.height / from.height;
+    double mapX(double x) => to.left + (x - from.left) * sx;
+    double mapY(double y) => to.bottom + (y - from.bottom) * sy;
+    for (final key in const ['QuadPoints', 'L', 'Vertices', 'CL']) {
+      final scaled = _mapPoints(dict[key], mapX, mapY);
+      if (scaled != null) dict[key] = scaled;
+    }
+    final ink = document.cos.resolve(dict['InkList']);
+    if (ink is CosArray) {
+      dict['InkList'] = CosArray([
+        for (final stroke in ink.items)
+          _mapPoints(stroke, mapX, mapY) ?? stroke,
+      ]);
+    }
+    _markAnnotationChanged(pageIndex, dict);
+  }
+
   /// An x y x y ... array translated by (dx, dy), or null if [raw] is not
   /// a numeric array.
-  CosArray? _shiftPoints(CosObject? raw, double dx, double dy) {
+  CosArray? _shiftPoints(CosObject? raw, double dx, double dy) =>
+      _mapPoints(raw, (x) => x + dx, (y) => y + dy);
+
+  /// An x y x y ... array with each coordinate mapped, or null if [raw]
+  /// is not a numeric array.
+  CosArray? _mapPoints(CosObject? raw, double Function(double) mapX,
+      double Function(double) mapY) {
     final cos = document.cos;
     final array = cos.resolve(raw);
     if (array is! CosArray) return null;
@@ -393,7 +433,7 @@ extension PdfAnnotationEditing on PdfEditor {
     }
     return CosArray([
       for (var i = 0; i < values.length; i++)
-        CosReal(values[i] + (i.isEven ? dx : dy)),
+        CosReal(i.isEven ? mapX(values[i]) : mapY(values[i])),
     ]);
   }
 

@@ -263,6 +263,51 @@ void main() {
     expect(moved.normalAppearance, isNotNull);
   });
 
+  test('resizeAnnotation rewrites the rect and scales point arrays', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150))
+      ..addInk(0, [
+        [(100, 100), (200, 150)],
+      ]);
+    final doc = PdfDocument.open(first.save());
+
+    final square = doc.page(0).annotations[0];
+    final ink = doc.page(0).annotations[1];
+    final inkTo = PdfRect(ink.rect.left, ink.rect.bottom,
+        ink.rect.left + ink.rect.width * 2, ink.rect.top);
+    final editor = PdfEditor(doc)
+      ..resizeAnnotation(0, square, const PdfRect(100, 100, 300, 250))
+      ..resizeAnnotation(0, ink, inkTo);
+    final reopened = PdfDocument.open(editor.save());
+
+    final resized = reopened.page(0).annotations[0];
+    expect(resized.rect, const PdfRect(100, 100, 300, 250));
+    // the appearance survives untouched: the BBox→Rect mapping stretches it
+    expect(resized.normalAppearance, isNotNull);
+
+    // ink points scale with the rect: x doubled relative to the rect's
+    // left edge, y unchanged
+    final inkRect = ink.rect;
+    final resizedInk = reopened.page(0).annotations[1];
+    final inkList = reopened.cos.resolve(resizedInk.dict['InkList']) as CosArray;
+    final stroke = reopened.cos.resolve(inkList[0]) as CosArray;
+    double at(int i) => (reopened.cos.resolve(stroke[i]) as CosReal).value;
+    expect(at(0), closeTo(inkRect.left + (100 - inkRect.left) * 2, 1e-6));
+    expect(at(1), closeTo(100, 1e-6));
+    expect(at(2), closeTo(inkRect.left + (200 - inkRect.left) * 2, 1e-6));
+    expect(at(3), closeTo(150, 1e-6));
+  });
+
+  test('resizeAnnotation rejects degenerate rects', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150));
+    final doc = PdfDocument.open(first.save());
+    expect(
+        () => PdfEditor(doc).resizeAnnotation(
+            0, doc.page(0).annotations.single, const PdfRect(50, 50, 50, 80)),
+        throwsArgumentError);
+  });
+
   test('print flag is set so annotations survive printing', () {
     final doc = roundTrip(
         (e) => e.addHighlight(0, const [PdfRect(72, 700, 200, 712)]));

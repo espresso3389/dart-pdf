@@ -69,9 +69,16 @@ The roadmap is complete, and the former gap list has been closed too:
 encrypt-on-write, certificate chain validation against a trust store,
 mesh shadings (types 4–7), pure-Dart CCITT/JBIG2/JPEG 2000 decoders,
 deep-zoom detail rendering, and real ICC color management all landed.
-Current work: the editing UI in `pdf_flutter`. Still open: richer text
-editing (reflow), RSASSA-PSS signatures, JBIG2 Huffman/refinement
-variants, and JPX subsampling/PCRL-CPRL progressions.
+
+The editing UI shipped with `pdf_flutter`: a `PdfEditingController`
+(edit session with zero-cost undo/redo — incremental updates make every
+revision a byte prefix of the next, so undo is just a shorter view of
+the same buffer), tool overlays on every page (text markup from the
+selection, ink, shapes, free text, notes, stamps; select/move/resize
+with handles), keyboard shortcuts, and a ready-made
+`PdfEditingToolbar`. Still open: richer text editing (reflow),
+RSASSA-PSS signatures, JBIG2 Huffman/refinement variants, and JPX
+subsampling/PCRL-CPRL progressions.
 
 ## Development
 

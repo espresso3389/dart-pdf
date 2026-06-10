@@ -519,10 +519,14 @@ class PdfInterpreter {
         }
       }
       if (stroke) {
+        final k = _state.ctm.scaleFactor;
         final scaled = _state.stroke.copyWith(
             width: _state.stroke.width <= 0
-                ? _state.ctm.scaleFactor // zero width = thinnest line
-                : _state.stroke.width * _state.ctm.scaleFactor);
+                ? k // zero width = thinnest line
+                : _state.stroke.width * k,
+            // dash lengths live in user space too (§8.4.3.6)
+            dashArray: [for (final d in _state.stroke.dashArray) d * k],
+            dashPhase: _state.stroke.dashPhase * k);
         device.strokePath(path, _state.strokeColor, scaled, _state.strokeAlpha);
       }
       if (_pendingClip != null) {

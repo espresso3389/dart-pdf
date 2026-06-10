@@ -132,9 +132,12 @@ class CanvasPdfDevice implements PdfDevice {
   @override
   void strokePath(
       PdfPath path, PdfColor color, PdfStroke stroke, double alpha) {
-    // TODO: dash patterns need a path-measuring dasher; drawn solid for now
+    var uiPath = _toUiPath(path, PdfFillRule.nonzero);
+    if (stroke.dashArray.any((d) => d > 0)) {
+      uiPath = _dashPath(uiPath, stroke.dashArray, stroke.dashPhase);
+    }
     canvas.drawPath(
-      _toUiPath(path, PdfFillRule.nonzero),
+      uiPath,
       Paint()
         ..style = PaintingStyle.stroke
         ..color = _toColor(color, alpha)
@@ -152,6 +155,63 @@ class CanvasPdfDevice implements PdfDevice {
         ..strokeMiterLimit = stroke.miterLimit
         ..blendMode = _blend,
     );
+  }
+
+  /// Rebuilds [source] as its dashed segments (§8.4.3.6). Zero-length
+  /// "on" dashes become near-zero slivers so round caps still paint dots.
+  static ui.Path _dashPath(
+      ui.Path source, List<double> pattern, double phase) {
+    // odd-length patterns repeat doubled, per spec
+    final dashes = [
+      for (final d in pattern)
+        if (d >= 0) d,
+    ];
+    if (dashes.length.isOdd) dashes.addAll(List.of(dashes));
+    final cycle = dashes.fold(0.0, (a, b) => a + b);
+    if (dashes.isEmpty || cycle <= 0) return source;
+
+    final out = ui.Path();
+    for (final metric in source.computeMetrics()) {
+      var index = 0;
+      var on = true;
+      var remaining = dashes[0];
+      var toSkip = phase.abs() % cycle;
+      while (toSkip > 0) {
+        if (toSkip >= remaining) {
+          toSkip -= remaining;
+          index = (index + 1) % dashes.length;
+          on = !on;
+          remaining = dashes[index];
+        } else {
+          remaining -= toSkip;
+          toSkip = 0;
+        }
+      }
+      var distance = 0.0;
+      while (distance < metric.length) {
+        var end = distance + remaining;
+        if (end > metric.length) end = metric.length;
+        if (on) {
+          final sliver = end - distance < 1e-3
+              ? (distance + 1e-3 > metric.length
+                  ? metric.length
+                  : distance + 1e-3)
+              : end;
+          out.addPath(
+              metric.extractPath(distance, sliver), ui.Offset.zero);
+        }
+        remaining -= end - distance;
+        distance = end;
+        if (remaining <= 1e-9) {
+          index = (index + 1) % dashes.length;
+          on = !on;
+          remaining = dashes[index];
+          // all-zero tail protection: force progress
+          if (remaining <= 0 && cycle <= 1e-9) break;
+        }
+      }
+    }
+    return out;
   }
 
   @override

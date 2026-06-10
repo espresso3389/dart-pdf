@@ -8,12 +8,14 @@ suite with appearance-stream generation, AcroForm filling, page manipulation,
 and digital-signature-safe editing — built natively for Flutter.
 
 > Status: the full roadmap below is complete — COS parsing (with xref
-> recovery for broken files), signature-preserving incremental updates,
-> a content-stream interpreter with TrueType/CFF/Type3 font rendering,
-> a zoomable Flutter viewer with text selection, search, and rotated-page
-> support, annotation authoring and flattening, AcroForm filling,
-> decryption (RC4/AES-128/AES-256), page manipulation, digital
-> signatures, and content editing. Current frontier: the editing UI.
+> recovery for broken files), signature-preserving incremental updates
+> with encrypt-on-write, a content-stream interpreter with
+> TrueType/CFF/Type3 font rendering, mesh shadings, and real ICC color,
+> pure-Dart CCITT/JBIG2/JPEG 2000 image decoders, a zoomable Flutter
+> viewer with deep-zoom detail rendering, text selection, search, and
+> rotated-page support, annotation authoring and flattening, AcroForm
+> filling, page manipulation, digital signatures with trust-store chain
+> validation, and content editing. Current frontier: the editing UI.
 
 ## Architecture
 
@@ -63,10 +65,13 @@ core runs on servers and in plain Dart tests.
     editing (`replaceText` — single-byte fonts, within one shown string;
     no reflow)
 
-The roadmap is complete. Current work: polish and the editing UI in
-`pdf_flutter`. Remaining gaps: deep-zoom tiling, encrypt-on-write,
-trust-store chain validation, JPX/CCITT/JBIG2 codecs, mesh shadings
-(types 4–7), real ICC color management, and richer text editing.
+The roadmap is complete, and the former gap list has been closed too:
+encrypt-on-write, certificate chain validation against a trust store,
+mesh shadings (types 4–7), pure-Dart CCITT/JBIG2/JPEG 2000 decoders,
+deep-zoom detail rendering, and real ICC color management all landed.
+Current work: the editing UI in `pdf_flutter`. Still open: richer text
+editing (reflow), RSASSA-PSS signatures, JBIG2 Huffman/refinement
+variants, and JPX subsampling/PCRL-CPRL progressions.
 
 ## Development
 

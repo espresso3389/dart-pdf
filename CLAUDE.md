@@ -76,6 +76,20 @@ chain is broken), type 4 PostScript calculator functions, /Count-based
 page lookup with full-walk fallback, gradient /Extend semantics, JPEG
 /Decode + color-key masks, and /Rotate folded into `PdfPageGeometry`
 (selection, highlights, overlays, and hit-testing are rotation-aware;
-the geometry mirrors the renderer's canvas transform). Known gaps:
-deep-zoom tiling, encrypt-on-write, trust-store chain validation,
-JPX/CCITT/JBIG2 decoders, mesh shadings 4-7, real ICC.
+the geometry mirrors the renderer's canvas transform).
+The big-gap batch landed next, all KAT-validated against reference
+codecs: encrypt-on-write (updater `_encryptedCopy`; signing encrypted
+files still refused), trust-store chain validation
+(`verifyCertificateChain` in pdf_cos cms.dart, `PdfTrustStore` +
+`validate(trustStore:)` in pdf_document), mesh shadings 4-7
+(`PdfMeshParser`/`PdfMesh`, device `fillMesh`, drawVertices in
+pdf_flutter), CCITT G3/G4 (`CcittDecoder`, KAT vs libtiff), JBIG2
+embedded profile (`Jbig2Decoder` + shared `MqDecoder` in
+filters/mq.dart, KAT vs jbig2enc/jbig2dec), JPEG 2000 (`JpxDecoder`,
+lossless bit-perfect vs OpenJPEG, lossy ±1), deep-zoom detail patch
+(`PdfPageView` renders the visible slice past the raster caps;
+`rasterizeRegion`), and real ICC (`IccProfile` in pdf_graphics —
+gray TRC, matrix/TRC, mft1/mft2/mAB LUTs, validated vs littleCMS;
+wired into sc/scn and image decoding). Remaining gaps: text reflow,
+RSASSA-PSS, JBIG2 Huffman/refinement, JPX subsampling + PCRL/CPRL,
+rendering intents/BPC in ICC.

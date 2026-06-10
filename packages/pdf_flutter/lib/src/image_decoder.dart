@@ -44,8 +44,9 @@ class ImageCollector implements PdfDevice {
 /// Decodes image XObjects to [ui.Image]s ahead of the (synchronous) paint.
 ///
 /// Coverage: DCTDecode via the platform codec; Flate/raw DeviceRGB,
-/// DeviceGray (8 and 1 bit) and 8-bit Indexed samples; /SMask soft-mask
-/// alpha; /ImageMask stencils (decoded as alpha, tinted by the device).
+/// DeviceGray (8 and 1 bit) and Indexed samples (1/2/4/8 bit, palettes in
+/// RGB, gray, or CMYK bases including ICCBased); /SMask soft-mask alpha;
+/// /ImageMask stencils (decoded as alpha, tinted by the device).
 /// TODO: JPXDecode, CCITT/JBIG2, /Mask color-key masking, /Decode arrays
 /// for non-stencil images.
 Future<Map<CosStream, ui.Image>> decodeImages(
@@ -232,6 +233,9 @@ Uint8List? _toRgba(CosDocument cos, CosDictionary dict, Uint8List data,
     }
     return out;
   }
+  if (space == 'Indexed') {
+    return _indexedToRgba(cos, dict, data, width, height, bits, out);
+  }
   if (bits != 8) return null;
 
   switch (space) {
@@ -262,41 +266,84 @@ Uint8List? _toRgba(CosDocument cos, CosDictionary dict, Uint8List data,
         out[i * 4 + 3] = 255;
       }
       return out;
-    case 'Indexed':
-      return _indexedToRgba(cos, dict, data, count, out);
   }
   return null;
 }
 
+/// Indexed images: samples are palette indices at 1/2/4/8 bits per pixel;
+/// the palette lives in any base space we can map to RGB (DeviceRGB and
+/// -Gray and -CMYK, directly or behind ICCBased/CalRGB/CalGray).
 Uint8List? _indexedToRgba(CosDocument cos, CosDictionary dict, Uint8List data,
-    int count, Uint8List out) {
+    int width, int height, int bits, Uint8List out) {
   final space = cos.resolve(dict['ColorSpace']);
   if (space is! CosArray || space.length < 4) return null;
-  final base = cos.resolve(space[1]);
-  final baseName = base is CosName ? base.value : '';
-  if (baseName != 'DeviceRGB' && baseName != 'RGB') return null;
+  final components = switch (_familyOf(cos, space[1])) {
+    'DeviceRGB' => 3,
+    'DeviceGray' => 1,
+    'DeviceCMYK' => 4,
+    _ => 0,
+  };
+  if (components == 0) return null;
+  if (bits != 1 && bits != 2 && bits != 4 && bits != 8) return null;
+
   final lookupObj = cos.resolve(space[3]);
-  final Uint8List palette;
+  final Uint8List lookup;
   if (lookupObj is CosString) {
-    palette = lookupObj.bytes;
+    lookup = lookupObj.bytes;
   } else if (lookupObj is CosStream) {
-    palette = cos.decodeStreamData(lookupObj);
+    lookup = cos.decodeStreamData(lookupObj);
   } else {
     return null;
   }
-  if (data.length < count) return null;
-  for (var i = 0; i < count; i++) {
-    final p = data[i] * 3;
-    out[i * 4] = p < palette.length ? palette[p] : 0;
-    out[i * 4 + 1] = p + 1 < palette.length ? palette[p + 1] : 0;
-    out[i * 4 + 2] = p + 2 < palette.length ? palette[p + 2] : 0;
-    out[i * 4 + 3] = 255;
+  // convert the palette to RGB once, indices then just copy triplets
+  final paletteCount = lookup.length ~/ components;
+  final palette = Uint8List(paletteCount * 3);
+  for (var p = 0; p < paletteCount; p++) {
+    final src = p * components;
+    switch (components) {
+      case 3:
+        palette[p * 3] = lookup[src];
+        palette[p * 3 + 1] = lookup[src + 1];
+        palette[p * 3 + 2] = lookup[src + 2];
+      case 1:
+        palette[p * 3] = palette[p * 3 + 1] = palette[p * 3 + 2] = lookup[src];
+      case 4:
+        final c = lookup[src] / 255, m = lookup[src + 1] / 255;
+        final y = lookup[src + 2] / 255, k = lookup[src + 3] / 255;
+        palette[p * 3] = ((1 - c) * (1 - k) * 255).round();
+        palette[p * 3 + 1] = ((1 - m) * (1 - k) * 255).round();
+        palette[p * 3 + 2] = ((1 - y) * (1 - k) * 255).round();
+    }
+  }
+
+  final rowBytes = (width * bits + 7) ~/ 8;
+  if (data.length < rowBytes * height) return null;
+  final perByte = 8 ~/ bits;
+  final mask = (1 << bits) - 1;
+  for (var y = 0; y < height; y++) {
+    for (var x = 0; x < width; x++) {
+      final byte = data[y * rowBytes + x ~/ perByte];
+      final shift = 8 - bits * (x % perByte + 1);
+      var index = (byte >> shift) & mask;
+      if (index >= paletteCount) index = 0;
+      final i = (y * width + x) * 4;
+      out[i] = palette[index * 3];
+      out[i + 1] = palette[index * 3 + 1];
+      out[i + 2] = palette[index * 3 + 2];
+      out[i + 3] = 255;
+    }
   }
   return out;
 }
 
-String _colorSpaceOf(CosDocument cos, CosDictionary dict) {
-  final space = cos.resolve(dict['ColorSpace']);
+String _colorSpaceOf(CosDocument cos, CosDictionary dict) =>
+    _familyOf(cos, dict['ColorSpace']);
+
+/// Maps any color-space object to the device family used for decoding:
+/// names (with their inline-image abbreviations), ICCBased by component
+/// count, and the CIE spaces by their device-family shape.
+String _familyOf(CosDocument cos, CosObject? raw) {
+  final space = cos.resolve(raw);
   if (space is CosName) {
     return switch (space.value) {
       'G' => 'DeviceGray',
@@ -309,17 +356,25 @@ String _colorSpaceOf(CosDocument cos, CosDictionary dict) {
   if (space is CosArray && space.length > 0) {
     final family = cos.resolve(space[0]);
     if (family is CosName) {
-      if (family.value == 'Indexed' || family.value == 'I') return 'Indexed';
-      if (family.value == 'ICCBased' && space.length > 1) {
-        final profile = cos.resolve(space[1]);
-        if (profile is CosStream) {
-          final n = cos.resolve(profile.dictionary['N']);
-          return switch (_intOf(n)) {
-            1 => 'DeviceGray',
-            4 => 'DeviceCMYK',
-            _ => 'DeviceRGB',
-          };
-        }
+      switch (family.value) {
+        case 'Indexed' || 'I':
+          return 'Indexed';
+        case 'CalRGB':
+          return 'DeviceRGB';
+        case 'CalGray':
+          return 'DeviceGray';
+        case 'ICCBased':
+          if (space.length > 1) {
+            final profile = cos.resolve(space[1]);
+            if (profile is CosStream) {
+              return switch (_intOf(cos.resolve(profile.dictionary['N']))) {
+                1 => 'DeviceGray',
+                4 => 'DeviceCMYK',
+                _ => 'DeviceRGB',
+              };
+            }
+          }
+          return 'DeviceRGB';
       }
     }
   }

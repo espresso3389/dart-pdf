@@ -9,5 +9,9 @@ resolution: workspace
 environment:
   sdk: ^3.5.0
 
+dependencies:
+  crypto: ^3.0.0
+  pdf_cos: ^0.1.0
+
 dev_dependencies:
   lints: ^5.0.0

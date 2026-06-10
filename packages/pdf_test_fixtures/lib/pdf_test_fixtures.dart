@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+export 'src/encrypted.dart';
+
 Uint8List ascii(String s) => Uint8List.fromList(s.codeUnits);
 
 /// Builds a minimal one-page PDF with a classic cross-reference table.

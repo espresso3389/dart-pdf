@@ -7,10 +7,13 @@ no PDFium, no platform channels.
 suite with appearance-stream generation, AcroForm filling, page manipulation,
 and digital-signature-safe editing — built natively for Flutter.
 
-> Status: early development. The COS object layer works (parses real PDF
-> files, including cross-reference streams and object streams), and the
-> incremental-update writer supports metadata and page-level edits that
-> preserve digital signatures. Rendering is the current frontier.
+> Status: the core pipeline works end to end — COS parsing (including
+> cross-reference and object streams), signature-preserving incremental
+> updates, a content-stream interpreter with TrueType/CFF font rendering,
+> a zoomable Flutter viewer with text selection and search, rendering of
+> annotation appearance streams, and decryption of encrypted documents
+> (RC4/AES-128/AES-256). Current frontier: annotation appearance-stream
+> generation.
 
 ## Architecture
 
@@ -30,13 +33,17 @@ core runs on servers and in plain Dart tests.
    xref streams, object streams
 2. ✅ Incremental-update writer (signature-preserving); first edits:
    metadata, page rotation
-3. Encryption (RC4/AES-128/AES-256) — required for business documents
-4. Content-stream interpreter with an abstract device interface
-5. Font engine: TrueType/CFF glyph outlines, CID fonts, CMaps, ToUnicode
-6. Flutter rendering device + viewer widget (tiling, zoom, page cache)
-7. Text extraction with positions → selection and search
-8. Annotations: model, rendering, **appearance-stream generation**
-   (ink, highlight, shapes, free text, notes, stamps), flattening
+3. ✅ Encryption: opening RC4/AES-128/AES-256 documents (user and owner
+   passwords; encrypting on write is still pending, so encrypted files are
+   read-only for now)
+4. ✅ Content-stream interpreter with an abstract device interface
+5. ✅ Font engine: TrueType/CFF glyph outlines, CID fonts, CMaps, ToUnicode
+6. ✅ Flutter rendering device + viewer widget (zoom, page cache; deep-zoom
+   tiling still pending)
+7. ✅ Text extraction with positions → selection and search
+8. Annotations: model ✅, rendering of appearance streams ✅;
+   **appearance-stream generation** (ink, highlight, shapes, free text,
+   notes, stamps) and flattening are next
 9. AcroForm: field model, filling, appearance regeneration
 10. Page manipulation: reorder, merge, split (cross-document object copying)
 11. Digital signatures: signing and validation

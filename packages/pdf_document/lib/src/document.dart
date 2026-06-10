@@ -11,8 +11,12 @@ class PdfDocument {
   /// The underlying COS-level document, for anything not surfaced here yet.
   final CosDocument cos;
 
-  static PdfDocument open(Uint8List bytes) =>
-      PdfDocument._(CosDocument.open(bytes));
+  /// Opens a document. For encrypted files [password] is tried first as
+  /// the user and then as the owner password (the empty default is what
+  /// most owner-locked business documents expect); a wrong password
+  /// throws [CosPasswordException].
+  static PdfDocument open(Uint8List bytes, {String password = ''}) =>
+      PdfDocument._(CosDocument.open(bytes, password: password));
 
   String get version => cos.version;
 

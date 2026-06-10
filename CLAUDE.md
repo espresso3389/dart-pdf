@@ -43,6 +43,8 @@ to validate changes:
 
 ## Roadmap context
 
-See README.md. Current frontier: incremental-update writer, then the
-content-stream interpreter (device interface modeled on MuPDF/pdf.js so text
-extraction and rendering share one interpreter).
+See README.md. The pipeline through the viewer is done: interpreter, font
+engine, Flutter rendering, text selection/search, annotation appearance
+rendering, and decryption (RC4/AES-128/AES-256; the updater refuses
+encrypted files until encrypt-on-write lands). Current frontier: annotation
+appearance-stream generation, then AcroForm filling.

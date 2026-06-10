@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'document.dart';
+import 'exceptions.dart';
 import 'objects.dart';
 import 'serializer.dart';
 import 'xref.dart';
@@ -11,6 +12,12 @@ import 'xref.dart';
 /// valid and makes every edit reversible.
 class CosIncrementalUpdater {
   CosIncrementalUpdater(this.document) {
+    if (document.isEncrypted) {
+      // loaded objects hold decrypted strings/streams; appending them
+      // without re-encrypting would corrupt the file
+      throw UnsupportedEncryptionException(
+          'editing encrypted documents is not supported yet');
+    }
     var next = document.declaredSize;
     if (next < 1) next = 1;
     // distrust /Size: some writers get it wrong

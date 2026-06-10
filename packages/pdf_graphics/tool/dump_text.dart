@@ -29,7 +29,7 @@ class _DumpDevice implements PdfDevice {
         '"${run.text}" font=${run.fontName} size=${run.fontSize} '
         'width=${run.width.toStringAsFixed(3)}em '
         'origin=(${t.e.toStringAsFixed(1)}, ${t.f.toStringAsFixed(1)}) '
-        'scale=(${t.a.toStringAsFixed(2)}, ${t.d.toStringAsFixed(2)})');
+        'scale=(${t.a.toStringAsFixed(2)}, ${t.d.toStringAsFixed(2)}) color=${run.color}');
   }
 
   @override

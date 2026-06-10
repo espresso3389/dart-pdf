@@ -91,4 +91,23 @@ void main() {
     expect(() => decodeStream(stream),
         throwsA(isA<UnsupportedFilterException>()));
   });
+
+  test('stopBeforeFilter unwraps outer filters, keeps the rest encoded', () {
+    // a "JPEG" wrapped in Flate: [/FlateDecode /DCTDecode]
+    final fakeJpeg = ascii('JFIF-payload');
+    final wrapped = Uint8List.fromList(const ZLibEncoder().encode(fakeJpeg));
+    final stream = CosStream(
+      CosDictionary({
+        'Filter': CosArray([
+          const CosName('FlateDecode'),
+          const CosName('DCTDecode'),
+        ]),
+      }),
+      wrapped,
+    );
+    expect(decodeStream(stream, stopBeforeFilter: 'DCTDecode'), fakeJpeg);
+    // without the stop, the unsupported DCT stage throws
+    expect(() => decodeStream(stream),
+        throwsA(isA<UnsupportedFilterException>()));
+  });
 }

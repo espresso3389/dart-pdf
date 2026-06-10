@@ -32,7 +32,12 @@ const Map<String, CosFilter> _filters = {
 ///
 /// [resolve] is used to chase indirect references inside /Filter,
 /// /DecodeParms, and /Length entries.
-Uint8List decodeStream(CosStream stream, {CosResolver? resolve}) {
+///
+/// [stopBeforeFilter] stops the chain just before the named filter and
+/// returns the partially decoded bytes — used to undo e.g. FlateDecode
+/// wrapped around a JPEG while leaving the JPEG for a platform codec.
+Uint8List decodeStream(CosStream stream,
+    {CosResolver? resolve, String? stopBeforeFilter}) {
   CosObject deref(CosObject? object) {
     var value = object ?? CosNull.instance;
     while (value is CosReference && resolve != null) {
@@ -65,6 +70,7 @@ Uint8List decodeStream(CosStream stream, {CosResolver? resolve}) {
 
   var data = stream.rawBytes;
   for (var i = 0; i < names.length; i++) {
+    if (names[i] == stopBeforeFilter) break;
     final filter = _filters[names[i]];
     if (filter == null) throw UnsupportedFilterException(names[i]);
     data = filter.decode(data, i < params.length ? params[i] : null);

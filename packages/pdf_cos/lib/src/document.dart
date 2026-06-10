@@ -148,9 +148,11 @@ class CosDocument {
   }
 
   /// Decodes a stream's payload, resolving indirect /Length and /Filter
-  /// entries against this document.
-  Uint8List decodeStreamData(CosStream stream) =>
-      decodeStream(stream, resolve: _resolveRef);
+  /// entries against this document. See [decodeStream] for
+  /// [stopBeforeFilter].
+  Uint8List decodeStreamData(CosStream stream, {String? stopBeforeFilter}) =>
+      decodeStream(stream,
+          resolve: _resolveRef, stopBeforeFilter: stopBeforeFilter);
 
   CosObject _resolveRef(CosReference ref) =>
       getObject(ref.objectNumber, ref.generation);

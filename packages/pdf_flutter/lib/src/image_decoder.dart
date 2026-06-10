@@ -56,9 +56,16 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
   final filters = _filterNames(cos, dict);
   final isMask = cos.resolve(dict['ImageMask']) == const CosBoolean(true);
 
-  if (!isMask && (filters.contains('DCTDecode') || filters.contains('DCT'))) {
-    // hand the JPEG straight to the platform codec
-    final codec = await ui.instantiateImageCodec(stream.rawBytes);
+  final dctName = filters.contains('DCTDecode')
+      ? 'DCTDecode'
+      : filters.contains('DCT')
+          ? 'DCT'
+          : null;
+  if (!isMask && dctName != null) {
+    // undo any wrapping filters (e.g. [/FlateDecode /DCTDecode]), then
+    // hand the JPEG to the platform codec
+    final jpeg = cos.decodeStreamData(stream, stopBeforeFilter: dctName);
+    final codec = await ui.instantiateImageCodec(jpeg);
     final base = (await codec.getNextFrame()).image;
     final mask = await _softMaskOf(cos, dict);
     if (mask == null) return base;
@@ -139,7 +146,8 @@ Future<_SoftMask?> _softMaskOf(CosDocument cos, CosDictionary dict) async {
   try {
     final filters = _filterNames(cos, smask.dictionary);
     if (filters.contains('DCTDecode')) {
-      final codec = await ui.instantiateImageCodec(smask.rawBytes);
+      final codec = await ui.instantiateImageCodec(
+          cos.decodeStreamData(smask, stopBeforeFilter: 'DCTDecode'));
       final image = (await codec.getNextFrame()).image;
       final raw = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
       if (raw == null) return null;

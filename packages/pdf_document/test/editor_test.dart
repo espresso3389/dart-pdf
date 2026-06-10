@@ -1,3 +1,4 @@
+import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 import 'package:test/test.dart';
@@ -58,5 +59,26 @@ void main() {
   test('non-right-angle rotation is rejected', () {
     final editor = PdfEditor(PdfDocument.open(buildClassicPdf()));
     expect(() => editor.rotatePage(0, 45), throwsArgumentError);
+  });
+
+  test('encrypted documents edit end-to-end (encrypt-on-write)', () {
+    final doc = PdfDocument.open(buildEncryptedPdf(revision: 4));
+    final editor = PdfEditor(doc)
+      ..rotatePage(0, 90)
+      ..setInfo(title: 'Re-encrypted');
+    final reopened = PdfDocument.open(editor.save());
+    expect(reopened.cos.isEncrypted, isTrue);
+    expect(reopened.page(0).rotation, 90);
+    expect(reopened.info['Title'], 'Re-encrypted');
+  });
+
+  test('signing an encrypted document is refused', () {
+    final doc = PdfDocument.open(buildEncryptedPdf(revision: 4));
+    expect(
+        () => PdfEditor(doc).saveSigned(
+              privateKey: RsaPrivateKey.fromPem(testSignerKeyPem),
+              certificates: [pemBytes(testSignerCertPem)],
+            ),
+        throwsA(isA<UnsupportedEncryptionException>()));
   });
 }

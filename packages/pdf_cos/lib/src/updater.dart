@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
+import 'crypto/standard_security_handler.dart';
 import 'document.dart';
-import 'exceptions.dart';
 import 'objects.dart';
 import 'serializer.dart';
 import 'xref.dart';
@@ -10,14 +10,14 @@ import 'xref.dart';
 /// are preserved verbatim and changed objects plus a new cross-reference
 /// section are appended (§7.5.6). This keeps existing digital signatures
 /// valid and makes every edit reversible.
+///
+/// Encrypted documents re-encrypt on write: queued objects hold plaintext
+/// (strings decrypt at load; editors build plaintext streams), so each one
+/// is serialized as an encrypted copy under its own object key. Stream
+/// payloads still carrying the file's original ciphertext are written
+/// verbatim.
 class CosIncrementalUpdater {
   CosIncrementalUpdater(this.document) {
-    if (document.isEncrypted) {
-      // loaded objects hold decrypted strings/streams; appending them
-      // without re-encrypting would corrupt the file
-      throw UnsupportedEncryptionException(
-          'editing encrypted documents is not supported yet');
-    }
     var next = document.declaredSize;
     if (next < 1) next = 1;
     // distrust /Size: some writers get it wrong
@@ -79,11 +79,16 @@ class CosIncrementalUpdater {
     final offsets = <int, int>{};
     final serializer = CosSerializer(out);
 
+    final handler = document.encryption;
     final changedNumbers = _changed.keys.toList()..sort();
     for (final number in changedNumbers) {
       offsets[number] = out.length - shift;
-      serializer.writeIndirectObject(CosIndirectObject(
-          number, _generationOf(number), _changed[number]!));
+      var object = _changed[number]!;
+      if (handler != null && number != document.encryptObjectNumber) {
+        object = _encryptedCopy(object, number, _generationOf(number), handler);
+      }
+      serializer.writeIndirectObject(
+          CosIndirectObject(number, _generationOf(number), object));
     }
 
     // a file whose newest xref is a stream must be updated with a stream;
@@ -96,6 +101,47 @@ class CosIncrementalUpdater {
     }
     _writeText(out, 'startxref\n$xrefOffset\n%%EOF\n');
     return out.takeBytes();
+  }
+
+  /// Deep-copies [object] with strings and stream payloads encrypted under
+  /// the (number, generation) object key. The live object stays plaintext
+  /// so later edits in the same session keep working. Cross-reference
+  /// streams and exempt /Metadata stay plain (§7.5.8.2); payloads still
+  /// holding the file's ciphertext pass through untouched.
+  CosObject _encryptedCopy(CosObject object, int number, int generation,
+      StandardSecurityHandler handler) {
+    CosObject copy(CosObject value) {
+      switch (value) {
+        case CosString():
+          return CosString(
+              handler.encryptString(value.bytes, number, generation),
+              isHex: value.isHex);
+        case CosArray():
+          return CosArray([for (final item in value.items) copy(item)]);
+        case CosStream():
+          final dict = copy(value.dictionary) as CosDictionary;
+          if (document.streamKeepsFileBytes(value)) {
+            return CosStream(dict, value.rawBytes);
+          }
+          final type = dict['Type'];
+          final exempt = type is CosName &&
+              (type.value == 'XRef' ||
+                  type.value == 'Metadata' && !handler.encryptMetadata);
+          if (exempt) return CosStream(dict, value.rawBytes);
+          final cipher =
+              handler.encryptStream(value.rawBytes, number, generation);
+          dict['Length'] = CosInteger(cipher.length);
+          return CosStream(dict, cipher);
+        case CosDictionary():
+          final out = CosDictionary();
+          value.entries.forEach((key, v) => out[key] = copy(v));
+          return out;
+        default:
+          return value;
+      }
+    }
+
+    return copy(object);
   }
 
   int _generationOf(int objectNumber) {

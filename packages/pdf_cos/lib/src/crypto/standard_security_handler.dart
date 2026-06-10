@@ -297,6 +297,40 @@ class StandardSecurityHandler {
   Uint8List decryptStream(Uint8List data, int objectNumber, int generation) =>
       _decrypt(streamCipher, data, objectNumber, generation);
 
+  // ---------- per-object encryption (encrypt-on-write) ----------
+
+  /// Generates the random IV for each AES payload. Swappable so tests can
+  /// produce deterministic output; never reuse an IV in production.
+  static Uint8List Function() randomIv = _secureRandomIv;
+
+  static Uint8List _secureRandomIv() {
+    final rng = math.Random.secure();
+    return Uint8List.fromList([for (var i = 0; i < 16; i++) rng.nextInt(256)]);
+  }
+
+  Uint8List encryptString(Uint8List data, int objectNumber, int generation) =>
+      _encrypt(stringCipher, data, objectNumber, generation);
+
+  Uint8List encryptStream(Uint8List data, int objectNumber, int generation) =>
+      _encrypt(streamCipher, data, objectNumber, generation);
+
+  Uint8List _encrypt(
+      PdfCipher cipher, Uint8List data, int objectNumber, int generation) {
+    switch (cipher) {
+      case PdfCipher.none:
+        return data;
+      case PdfCipher.rc4:
+        return rc4(_objectKey(objectNumber, generation, aes: false), data);
+      case PdfCipher.aes128:
+        return Aes.encryptContent(
+            _objectKey(objectNumber, generation, aes: true),
+            data,
+            randomIv());
+      case PdfCipher.aes256:
+        return Aes.encryptContent(_fileKey, data, randomIv());
+    }
+  }
+
   Uint8List _decrypt(
       PdfCipher cipher, Uint8List data, int objectNumber, int generation) {
     switch (cipher) {

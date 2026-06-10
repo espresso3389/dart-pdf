@@ -26,6 +26,13 @@ extension PdfSigning on PdfEditor {
     if (certificates.isEmpty) {
       throw ArgumentError('the signer certificate is required');
     }
+    if (document.cos.isEncrypted) {
+      // the signature /Contents and /ByteRange must stay unencrypted and
+      // byte-patchable in the written file; encrypt-on-write would
+      // scramble the placeholders this method patches
+      throw UnsupportedEncryptionException(
+          'signing encrypted documents is not supported yet');
+    }
     final cos = document.cos;
     final time = (signingTime ?? DateTime.now()).toUtc();
 

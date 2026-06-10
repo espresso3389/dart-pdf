@@ -34,8 +34,9 @@ core runs on servers and in plain Dart tests.
 2. ✅ Incremental-update writer (signature-preserving); first edits:
    metadata, page rotation
 3. ✅ Encryption: opening RC4/AES-128/AES-256 documents (user and owner
-   passwords; encrypting on write is still pending, so encrypted files are
-   read-only for now)
+   passwords) and encrypt-on-write, so encrypted documents are editable
+   (signing them is still refused — the signature byte ranges must stay
+   plaintext-patchable)
 4. ✅ Content-stream interpreter with an abstract device interface
 5. ✅ Font engine: TrueType/CFF glyph outlines, CID fonts, CMaps, ToUnicode
 6. ✅ Flutter rendering device + viewer widget (zoom, page cache; deep-zoom

@@ -32,6 +32,19 @@ class Aes {
         : plain;
   }
 
+  /// Encrypts a PDF content payload: PKCS#7-pads [data], prepends the
+  /// 16-byte [iv], CBC-encrypts. The inverse of [decryptContent].
+  static Uint8List encryptContent(List<int> key, Uint8List data, List<int> iv) {
+    final padLength = 16 - (data.length % 16);
+    final padded = Uint8List(data.length + padLength)
+      ..setRange(0, data.length, data)
+      ..fillRange(data.length, data.length + padLength, padLength);
+    return (BytesBuilder(copy: false)
+          ..add(Uint8List.fromList(iv))
+          ..add(Aes(key).cbcEncrypt(iv, padded)))
+        .takeBytes();
+  }
+
   /// Encrypts with CBC and no padding; [data] must be block-aligned.
   /// Used by Algorithm 2.B and by test fixtures (with PKCS#7 applied by
   /// the caller).

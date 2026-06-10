@@ -69,10 +69,82 @@ void main() {
     }
   });
 
-  test('the updater refuses encrypted documents (no re-encryption yet)', () {
-    final doc = CosDocument.open(buildEncryptedPdf(revision: 3));
-    expect(() => CosIncrementalUpdater(doc),
-        throwsA(isA<UnsupportedEncryptionException>()));
+  group('encrypt-on-write', () {
+    for (final revision in [2, 3, 4, 6]) {
+      test('R$revision round-trips string and stream edits', () {
+        final doc = CosDocument.open(buildEncryptedPdf(revision: revision));
+        final updater = CosIncrementalUpdater(doc);
+
+        final infoRef = doc.trailer['Info'] as CosReference;
+        updater.replaceObject(
+            infoRef.objectNumber,
+            CosDictionary({'Title': CosString.fromText('Updated Title')}));
+        final payload = ascii('fresh plaintext stream payload');
+        final streamRef = updater.addObject(CosStream(
+            CosDictionary({'Length': CosInteger(payload.length)}), payload));
+
+        final saved = updater.save();
+
+        // the appended bytes must not leak the plaintext
+        final tail = saved.sublist(doc.bytes.length);
+        expect(String.fromCharCodes(tail), isNot(contains('Updated Title')));
+        expect(String.fromCharCodes(tail),
+            isNot(contains('fresh plaintext stream payload')));
+
+        final reopened = CosDocument.open(saved);
+        final info = reopened.resolve(reopened.trailer['Info'])
+            as CosDictionary;
+        expect((reopened.resolve(info['Title']) as CosString).text,
+            'Updated Title');
+        final stream = reopened.getObject(streamRef.objectNumber, 0)
+            as CosStream;
+        expect(reopened.decodeStreamData(stream), payload);
+        // untouched original content still decrypts
+        final kids = reopened.resolve((reopened
+            .resolve(reopened.catalog['Pages']) as CosDictionary)['Kids']);
+        final pageDict =
+            reopened.resolve((kids as CosArray)[0]) as CosDictionary;
+        final contents =
+            reopened.resolve(pageDict['Contents']) as CosStream;
+        expect(latin1.decode(reopened.decodeStreamData(contents)),
+            expectedContent);
+      });
+    }
+
+    test('passworded documents stay passworded after an edit', () {
+      final original =
+          buildEncryptedPdf(revision: 4, userPassword: 'hunter2');
+      final doc = CosDocument.open(original, password: 'hunter2');
+      final updater = CosIncrementalUpdater(doc);
+      final infoRef = doc.trailer['Info'] as CosReference;
+      updater.replaceObject(infoRef.objectNumber,
+          CosDictionary({'Title': CosString.fromText('Edited')}));
+      final saved = updater.save();
+      expect(() => CosDocument.open(saved),
+          throwsA(isA<CosPasswordException>()));
+      final reopened = CosDocument.open(saved, password: 'hunter2');
+      final info =
+          reopened.resolve(reopened.trailer['Info']) as CosDictionary;
+      expect((reopened.resolve(info['Title']) as CosString).text, 'Edited');
+    });
+
+    test('resaving a loaded stream does not double-encrypt it', () {
+      final doc = CosDocument.open(buildEncryptedPdf(revision: 4));
+      final page = doc.resolve(
+          (doc.resolve(doc.catalog['Pages']) as CosDictionary)['Kids']);
+      final pageDict =
+          doc.resolve((page as CosArray)[0]) as CosDictionary;
+      final contents = doc.resolve(pageDict['Contents']) as CosStream;
+      final updater = CosIncrementalUpdater(doc)..markChanged(contents);
+      final reopened = CosDocument.open(updater.save());
+      final reKids = reopened.resolve((reopened
+          .resolve(reopened.catalog['Pages']) as CosDictionary)['Kids']);
+      final rePage =
+          reopened.resolve((reKids as CosArray)[0]) as CosDictionary;
+      final reContents = reopened.resolve(rePage['Contents']) as CosStream;
+      expect(latin1.decode(reopened.decodeStreamData(reContents)),
+          expectedContent);
+    });
   });
 
   test('unencrypted documents are unaffected', () {

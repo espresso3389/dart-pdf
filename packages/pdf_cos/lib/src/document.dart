@@ -43,6 +43,15 @@ class CosDocument {
 
   bool get isEncrypted => _encryption != null;
 
+  /// Object number of the /Encrypt dictionary, whose strings stay raw.
+  int? get encryptObjectNumber => _encryptObjectNumber;
+
+  /// Whether [stream]'s payload is still the bytes loaded from the file
+  /// (kept encrypted until [decodeStreamData] runs). Encrypt-on-write
+  /// leaves such payloads alone instead of double-encrypting them.
+  bool streamKeepsFileBytes(CosStream stream) =>
+      _streamOwners.containsKey(stream);
+
   /// Opens a document. For encrypted files [password] is tried first as
   /// the user and then as the owner password; the default empty password
   /// is what most "owner-locked" business documents expect. Throws

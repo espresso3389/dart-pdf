@@ -77,5 +77,36 @@ void main() {
       expect(doc.pageIndexOf(doc.page(2).dict), 2);
       expect(doc.pageIndexOf(doc.catalog), -1);
     });
+
+    test('annotations without /AP have no appearance', () {
+      expect(annots[0].normalAppearance, isNull);
+    });
+  });
+
+  group('appearance streams', () {
+    late PdfDocument doc;
+    late List<PdfAnnotation> annots;
+
+    setUp(() {
+      doc = PdfDocument.open(buildAppearanceAnnotationsPdf());
+      annots = doc.page(0).annotations;
+    });
+
+    String decoded(PdfAnnotation annotation) => String.fromCharCodes(
+        doc.cos.decodeStreamData(annotation.normalAppearance!));
+
+    test('/AP /N resolves to the form stream', () {
+      expect(decoded(annots[0]), contains('0 1 0 rg'));
+    });
+
+    test('/AS picks the state out of an /N subdictionary', () {
+      expect(annots[2], isA<PdfWidgetAnnotation>());
+      expect(decoded(annots[2]), contains('0.5 g'));
+    });
+
+    test('hidden flag parses alongside the appearance', () {
+      expect(annots[3].isHidden, isTrue);
+      expect(annots[3].normalAppearance, isNotNull);
+    });
   });
 }

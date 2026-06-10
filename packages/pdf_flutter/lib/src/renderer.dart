@@ -22,7 +22,9 @@ class PdfPageRenderer {
     final cos = page.document.cos;
 
     final collector = ImageCollector();
-    PdfInterpreter(cos: cos, device: collector).drawPage(page);
+    PdfInterpreter(cos: cos, device: collector)
+      ..drawPage(page)
+      ..drawAnnotations(page);
     final images = await decodeImages(cos, collector.streams);
 
     final box = page.cropBox;
@@ -51,7 +53,8 @@ class PdfPageRenderer {
     canvas.translate(-box.left, -box.bottom);
 
     PdfInterpreter(cos: cos, device: CanvasPdfDevice(canvas, images: images))
-        .drawPage(page);
+      ..drawPage(page)
+      ..drawAnnotations(page);
     return recorder.endRecording();
   }
 

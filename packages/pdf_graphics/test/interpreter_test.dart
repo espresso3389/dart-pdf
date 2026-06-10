@@ -439,4 +439,74 @@ void main() {
     expect(corner.x, 108); // 2*4 + 100
     expect(corner.y, 8);
   });
+
+  group('annotation appearances', () {
+    // page-space bounding box of a recorded fill
+    (double, double, double, double) boundsOf(PdfPath path) {
+      var minX = double.infinity, minY = double.infinity;
+      var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+      for (final segment in path.segments) {
+        if (segment case PdfMoveTo(:final x, :final y) ||
+            PdfLineTo(:final x, :final y)) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+      return (minX, minY, maxX, maxY);
+    }
+
+    RecordingDevice drawAnnotations() {
+      final doc = PdfDocument.open(buildAppearanceAnnotationsPdf());
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc.cos, device: device)
+        ..drawPage(doc.page(0))
+        ..drawAnnotations(doc.page(0));
+      return device;
+    }
+
+    test('appearances draw after content; hidden and Popup are skipped', () {
+      final device = drawAnnotations();
+      // blue page content + green square + red stamp + gray checkbox;
+      // the magenta hidden and yellow popup appearances never paint
+      expect(device.fills.map((f) => f.$2), [
+        const PdfColor(0, 0, 1),
+        const PdfColor(0, 1, 0),
+        const PdfColor(1, 0, 0),
+        const PdfColor.gray(0.5),
+      ]);
+    });
+
+    test('BBox is scaled onto the annotation Rect', () {
+      final device = drawAnnotations();
+      final green =
+          device.fills.firstWhere((f) => f.$2 == const PdfColor(0, 1, 0));
+      expect(boundsOf(green.$1), (100, 100, 200, 150));
+    });
+
+    test('appearance /Matrix rotates, then the result maps onto Rect', () {
+      final device = drawAnnotations();
+      final red =
+          device.fills.firstWhere((f) => f.$2 == const PdfColor(1, 0, 0));
+      expect(boundsOf(red.$1), (300, 100, 350, 200));
+    });
+
+    test('/AS selects the appearance state', () {
+      final device = drawAnnotations();
+      final gray =
+          device.fills.firstWhere((f) => f.$2 == const PdfColor.gray(0.5));
+      expect(boundsOf(gray.$1), (400, 100, 420, 120));
+    });
+
+    test('each appearance clips to its BBox', () {
+      final doc = PdfDocument.open(buildAppearanceAnnotationsPdf());
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc.cos, device: device)
+          .drawAnnotations(doc.page(0));
+      // three drawn appearances, one BBox clip each
+      expect(device.clips, hasLength(3));
+      expect(boundsOf(device.clips.first.$1), (100, 100, 200, 150));
+    });
+  });
 }

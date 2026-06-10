@@ -112,8 +112,9 @@ class _ActiveSoftMask {
 ///
 /// Coverage: paths, transforms, device color spaces, clipping, text
 /// positioning/showing (with metric-accurate advances), form XObjects,
-/// image XObjects and inline images (decoding delegated to the device).
-/// TODO: shadings (sh), patterns, soft masks, Type3 fonts.
+/// image XObjects and inline images (decoding delegated to the device),
+/// shadings, patterns, soft masks, Type3 fonts, and annotation
+/// appearance streams.
 class PdfInterpreter {
   PdfInterpreter({required this.cos, required this.device});
 
@@ -152,10 +153,88 @@ class PdfInterpreter {
     }
   }
 
-  /// Runs a parsed content stream against [resources] (used by tests and,
-  /// later, annotation appearance streams).
+  /// Runs a parsed content stream against [resources] (used by tests).
   void run(List<ContentOperation> operations, CosDictionary resources) {
     _run(operations, resources, 0);
+  }
+
+  /// Draws the page's annotation appearance streams, normally called after
+  /// [drawPage] so they paint over the content (§12.5.5).
+  ///
+  /// Hidden and NoView annotations are skipped, as are Popups — those are
+  /// only shown by a viewer when their parent note is opened.
+  void drawAnnotations(PdfPage page) {
+    _pageBox = page.mediaBox;
+    for (final annotation in page.annotations) {
+      if (annotation.isHidden || annotation.isNoView) continue;
+      if (annotation.subtype == 'Popup') continue;
+      final form = annotation.normalAppearance;
+      if (form == null) continue;
+      _drawAppearance(form, annotation.rect);
+    }
+  }
+
+  /// Renders one appearance form: the /BBox corners go through /Matrix,
+  /// their bounding box is fitted onto the annotation's /Rect, and the
+  /// content runs clipped to the BBox (the algorithm in §12.5.5).
+  void _drawAppearance(CosStream form, PdfRect rect) {
+    final Uint8List content;
+    try {
+      content = cos.decodeStreamData(form);
+    } on Exception {
+      return;
+    }
+    final dict = form.dictionary;
+    final matrixObj = cos.resolve(dict['Matrix']);
+    final matrix = matrixObj is CosArray && matrixObj.length >= 6
+        ? _matrixFrom(matrixObj.items)
+        : PdfMatrix.identity;
+    final bbox = _numbersOf(dict['BBox']);
+
+    var ctm = matrix;
+    if (bbox.length >= 4 && rect.width > 0 && rect.height > 0) {
+      var minX = double.infinity, minY = double.infinity;
+      var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+      for (final (x, y) in [
+        (bbox[0], bbox[1]),
+        (bbox[2], bbox[1]),
+        (bbox[2], bbox[3]),
+        (bbox[0], bbox[3]),
+      ]) {
+        minX = math.min(minX, matrix.transformX(x, y));
+        minY = math.min(minY, matrix.transformY(x, y));
+        maxX = math.max(maxX, matrix.transformX(x, y));
+        maxY = math.max(maxY, matrix.transformY(x, y));
+      }
+      if (maxX > minX && maxY > minY) {
+        final sx = rect.width / (maxX - minX);
+        final sy = rect.height / (maxY - minY);
+        ctm = matrix.concat(PdfMatrix(
+            sx, 0, 0, sy, rect.left - minX * sx, rect.bottom - minY * sy));
+      }
+    }
+
+    final savedState = _state;
+    final savedStackDepth = _stateStack.length;
+    device.save();
+    try {
+      _state = _GraphicsState()..ctm = ctm;
+      if (bbox.length >= 4) _clipToBox(bbox);
+      final resources = cos.resolve(dict['Resources']);
+      _run(
+        ContentStreamParser.parse(content),
+        resources is CosDictionary ? resources : CosDictionary(),
+        _currentFormDepth + 1,
+      );
+      final mask = _state.softMask;
+      if (mask != null) _finalizeSoftMask(mask);
+    } finally {
+      while (_stateStack.length > savedStackDepth) {
+        _stateStack.removeLast();
+      }
+      _state = savedState;
+      device.restore();
+    }
   }
 
   void _run(

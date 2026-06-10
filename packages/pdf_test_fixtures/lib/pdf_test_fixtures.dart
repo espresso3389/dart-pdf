@@ -192,6 +192,73 @@ Uint8List buildAnnotatedPdf() {
   return ascii(buffer.toString());
 }
 
+/// Builds a one-page PDF whose annotations carry appearance streams:
+///
+/// - a Square at /Rect [100 100 200 150], /AP BBox [0 0 10 10] filling
+///   itself green — exercises the BBox → Rect scaling (×10, ×5)
+/// - a Stamp at /Rect [300 100 350 200] whose /AP has a 90°-rotation
+///   /Matrix and fills its BBox red
+/// - a Widget checkbox "agree" at /Rect [400 100 420 120] with /AS /On
+///   selecting between /On (fills 0.5 gray) and /Off (empty) states
+/// - a hidden (/F 2) Square at [100 300 200 350] whose /AP fills magenta —
+///   must not be drawn
+/// - a Popup at [300 300 400 400] whose /AP fills yellow — must not be
+///   drawn during page rendering
+///
+/// The page content itself fills a blue square at (10,10)-(60,60).
+Uint8List buildAppearanceAnnotationsPdf() {
+  String form(String bbox, String content, {String? matrix}) =>
+      '<< /Type /XObject /Subtype /Form /BBox $bbox '
+      '${matrix == null ? '' : '/Matrix $matrix '}'
+      '/Length ${content.length} >>\nstream\n$content\nendstream';
+
+  const annots = '/Annots [ '
+      '<< /Type /Annot /Subtype /Square /Rect [100 100 200 150] '
+      '/AP << /N 5 0 R >> >> '
+      '<< /Type /Annot /Subtype /Stamp /Rect [300 100 350 200] '
+      '/AP << /N 6 0 R >> >> '
+      '<< /Type /Annot /Subtype /Widget /FT /Btn /T (agree) '
+      '/Rect [400 100 420 120] /AS /On '
+      '/AP << /N << /On 7 0 R /Off 8 0 R >> >> >> '
+      '<< /Type /Annot /Subtype /Square /Rect [100 300 200 350] /F 2 '
+      '/AP << /N 9 0 R >> >> '
+      '<< /Type /Annot /Subtype /Popup /Rect [300 300 400 400] '
+      '/AP << /N 10 0 R >> >> '
+      ']';
+  const content = '0 0 1 rg 10 10 50 50 re f';
+  final objects = <String>[
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
+        '/Contents 4 0 R $annots >>',
+    '<< /Length ${content.length} >>\nstream\n$content\nendstream',
+    form('[0 0 10 10]', '0 1 0 rg 0 0 10 10 re f'),
+    form('[0 0 10 10]', '1 0 0 rg 0 0 10 10 re f', matrix: '[0 1 -1 0 0 0]'),
+    form('[0 0 1 1]', '0.5 g 0 0 1 1 re f'),
+    form('[0 0 1 1]', ''),
+    form('[0 0 10 10]', '1 0 1 rg 0 0 10 10 re f'),
+    form('[0 0 10 10]', '1 1 0 rg 0 0 10 10 re f'),
+  ];
+
+  final buffer = StringBuffer('%PDF-1.4\n');
+  final offsets = <int>[];
+  for (var i = 0; i < objects.length; i++) {
+    offsets.add(buffer.length);
+    buffer.write('${i + 1} 0 obj\n${objects[i]}\nendobj\n');
+  }
+  final xrefOffset = buffer.length;
+  buffer
+    ..write('xref\n0 ${objects.length + 1}\n')
+    ..write('0000000000 65535 f \n');
+  for (final offset in offsets) {
+    buffer.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  buffer
+    ..write('trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n')
+    ..write('startxref\n$xrefOffset\n%%EOF\n');
+  return ascii(buffer.toString());
+}
+
 /// Builds a minimal TrueType font, unitsPerEm 1000, three glyphs:
 /// 0 = .notdef (empty), 1 = 'A' (triangle, advance 600),
 /// 2 = 'B' (square, advance 1000). The cmap is a (3,1) format 4 table.

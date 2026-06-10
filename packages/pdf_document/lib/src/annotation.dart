@@ -72,6 +72,29 @@ class PdfAnnotation {
   /// The action this annotation triggers when activated, if any.
   PdfAction? get action => null;
 
+  /// The normal appearance stream (§12.5.5): /AP → /N, a Form XObject.
+  ///
+  /// When /N holds a subdictionary of states (checkboxes, radio buttons),
+  /// the /AS entry selects one; without /AS a sole entry is used, anything
+  /// more ambiguous resolves to null.
+  CosStream? get normalAppearance {
+    final cos = document.cos;
+    final ap = cos.resolve(dict['AP']);
+    if (ap is! CosDictionary) return null;
+    var n = cos.resolve(ap['N']);
+    if (n is CosDictionary) {
+      final state = cos.resolve(dict['AS']);
+      if (state is CosName) {
+        n = cos.resolve(n[state.value]);
+      } else if (n.entries.length == 1) {
+        n = cos.resolve(n.entries.values.single);
+      } else {
+        return null;
+      }
+    }
+    return n is CosStream ? n : null;
+  }
+
   static PdfGoToAction? _destAsGoTo(PdfDocument document, CosObject? raw) {
     final destination = PdfDestination.parse(document, raw);
     return destination == null ? null : PdfGoToAction(destination);

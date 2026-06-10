@@ -56,4 +56,11 @@ Page manipulation is in (`page_editor.dart`): reorder/move/remove flatten
 the page tree (materializing inherited attributes), `appendPagesFrom`
 deep-copies pages across documents, `extractPages` splits into a fresh
 file via `CosDocumentBuilder` (pdf_cos's from-scratch writer).
-Current frontier: digital signatures (signing and validation).
+Digital signatures are in: `PdfSignature.of(doc)` + `validate()`
+(`signature.dart`; CMS/X.509/RSA/ECDSA primitives live in
+`pdf_cos/src/crypto/` — asn1, rsa, ecdsa, cms) and `PdfEditor.saveSigned`
+(`signature_editor.dart`, adbe.pkcs7.detached with ByteRange patching).
+No trust-store chain validation. Test signer identity in
+`pdf_test_fixtures/src/signer_identity.dart`.
+Current frontier: content editing tiers (stamping → element deletion →
+text editing).

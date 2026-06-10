@@ -4,7 +4,11 @@ library;
 
 export 'src/builder.dart';
 export 'src/crypto/aes.dart';
+export 'src/crypto/asn1.dart';
+export 'src/crypto/cms.dart';
+export 'src/crypto/ecdsa.dart';
 export 'src/crypto/rc4.dart';
+export 'src/crypto/rsa.dart';
 export 'src/crypto/standard_security_handler.dart';
 export 'src/document.dart';
 export 'src/exceptions.dart';

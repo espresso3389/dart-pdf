@@ -1,0 +1,362 @@
+/// CMS / PKCS#7 SignedData (RFC 5652) — the container inside a PDF
+/// signature's /Contents — plus the minimal X.509 reading it needs.
+/// Verification checks the cryptography against the embedded certificate;
+/// chain-of-trust evaluation against a root store is out of scope.
+library;
+
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart' as crypto;
+
+import 'asn1.dart';
+import 'ecdsa.dart';
+import 'rsa.dart';
+
+abstract final class _Oid {
+  static const signedData = '1.2.840.113549.1.7.2';
+  static const data = '1.2.840.113549.1.7.1';
+  static const contentType = '1.2.840.113549.1.9.3';
+  static const messageDigest = '1.2.840.113549.1.9.4';
+  static const signingTime = '1.2.840.113549.1.9.5';
+  static const rsaEncryption = '1.2.840.113549.1.1.1';
+  static const ecPublicKey = '1.2.840.10045.2.1';
+}
+
+/// Maps a digest OID (or a combined signature OID) to its hash.
+crypto.Hash? _hashFor(String oid) => switch (oid) {
+      DigestOid.sha1 || '1.2.840.113549.1.1.5' || '1.2.840.10045.4.1' =>
+        crypto.sha1,
+      DigestOid.sha256 ||
+      '1.2.840.113549.1.1.11' ||
+      '1.2.840.10045.4.3.2' =>
+        crypto.sha256,
+      DigestOid.sha384 ||
+      '1.2.840.113549.1.1.12' ||
+      '1.2.840.10045.4.3.3' =>
+        crypto.sha384,
+      DigestOid.sha512 ||
+      '1.2.840.113549.1.1.13' ||
+      '1.2.840.10045.4.3.4' =>
+        crypto.sha512,
+      _ => null,
+    };
+
+String? _digestOidFor(crypto.Hash hash) => switch (hash) {
+      crypto.sha1 => DigestOid.sha1,
+      crypto.sha256 => DigestOid.sha256,
+      crypto.sha384 => DigestOid.sha384,
+      crypto.sha512 => DigestOid.sha512,
+      _ => null,
+    };
+
+class X509Certificate {
+  X509Certificate._(this.der);
+
+  factory X509Certificate.parse(Uint8List der) {
+    final cert = X509Certificate._(der);
+    final top = DerObject.parse(der).children;
+    final tbs = top[0].children;
+    var i = 0;
+    if (tbs[0].tag == DerTag.context(0)) i = 1; // explicit version
+    cert.serial = tbs[i].asInteger;
+    cert.issuerDer = tbs[i + 2].encoded;
+    final validity = tbs[i + 3].children;
+    cert.notBefore = validity[0].asTime;
+    cert.notAfter = validity[1].asTime;
+    cert.subjectDer = tbs[i + 4].encoded;
+    final spki = tbs[i + 5].children;
+    final algorithm = spki[0].children;
+    cert.publicKeyAlgorithmOid = algorithm[0].asOid;
+    final keyBits = spki[1].asBitString;
+    switch (cert.publicKeyAlgorithmOid) {
+      case _Oid.rsaEncryption:
+        cert.publicKey = RsaPublicKey.fromPkcs1(keyBits);
+      case _Oid.ecPublicKey when algorithm.length > 1:
+        final curve = EcCurve.byOid(algorithm[1].asOid);
+        if (curve != null) {
+          cert.publicKey = EcPublicKey.fromPoint(curve, keyBits);
+        }
+      default:
+        cert.publicKey = null;
+    }
+    return cert;
+  }
+
+  final Uint8List der;
+  late final BigInt serial;
+  late final Uint8List issuerDer;
+  late final Uint8List subjectDer;
+  late final DateTime notBefore;
+  late final DateTime notAfter;
+  late final String publicKeyAlgorithmOid;
+
+  /// [RsaPublicKey], [EcPublicKey], or null for unsupported algorithms.
+  Object? publicKey;
+
+  /// Attribute values of a Name by OID, e.g. CN is `2.5.4.3`.
+  static Map<String, String> _nameOf(Uint8List nameDer) {
+    final out = <String, String>{};
+    for (final rdn in DerObject.parse(nameDer).children) {
+      for (final pair in rdn.children) {
+        out[pair.children[0].asOid] = pair.children[1].asString;
+      }
+    }
+    return out;
+  }
+
+  Map<String, String> get subject => _nameOf(subjectDer);
+  Map<String, String> get issuer => _nameOf(issuerDer);
+
+  String? get subjectCommonName => subject['2.5.4.3'];
+  String? get issuerCommonName => issuer['2.5.4.3'];
+}
+
+class CmsSignerInfo {
+  CmsSignerInfo._();
+
+  late final String digestAlgorithmOid;
+  late final String signatureAlgorithmOid;
+  late final Uint8List signature;
+
+  /// The signed attributes re-tagged as an EXPLICIT SET, the exact bytes
+  /// the signature is computed over (RFC 5652 §5.4). Null when the signer
+  /// signed the content digest directly.
+  Uint8List? signedAttrsDer;
+  Uint8List? messageDigest;
+  DateTime? signingTime;
+
+  Uint8List? sidIssuerDer;
+  BigInt? sidSerial;
+}
+
+class CmsSignedData {
+  CmsSignedData._(this.certificates, this.signerInfos, this.eContent);
+
+  /// Parses a ContentInfo wrapping SignedData. [der] may carry trailing
+  /// zero padding (PDF signers pre-allocate /Contents).
+  factory CmsSignedData.parse(Uint8List der) {
+    final contentInfo = DerObject.parsePrefix(der);
+    final children = contentInfo.children;
+    if (children.isEmpty || children[0].asOid != _Oid.signedData) {
+      throw const FormatException('not a CMS SignedData');
+    }
+    final signedData = children[1].children.first.children;
+    var i = 0;
+    i++; // version
+    i++; // digestAlgorithms
+    final encap = signedData[i++].children;
+    Uint8List? eContent;
+    if (encap.length > 1 && encap[1].tag == DerTag.context(0)) {
+      final inner = encap[1].children.first;
+      eContent = inner.content;
+    }
+    final certificates = <X509Certificate>[];
+    while (i < signedData.length &&
+        (signedData[i].tag == DerTag.context(0) ||
+            signedData[i].tag == DerTag.context(1))) {
+      if (signedData[i].tag == DerTag.context(0)) {
+        for (final certDer in signedData[i].children) {
+          try {
+            certificates.add(X509Certificate.parse(certDer.encoded));
+          } on Object {
+            // an attribute certificate or unparsable entry — skip it
+          }
+        }
+      }
+      i++;
+    }
+    final signerInfos = <CmsSignerInfo>[
+      for (final info in signedData[i].children) _parseSignerInfo(info),
+    ];
+    return CmsSignedData._(certificates, signerInfos, eContent);
+  }
+
+  static CmsSignerInfo _parseSignerInfo(DerObject info) {
+    final signer = CmsSignerInfo._();
+    final fields = info.children;
+    var i = 1; // skip version
+    if (fields[i].tag == DerTag.sequence) {
+      final sid = fields[i].children;
+      signer.sidIssuerDer = sid[0].encoded;
+      signer.sidSerial = sid[1].asInteger;
+    }
+    i++;
+    signer.digestAlgorithmOid = fields[i++].children[0].asOid;
+    if (fields[i].tag == DerTag.context(0)) {
+      final attrs = fields[i];
+      // the signature is over these bytes with the IMPLICIT [0] tag
+      // replaced by SET — same length, different identifier octet
+      final retagged = Uint8List.fromList(attrs.encoded);
+      retagged[0] = DerTag.set;
+      signer.signedAttrsDer = retagged;
+      for (final attribute in attrs.children) {
+        final oid = attribute.children[0].asOid;
+        final values = attribute.children[1].children;
+        if (values.isEmpty) continue;
+        if (oid == _Oid.messageDigest) {
+          signer.messageDigest = values.first.content;
+        } else if (oid == _Oid.signingTime) {
+          signer.signingTime = values.first.asTime;
+        }
+      }
+      i++;
+    }
+    signer.signatureAlgorithmOid = fields[i++].children[0].asOid;
+    signer.signature = fields[i].content;
+    return signer;
+  }
+
+  final List<X509Certificate> certificates;
+  final List<CmsSignerInfo> signerInfos;
+
+  /// Encapsulated content, when not detached (adbe.pkcs7.sha1 stores the
+  /// document digest here).
+  final Uint8List? eContent;
+
+  /// The certificate a signer info points at via issuer + serial.
+  X509Certificate? certificateFor(CmsSignerInfo signer) {
+    for (final cert in certificates) {
+      if (cert.serial == signer.sidSerial &&
+          _bytesEqual(cert.issuerDer, signer.sidIssuerDer)) {
+        return cert;
+      }
+    }
+    return certificates.isEmpty ? null : certificates.first;
+  }
+
+  static bool _bytesEqual(Uint8List a, Uint8List? b) {
+    if (b == null || a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+}
+
+/// Outcome of verifying one CMS signer against detached [content] bytes.
+class CmsVerification {
+  CmsVerification(this.digestMatches, this.signatureValid, this.problem);
+
+  /// The signed message digest equals the digest of the content.
+  final bool digestMatches;
+
+  /// The signature verifies against the signer's certificate key.
+  final bool signatureValid;
+
+  /// Why verification could not complete, when it could not.
+  final String? problem;
+}
+
+/// Verifies [signer] over the detached [content]. For encapsulated
+/// variants pass the eContent as [content] override semantics handled by
+/// the caller.
+CmsVerification cmsVerify(
+    CmsSignedData cms, CmsSignerInfo signer, List<int> content) {
+  final hash = _hashFor(signer.digestAlgorithmOid);
+  if (hash == null) {
+    return CmsVerification(
+        false, false, 'unsupported digest ${signer.digestAlgorithmOid}');
+  }
+  final contentDigest = hash.convert(content).bytes;
+
+  // what the signature is over, and the digest it must embed
+  final List<int> signedBytes;
+  var digestMatches = true;
+  if (signer.signedAttrsDer != null) {
+    final embedded = signer.messageDigest;
+    digestMatches = embedded != null &&
+        CmsSignedData._bytesEqual(Uint8List.fromList(contentDigest),
+            Uint8List.fromList(embedded));
+    signedBytes = signer.signedAttrsDer!;
+  } else {
+    signedBytes = content;
+  }
+
+  final cert = cms.certificateFor(signer);
+  if (cert == null) {
+    return CmsVerification(digestMatches, false, 'no signer certificate');
+  }
+  if (signer.signatureAlgorithmOid == '1.2.840.113549.1.1.10') {
+    return CmsVerification(
+        digestMatches, false, 'RSASSA-PSS is not supported yet');
+  }
+
+  // the signature algorithm may name the digest itself (sha256WithRSA);
+  // otherwise the separate digest algorithm applies
+  final signatureHash =
+      _hashFor(signer.signatureAlgorithmOid) ?? hash;
+  final digestOid = _digestOidFor(signatureHash)!;
+  final signedDigest = signatureHash.convert(signedBytes).bytes;
+
+  switch (cert.publicKey) {
+    case final RsaPublicKey key:
+      return CmsVerification(
+          digestMatches,
+          rsaVerify(key, digestOid, signedDigest, signer.signature),
+          null);
+    case final EcPublicKey key:
+      return CmsVerification(digestMatches,
+          ecdsaVerify(key, signedDigest, signer.signature), null);
+    default:
+      return CmsVerification(digestMatches, false,
+          'unsupported key algorithm ${cert.publicKeyAlgorithmOid}');
+  }
+}
+
+/// Builds a detached CMS SignedData over content whose digest is
+/// [contentDigest] (SHA-256), signing with RSA PKCS#1 v1.5.
+/// [certificates] is the DER chain, signer certificate first.
+Uint8List cmsSignDetached({
+  required List<int> contentDigest,
+  required RsaPrivateKey privateKey,
+  required List<Uint8List> certificates,
+  DateTime? signingTime,
+}) {
+  if (certificates.isEmpty) {
+    throw ArgumentError('at least the signer certificate is required');
+  }
+  final signerCert = X509Certificate.parse(certificates.first);
+
+  final signedAttrs = derSetOf([
+    derSequence([
+      derOid(_Oid.contentType),
+      derSet([derOid(_Oid.data)]),
+    ]),
+    if (signingTime != null)
+      derSequence([
+        derOid(_Oid.signingTime),
+        derSet([derUtcTime(signingTime)]),
+      ]),
+    derSequence([
+      derOid(_Oid.messageDigest),
+      derSet([derOctetString(contentDigest)]),
+    ]),
+  ]);
+
+  final signature = rsaSign(privateKey, DigestOid.sha256,
+      crypto.sha256.convert(signedAttrs).bytes);
+
+  final sha256Algorithm = derSequence([derOid(DigestOid.sha256), derNull()]);
+  final signerInfo = derSequence([
+    derInteger(BigInt.one),
+    derSequence([signerCert.issuerDer, derInteger(signerCert.serial)]),
+    sha256Algorithm,
+    // re-tag the SET of signed attributes as IMPLICIT [0]
+    Uint8List.fromList(signedAttrs)..[0] = DerTag.context(0),
+    derSequence([derOid(_Oid.rsaEncryption), derNull()]),
+    derOctetString(signature),
+  ]);
+
+  final signedData = derSequence([
+    derInteger(BigInt.one),
+    derSet([sha256Algorithm]),
+    derSequence([derOid(_Oid.data)]),
+    derContext(0, [for (final cert in certificates) ...cert]),
+    derSet([signerInfo]),
+  ]);
+
+  return derSequence([
+    derOid(_Oid.signedData),
+    derContext(0, signedData),
+  ]);
+}

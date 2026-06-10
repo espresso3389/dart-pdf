@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:pdf_cos/pdf_cos.dart';
 
 import 'annotation.dart';
@@ -12,6 +13,7 @@ import 'rect.dart';
 part 'annotation_editor.dart';
 part 'form_editor.dart';
 part 'page_editor.dart';
+part 'signature_editor.dart';
 
 /// High-level editing session over a [PdfDocument].
 ///

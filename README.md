@@ -50,8 +50,13 @@ core runs on servers and in plain Dart tests.
 10. ✅ Page manipulation: reorder/move, remove, merge with cross-document
     object copying (`appendPagesFrom`), and split (`extractPages` writes a
     standalone file; extracting from an encrypted document decrypts)
-11. **Digital signatures: signing and validation** — next
-12. Content editing tiers: stamping → element deletion → text editing
+11. ✅ Digital signatures: validation (CMS/PKCS#7 with RSA and ECDSA
+    P-256/384/521, byte-range and revision-coverage checks; trust-store
+    chain evaluation not included) and signing (`saveSigned` —
+    adbe.pkcs7.detached, RSA-SHA256, verified interoperable with
+    OpenSSL and poppler)
+12. **Content editing tiers: stamping → element deletion → text
+    editing** — next
 
 ## Development
 

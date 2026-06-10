@@ -78,7 +78,9 @@ selection, ink, shapes, free text, notes, stamps; select/move/resize
 with handles; a content tool that selects page elements for deletion or
 in-place text replacement), keyboard shortcuts, style controls (stroke
 width, opacity, font size), an annotation list sidebar
-(`PdfAnnotationSidebar`), and a ready-made `PdfEditingToolbar`. Still
+(`PdfAnnotationSidebar`), a page thumbnail sidebar
+(`PdfThumbnailSidebar` — tap to jump, drag to reorder pages, delete),
+and a ready-made `PdfEditingToolbar`. Still
 open: richer text editing (reflow),
 RSASSA-PSS signatures, JBIG2 Huffman/refinement variants, and JPX
 subsampling/PCRL-CPRL progressions.

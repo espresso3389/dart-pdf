@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -237,6 +238,48 @@ void main() {
       expect(editing.selectedElement, isNotNull);
       editing.tool = PdfEditTool.select;
       expect(editing.selectedElement, isNull);
+    });
+
+    test('movePage and removePage commit undoable revisions', () {
+      final editing = PdfEditingController(buildMultiPagePdf(3));
+      String shown(int page) => editing
+          .elementsOn(page)
+          .elements
+          .firstWhere((e) => e.kind == PdfElementKind.text)
+          .text!;
+
+      editing.movePage(0, 2);
+      expect(shown(0), 'Page 2');
+      expect(shown(1), 'Page 3');
+      expect(shown(2), 'Page 1');
+
+      editing.undo();
+      expect(shown(0), 'Page 1');
+      editing.redo();
+
+      editing.removePage(0);
+      expect(editing.document.pageCount, 2);
+      expect(shown(0), 'Page 3');
+      expect(shown(1), 'Page 1');
+    });
+
+    test('page edits clear the selection; the last page is kept', () {
+      final editing = PdfEditingController(buildMultiPagePdf(2))
+        ..addRectangle(1, const PdfRect(100, 100, 200, 150))
+        ..tool = PdfEditTool.select;
+      editing.selectAnnotationAt(1, 150, 125);
+      expect(editing.selectedAnnotation, isNotNull);
+
+      editing.movePage(1, 0);
+      expect(editing.selectedAnnotation, isNull,
+          reason: 'page indices shifted under the slot');
+
+      editing.removePage(1);
+      expect(editing.document.pageCount, 1);
+      editing.removePage(0);
+      expect(editing.document.pageCount, 1,
+          reason: 'the last page cannot be removed');
+      expect(editing.document.page(0).annotations.single.subtype, 'Square');
     });
   });
 
@@ -560,6 +603,72 @@ void main() {
       await tester.pump();
       expect(editing.opacity, lessThan(1));
       await tester.pumpAndSettle();
+    });
+
+    testWidgets('the thumbnail sidebar jumps, reorders, and deletes pages',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(3));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            PdfThumbnailSidebar(
+              controller: editing,
+              viewerController: viewer,
+              width: 130,
+            ),
+            Expanded(
+              child: ListenableBuilder(
+                listenable: editing,
+                builder: (context, _) => PdfViewer(
+                  document: editing.document,
+                  controller: viewer,
+                  editing: editing,
+                ),
+              ),
+            ),
+          ]),
+        ),
+      ));
+      await tester.pump();
+
+      String shown(int page) => editing
+          .elementsOn(page)
+          .elements
+          .firstWhere((e) => e.kind == PdfElementKind.text)
+          .text!;
+
+      // a footer label per page
+      expect(find.text('Page 1'), findsOneWidget);
+      expect(find.text('Page 3'), findsOneWidget);
+
+      // tapping a thumbnail jumps the viewer
+      await tester.tap(find.text('Page 3'));
+      await settle(tester);
+      expect(viewer.currentPage, 2);
+
+      // long-press a tile, then drag it one tile down to reorder
+      final gesture =
+          await tester.startGesture(tester.getCenter(find.text('Page 1')));
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
+      await gesture.moveBy(const Offset(0, 90));
+      await tester.pump();
+      await gesture.moveBy(const Offset(0, 90));
+      await tester.pump();
+      await gesture.up();
+      await settle(tester);
+      expect(shown(0), 'Page 2');
+      expect(shown(1), 'Page 1');
+      expect(shown(2), 'Page 3');
+
+      // the first tile's footer button deletes that page
+      await tester.tap(find.byTooltip('Delete page').first);
+      await settle(tester);
+      expect(editing.document.pageCount, 2);
+      expect(shown(0), 'Page 1');
+      expect(shown(1), 'Page 3');
     });
   });
 }

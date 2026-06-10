@@ -306,6 +306,26 @@ class PdfEditingController extends ChangeNotifier {
       });
 
   // ---------------------------------------------------------------------
+  // pages
+
+  /// Moves the page at [from] so it ends up at index [to]. Structural
+  /// page edits shift page indices, so the annotation selection (a
+  /// page-indexed slot) is cleared first.
+  void movePage(int from, int to) {
+    if (from == to) return;
+    _selected = null;
+    apply((e) => e.movePage(from, to));
+  }
+
+  /// Removes the page at [index]. Refused (a no-op) on the last page —
+  /// a document must keep at least one.
+  void removePage(int index) {
+    if (_document.pageCount <= 1) return;
+    _selected = null;
+    apply((e) => e.removePage(index));
+  }
+
+  // ---------------------------------------------------------------------
   // selection
 
   /// Annotation subtypes the select tool ignores: popups belong to their

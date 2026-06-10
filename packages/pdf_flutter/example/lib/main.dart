@@ -41,6 +41,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
   String _title = '';
   String? _error;
   bool _showAnnotations = false;
+  bool _showPages = false;
 
   // app state the interactive demo's PDF links and overlays manipulate
   bool _isDemo = false;
@@ -255,7 +256,13 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     },
                   ),
           ),
-          if (editing != null)
+          if (editing != null) ...[
+            IconButton(
+              icon: const Icon(Icons.grid_view),
+              tooltip: 'Pages',
+              isSelected: _showPages,
+              onPressed: () => setState(() => _showPages = !_showPages),
+            ),
             IconButton(
               icon: const Icon(Icons.list_alt),
               tooltip: 'Annotations',
@@ -263,6 +270,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
               onPressed: () =>
                   setState(() => _showAnnotations = !_showAnnotations),
             ),
+          ],
           IconButton(
             icon: const Icon(Icons.auto_awesome),
             tooltip: 'Open the interactive demo',
@@ -307,6 +315,11 @@ class _ViewerScreenState extends State<ViewerScreen> {
         // the editing controller owns the document revisions: rebuild the
         // viewer with the current one whenever the controller notifies
         (final PdfEditingController session, _) => Row(children: [
+            if (_showPages)
+              PdfThumbnailSidebar(
+                controller: session,
+                viewerController: _controller,
+              ),
             Expanded(
               child: ListenableBuilder(
                 listenable: session,

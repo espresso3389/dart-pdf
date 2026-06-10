@@ -111,3 +111,10 @@ tool (`PdfEditTool.content`: taps hit-test `PdfPageElements` — cached
 per revision in the controller — orange selection chrome; delete via
 `deleteElements`, text rewrite via `replaceText`; element ids die with
 every revision, so any edit clears the element selection).
+Page management UI: `PdfThumbnailSidebar` (editing_thumbnails.dart) —
+display-list thumbnails (`renderPicture` replayed scaled, no
+rasterization), tap to jump, long-press drag to reorder
+(ReorderableListView `onReorderItem` — already index-adjusted), footer
+delete; `controller.movePage`/`removePage` clear the slot-based
+annotation selection first because page indices shift under it, and
+`removePage` is a no-op on the last page.

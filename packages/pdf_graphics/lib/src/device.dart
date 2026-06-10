@@ -5,6 +5,19 @@ import 'matrix.dart';
 import 'path.dart';
 import 'shading.dart';
 
+/// One glyph within a [PdfTextRun]: its outline (when the font is embedded
+/// and parsed) and its pen offset, both in em units.
+class PdfGlyphPlacement {
+  const PdfGlyphPlacement({required this.offset, this.outline});
+
+  /// Horizontal pen position within the run, in em units.
+  final double offset;
+
+  /// Glyph outline in em units (y-up, origin on the baseline), or null when
+  /// the glyph is blank or its outline could not be parsed.
+  final PdfPath? outline;
+}
+
 /// One run of text from a single show-text operator.
 class PdfTextRun {
   const PdfTextRun({
@@ -14,6 +27,7 @@ class PdfTextRun {
     required this.width,
     this.fontName,
     this.fontSize = 0,
+    this.glyphs,
   });
 
   /// Best-effort Unicode (via ToUnicode CMaps or the font's encoding).
@@ -34,6 +48,13 @@ class PdfTextRun {
 
   /// Nominal font size before transformation, for font selection heuristics.
   final double fontSize;
+
+  /// Real glyph outlines from the embedded font, when available. Devices
+  /// should prefer these over substituted text rendering.
+  final List<PdfGlyphPlacement>? glyphs;
+
+  bool get hasOutlines =>
+      glyphs != null && glyphs!.any((g) => g.outline != null);
 }
 
 /// An image draw request. Decoding is left to the device, which may have

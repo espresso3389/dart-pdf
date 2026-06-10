@@ -514,9 +514,16 @@ class PdfInterpreter {
 
     final codes = font.codesOf(bytes);
     final buffer = StringBuffer();
+    final emScale = size * _state.horizontalScale;
+    final glyphs =
+        font.hasOutlines && emScale != 0 ? <PdfGlyphPlacement>[] : null;
     var advance = 0.0; // in unscaled text-space units
     for (final code in codes) {
       buffer.write(font.charFor(code));
+      glyphs?.add(PdfGlyphPlacement(
+        offset: advance / emScale,
+        outline: font.outlineFor(code),
+      ));
       var tx = font.widthOf(code) * size + _state.charSpacing;
       if (!font.isCid && code == 0x20) tx += _state.wordSpacing;
       advance += tx * _state.horizontalScale;
@@ -530,16 +537,19 @@ class PdfInterpreter {
         0, _state.rise,
       ).concat(_textMatrix).concat(_state.ctm);
       final text = buffer.toString();
-      if (text.trim().isNotEmpty) {
+      final hasOutlines =
+          glyphs != null && glyphs.any((g) => g.outline != null);
+      if (text.trim().isNotEmpty || hasOutlines) {
         device.drawText(PdfTextRun(
           text: text,
           transform: transform,
           color: _state.renderMode == 1 || _state.renderMode == 5
               ? _state.strokeColor
               : _state.fillColor,
-          width: advance / (size * _state.horizontalScale),
+          width: advance / emScale,
           fontName: font.baseFont,
           fontSize: size,
+          glyphs: glyphs,
         ));
       }
     }

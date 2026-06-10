@@ -85,8 +85,13 @@ class CanvasPdfDevice implements PdfDevice {
 
   @override
   void drawText(PdfTextRun run) {
-    // Draw at 100px and scale down 100x: TextPainter quality degrades at
-    // tiny sizes, and the run transform already encodes the real size.
+    if (run.hasOutlines) {
+      _drawGlyphOutlines(run);
+      return;
+    }
+    // No embedded outlines: substitute a system font, drawn at 100px and
+    // scaled down 100x (TextPainter quality degrades at tiny sizes; the run
+    // transform already encodes the real size).
     const renderSize = 100.0;
     final painter = TextPainter(
       text: TextSpan(text: run.text, style: _styleFor(run)),
@@ -104,6 +109,23 @@ class CanvasPdfDevice implements PdfDevice {
         : 1.0;
     canvas.scale(scaleX / renderSize, -1 / renderSize);
     painter.paint(canvas, Offset(0, -baseline));
+    canvas.restore();
+  }
+
+  /// Draws real glyph outlines from the embedded font. The run transform
+  /// maps em space (y-up) to page space, so no unflip is needed.
+  void _drawGlyphOutlines(PdfTextRun run) {
+    final paint = Paint()..color = _toColor(run.color, 1);
+    canvas.save();
+    canvas.transform(_toFloat64(run.transform));
+    for (final glyph in run.glyphs!) {
+      final outline = glyph.outline;
+      if (outline == null) continue;
+      canvas.save();
+      canvas.translate(glyph.offset, 0);
+      canvas.drawPath(_toUiPath(outline, PdfFillRule.nonzero), paint);
+      canvas.restore();
+    }
     canvas.restore();
   }
 

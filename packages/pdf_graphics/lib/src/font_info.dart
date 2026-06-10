@@ -2,9 +2,12 @@ import 'dart:typed_data';
 
 import 'package:pdf_cos/pdf_cos.dart';
 
-/// Metrics and text decoding for one font dictionary: enough to position and
-/// extract text. Glyph outlines (the real font engine) come later; devices
-/// substitute a system font and scale runs to these widths meanwhile.
+import 'fonts/truetype.dart';
+import 'path.dart';
+
+/// Metrics, text decoding, and (for embedded TrueType fonts) real glyph
+/// outlines for one font dictionary. Fonts without usable embedded outlines
+/// fall back to device-side substitution scaled to these widths.
 class PdfFontInfo {
   PdfFontInfo._({
     required this.baseFont,
@@ -12,9 +15,15 @@ class PdfFontInfo {
     required Map<int, double> widths,
     required double defaultWidth,
     required Map<int, String> toUnicode,
+    TrueTypeFont? trueType,
+    Uint8List? cidToGid,
+    bool symbolic = false,
   })  : _widths = widths,
         _defaultWidth = defaultWidth,
-        _toUnicode = toUnicode;
+        _toUnicode = toUnicode,
+        _trueType = trueType,
+        _cidToGid = cidToGid,
+        _symbolic = symbolic;
 
   final String? baseFont;
 
@@ -26,6 +35,12 @@ class PdfFontInfo {
   final Map<int, double> _widths;
   final double _defaultWidth;
   final Map<int, String> _toUnicode;
+  final TrueTypeFont? _trueType;
+  final Uint8List? _cidToGid;
+  final bool _symbolic;
+
+  /// True when embedded glyph outlines are available.
+  bool get hasOutlines => _trueType != null;
 
   static PdfFontInfo load(CosDocument cos, CosDictionary font) {
     final subtype = font['Subtype'];
@@ -48,6 +63,9 @@ class PdfFontInfo {
     final widths = <int, double>{};
     var defaultWidth = 0.5;
     final toUnicode = _parseToUnicode(cos, font['ToUnicode']);
+    TrueTypeFont? trueType;
+    Uint8List? cidToGid;
+    var symbolic = false;
 
     if (isCid) {
       final descendants = cos.resolve(font['DescendantFonts']);
@@ -62,6 +80,19 @@ class PdfFontInfo {
                 ? dw.value / 1000
                 : 1.0;
         _parseCidWidths(cos, cos.resolve(descendant['W']), widths);
+        final descriptor = cos.resolve(descendant['FontDescriptor']);
+        if (descriptor is CosDictionary) {
+          trueType = _loadTrueType(cos, descriptor);
+          symbolic = _isSymbolic(cos, descriptor);
+        }
+        final gidMap = cos.resolve(descendant['CIDToGIDMap']);
+        if (gidMap is CosStream) {
+          try {
+            cidToGid = cos.decodeStreamData(gidMap);
+          } on Exception {
+            cidToGid = null;
+          }
+        }
       }
     } else {
       final firstCharObj = cos.resolve(font['FirstChar']);
@@ -79,6 +110,8 @@ class PdfFontInfo {
         if (missing is CosInteger) {
           defaultWidth = missing.value * widthScale;
         }
+        trueType = _loadTrueType(cos, descriptor);
+        symbolic = _isSymbolic(cos, descriptor);
       }
     }
 
@@ -88,7 +121,67 @@ class PdfFontInfo {
       widths: widths,
       defaultWidth: defaultWidth,
       toUnicode: toUnicode,
+      trueType: trueType,
+      cidToGid: cidToGid,
+      symbolic: symbolic,
     );
+  }
+
+  static TrueTypeFont? _loadTrueType(
+      CosDocument cos, CosDictionary descriptor) {
+    // FontFile2 is TrueType; FontFile3 /Subtype /OpenType may carry glyf
+    // outlines too (CFF-flavored OpenType parses to null until the CFF
+    // engine lands).
+    for (final key in const ['FontFile2', 'FontFile3']) {
+      final file = cos.resolve(descriptor[key]);
+      if (file is! CosStream) continue;
+      try {
+        final parsed = TrueTypeFont.parse(cos.decodeStreamData(file));
+        if (parsed != null) return parsed;
+      } on Exception {
+        // fall through to substitution
+      }
+    }
+    return null;
+  }
+
+  static bool _isSymbolic(CosDocument cos, CosDictionary descriptor) {
+    final flags = cos.resolve(descriptor['Flags']);
+    return flags is CosInteger && (flags.value & 4) != 0;
+  }
+
+  /// Real outline for one character code, in em units, or null.
+  PdfPath? outlineFor(int code) {
+    final font = _trueType;
+    if (font == null) return null;
+    return font.outlineForGlyph(_gidFor(code));
+  }
+
+  /// Code → glyph id, per §9.6.6.4 (simple fonts) and §9.7.4.2 (CID fonts).
+  int _gidFor(int code) {
+    final font = _trueType;
+    if (font == null) return 0;
+    if (isCid) {
+      final map = _cidToGid;
+      if (map == null) return code; // Identity
+      final index = code * 2;
+      if (index + 1 >= map.length) return 0;
+      return (map[index] << 8) | map[index + 1];
+    }
+    if (_symbolic || font.hasSymbolCmap) {
+      final gid = font.gidForSymbolCode(code);
+      if (gid != 0) return gid;
+    }
+    final unicode = charFor(code);
+    if (unicode.isNotEmpty) {
+      final gid = font.gidForUnicode(unicode.runes.first);
+      if (gid != 0) return gid;
+    }
+    final mac = font.gidForMacCode(code);
+    if (mac != 0) return mac;
+    // subset fonts without a cmap index glyphs directly by code
+    if (!font.hasCmap && code < font.numGlyphs) return code;
+    return 0;
   }
 
   /// Splits show-text string bytes into character codes.
@@ -101,8 +194,18 @@ class PdfFontInfo {
     return codes;
   }
 
-  /// Glyph advance in em units (1.0 = the font size).
-  double widthOf(int code) => _widths[code] ?? _defaultWidth;
+  /// Glyph advance in em units (1.0 = the font size). Falls back to the
+  /// embedded font's hmtx metrics before the default width.
+  double widthOf(int code) {
+    final declared = _widths[code];
+    if (declared != null) return declared;
+    final font = _trueType;
+    if (font != null) {
+      final advance = font.advanceForGlyph(_gidFor(code));
+      if (advance != null && advance > 0) return advance;
+    }
+    return _defaultWidth;
+  }
 
   /// Best-effort Unicode for one character code.
   String charFor(int code) {

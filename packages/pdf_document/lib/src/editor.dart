@@ -2,7 +2,11 @@ import 'dart:typed_data';
 
 import 'package:pdf_cos/pdf_cos.dart';
 
+import 'content_writer.dart';
 import 'document.dart';
+import 'rect.dart';
+
+part 'annotation_editor.dart';
 
 /// High-level editing session over a [PdfDocument].
 ///

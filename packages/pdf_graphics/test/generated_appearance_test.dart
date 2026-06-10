@@ -1,0 +1,103 @@
+import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_graphics/pdf_graphics.dart';
+import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
+import 'package:test/test.dart';
+
+/// Counts device calls; enough to prove generated appearance streams run
+/// end to end through the interpreter.
+class CountingDevice implements PdfDevice {
+  final fills = <PdfColor>[];
+  final strokes = <PdfColor>[];
+  final texts = <PdfTextRun>[];
+  final blendModes = <PdfBlendMode>[];
+  var alphas = <double>[];
+
+  @override
+  void fillPath(PdfPath path, PdfColor color, PdfFillRule rule, double alpha) {
+    fills.add(color);
+    alphas.add(alpha);
+  }
+
+  @override
+  void strokePath(
+      PdfPath path, PdfColor color, PdfStroke stroke, double alpha) {
+    strokes.add(color);
+  }
+
+  @override
+  void drawText(PdfTextRun run) => texts.add(run);
+
+  @override
+  void setBlendMode(PdfBlendMode mode) => blendModes.add(mode);
+
+  @override
+  void save() {}
+  @override
+  void restore() {}
+  @override
+  void clipPath(PdfPath path, PdfFillRule rule) {}
+  @override
+  void fillPathGradient(
+      PdfPath path, PdfFillRule rule, PdfGradient gradient, double alpha) {}
+  @override
+  void drawImage(PdfImageRequest request) {}
+  @override
+  void beginSoftMasked() {}
+  @override
+  void endSoftMasked(
+      {required bool luminosity,
+      required PdfRect backdrop,
+      required void Function() drawMask}) {}
+}
+
+void main() {
+  PdfDocument annotated(void Function(PdfEditor) edit) {
+    final editor = PdfEditor(PdfDocument.open(buildClassicPdf()));
+    edit(editor);
+    return PdfDocument.open(editor.save());
+  }
+
+  CountingDevice render(PdfDocument doc) {
+    final device = CountingDevice();
+    final page = doc.page(0);
+    PdfInterpreter(cos: doc.cos, device: device)
+      ..drawPage(page)
+      ..drawAnnotations(page);
+    return device;
+  }
+
+  test('a generated highlight fills in its color with Multiply blending', () {
+    final device = render(annotated((e) => e.addHighlight(
+        0, const [PdfRect(72, 700, 200, 712)],
+        color: 0xFF0000)));
+    expect(
+        device.fills.any((c) => c.red > 0.99 && c.green < 0.01), isTrue);
+    expect(device.blendModes, contains(PdfBlendMode.multiply));
+  });
+
+  test('a generated square strokes and fills at the requested opacity', () {
+    final device = render(annotated((e) => e.addSquare(
+        0, const PdfRect(100, 100, 200, 150),
+        strokeColor: 0x0000FF, fillColor: 0x00FF00, opacity: 0.5)));
+    expect(device.strokes.any((c) => c.blue > 0.99), isTrue);
+    expect(device.fills.any((c) => c.green > 0.99), isTrue);
+    expect(device.alphas, contains(closeTo(0.5, 1e-9)));
+  });
+
+  test('generated free text reaches the device as text runs', () {
+    final device = render(annotated((e) => e.addFreeText(
+        0, const PdfRect(72, 600, 300, 660), 'Generated note',
+        fontSize: 14)));
+    final shown = device.texts.map((t) => t.text).join();
+    expect(shown, contains('Generated note'));
+  });
+
+  test('a generated stamp shows its caption in Helvetica-Bold', () {
+    final device = render(annotated(
+        (e) => e.addStamp(0, const PdfRect(100, 500, 260, 540), 'DRAFT')));
+    final stamp =
+        device.texts.where((t) => t.text.contains('DRAFT')).toList();
+    expect(stamp, isNotEmpty);
+    expect(stamp.first.fontName, contains('Helvetica-Bold'));
+  });
+}

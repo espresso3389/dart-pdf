@@ -216,6 +216,9 @@ class _PdfViewerState extends State<PdfViewer>
   /// Cumulative scale of the trackpad pan-zoom gesture in progress.
   double _trackpadScale = 1;
 
+  /// Tracks the gesture's pan velocity for the fling on lift-off.
+  VelocityTracker? _trackpadVelocity;
+
   final _focusNode = FocusNode(debugLabel: 'PdfViewer');
 
   // text selection: (pageIndex, offset into that page's text)
@@ -285,11 +288,21 @@ class _PdfViewerState extends State<PdfViewer>
   /// With ctrl/cmd held the list is out of the hit path (IgnorePointer),
   /// this registration wins, and the wheel zooms around the pointer.
   /// Without a modifier the list's own registration wins while it can
-  /// scroll; at the scroll extents this no-op soaks up the leftovers.
+  /// scroll; at the scroll extents this wins instead — zoomed in it pans
+  /// the zoom window (keeping the document's ends reachable), otherwise
+  /// it just soaks the event up so nothing else zooms.
   void _onPointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
     GestureBinding.instance.pointerSignalResolver.register(event, (event) {
-      if (_zoomModifierDown) _applyWheelZoom(event as PointerScrollEvent);
+      final scroll = event as PointerScrollEvent;
+      if (_zoomModifierDown) {
+        _applyWheelZoom(scroll);
+      } else if (_zoomed) {
+        final matrix = _transform.value.clone();
+        matrix.storage[12] -= scroll.scrollDelta.dx;
+        matrix.storage[13] -= scroll.scrollDelta.dy;
+        _transform.value = _clampedTransform(matrix);
+      }
     });
   }
 
@@ -759,15 +772,19 @@ class _PdfViewerState extends State<PdfViewer>
   //
   // A dedicated recognizer owns every trackpad pan-zoom gesture (see
   // _TrackpadPanRecognizer): vertical deltas scroll the list 1:1 with the
-  // fingers on screen, horizontal deltas pan the zoom window when zoomed,
-  // and pinch zooms around the gesture's focal point. macOS momentum
-  // arrives as continued pan-zoom updates, so flings work unchanged.
+  // fingers on screen (spilling into the zoom window's translation at the
+  // scroll extents, so the document's ends stay reachable while zoomed),
+  // horizontal deltas pan the zoom window, and pinch zooms around the
+  // gesture's focal point. Lifting off hands the tracked velocity to the
+  // scroll position's ballistic simulation, so flings feel stock.
 
   void _onTrackpadPanZoomStart(PointerPanZoomStartEvent event) {
     _trackpadScale = 1;
+    _trackpadVelocity = VelocityTracker.withKind(PointerDeviceKind.trackpad);
   }
 
   void _onTrackpadPanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    _trackpadVelocity?.addPosition(event.timeStamp, event.pan);
     final matrix = _transform.value.clone();
     final scale = matrix.getMaxScaleOnAxis();
 
@@ -785,21 +802,38 @@ class _PdfViewerState extends State<PdfViewer>
     }
 
     matrix.storage[12] += event.panDelta.dx;
-    _transform.value = _clampedTransform(matrix);
 
+    // vertical: scroll the list (deltas are screen pixels; the list lives
+    // under the zoom transform). Whatever the extents can't absorb pans
+    // the zoom window instead, so the very top and bottom of the document
+    // are reachable at any zoom.
     if (_scroll.hasClients && event.panDelta.dy != 0) {
       final position = _scroll.position;
-      // deltas are screen pixels; the list lives under the zoom transform
-      final dy = event.panDelta.dy / _transform.value.getMaxScaleOnAxis();
-      position.jumpTo((position.pixels - dy)
-          .clamp(position.minScrollExtent, position.maxScrollExtent));
+      final target = position.pixels - event.panDelta.dy / scale;
+      final clamped =
+          target.clamp(position.minScrollExtent, position.maxScrollExtent);
+      if (clamped != position.pixels) position.jumpTo(clamped);
+      matrix.storage[13] += (clamped - target) * scale;
     }
+    _transform.value = _clampedTransform(matrix);
   }
 
   void _onTrackpadPanZoomEnd() {
-    final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
+    final velocity =
+        _trackpadVelocity?.getVelocity().pixelsPerSecond ?? Offset.zero;
+    _trackpadVelocity = null;
+    final scale = _transform.value.getMaxScaleOnAxis();
+    final zoomed = scale > 1.01;
     if (!zoomed) _transform.value = Matrix4.identity();
     if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
+    // hand leftover momentum to the scroll physics (same sign convention
+    // as a drag: content follows the fingers)
+    if (_scroll.hasClients && velocity.dy.abs() > kMinFlingVelocity) {
+      final position = _scroll.position;
+      if (position is ScrollPositionWithSingleContext) {
+        position.goBallistic(-velocity.dy / scale);
+      }
+    }
   }
 
   /// Keeps the zoom window over the content: snaps near-1 scales back to

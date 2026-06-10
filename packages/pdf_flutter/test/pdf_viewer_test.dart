@@ -365,6 +365,58 @@ void main() {
     expect(controller.zoom, 1);
   });
 
+  testWidgets('trackpad fling keeps scrolling after lift-off', (tester) async {
+    await pumpViewer(tester);
+    final scrollable =
+        tester.state<ScrollableState>(find.byType(Scrollable).first);
+
+    final gesture = await tester.createGesture(
+        kind: PointerDeviceKind.trackpad, pointer: 23);
+    await gesture.panZoomStart(const Offset(400, 300));
+    // brisk swipe: ~50px every 16ms ≈ 3000 px/s
+    for (var i = 1; i <= 6; i++) {
+      await gesture.panZoomUpdate(const Offset(400, 300),
+          pan: Offset(0, -50.0 * i), timeStamp: Duration(milliseconds: 16 * i));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.panZoomEnd(timeStamp: const Duration(milliseconds: 112));
+    await tester.pump();
+    final atLiftOff = scrollable.position.pixels;
+
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(scrollable.position.pixels, greaterThan(atLiftOff + 100));
+  });
+
+  testWidgets('zoomed trackpad scrolling reaches the document ends',
+      (tester) async {
+    final controller = await pumpViewer(tester, pages: 2);
+
+    // zoom in with a touch double-tap
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, greaterThan(1));
+
+    // scroll well past everything: the list hits its extent and the
+    // leftover pans the zoom window down to the true bottom
+    final gesture = await tester.createGesture(
+        kind: PointerDeviceKind.trackpad, pointer: 24);
+    await gesture.panZoomStart(const Offset(400, 300));
+    for (var i = 1; i <= 20; i++) {
+      await gesture.panZoomUpdate(const Offset(400, 300),
+          pan: Offset(0, -1000.0 * i));
+      await tester.pump();
+    }
+    await gesture.panZoomEnd();
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    // the last page's bottom edge must be visible in the 800x600 viewport
+    final bottom = tester.getRect(find.byType(PdfPageView).last).bottom;
+    expect(bottom, lessThanOrEqualTo(600 + 1e-6));
+    expect(controller.zoom, greaterThan(1)); // still zoomed
+  });
+
   testWidgets('plain wheel at the scroll extents does not zoom',
       (tester) async {
     // Regression: at the top/bottom edge the scrollable declines wheel

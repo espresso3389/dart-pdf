@@ -1,9 +1,12 @@
+import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:pdf_cos/pdf_cos.dart';
 
 import 'annotation.dart';
+import 'content_elements.dart';
 import 'content_writer.dart';
 import 'document.dart';
 import 'form.dart';
@@ -11,6 +14,7 @@ import 'page.dart';
 import 'rect.dart';
 
 part 'annotation_editor.dart';
+part 'content_editor.dart';
 part 'form_editor.dart';
 part 'page_editor.dart';
 part 'signature_editor.dart';
@@ -24,6 +28,9 @@ class PdfEditor {
 
   final PdfDocument document;
   final CosIncrementalUpdater _updater;
+
+  /// Pages whose original content this session already wrapped in q/Q.
+  final Set<CosDictionary> _wrappedPages = {};
 
   bool get hasChanges => _updater.hasChanges;
 

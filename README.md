@@ -55,8 +55,16 @@ core runs on servers and in plain Dart tests.
     chain evaluation not included) and signing (`saveSigned` —
     adbe.pkcs7.detached, RSA-SHA256, verified interoperable with
     OpenSSL and poppler)
-12. **Content editing tiers: stamping → element deletion → text
-    editing** — next
+12. ✅ Content editing tiers: stamping (`stampPage` — text, shapes,
+    JPEG images over existing content), element deletion
+    (`PdfPageElements` enumerates text runs/paths/images with
+    approximate bounds; `deleteElements` rewrites the stream), and text
+    editing (`replaceText` — single-byte fonts, within one shown string;
+    no reflow)
+
+The roadmap is complete. Current work: polish and the editing UI in
+`pdf_flutter` (deep-zoom tiling, encrypt-on-write, trust-store chain
+validation, and richer text editing remain open).
 
 ## Development
 

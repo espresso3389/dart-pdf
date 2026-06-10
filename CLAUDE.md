@@ -62,5 +62,12 @@ Digital signatures are in: `PdfSignature.of(doc)` + `validate()`
 (`signature_editor.dart`, adbe.pkcs7.detached with ByteRange patching).
 No trust-store chain validation. Test signer identity in
 `pdf_test_fixtures/src/signer_identity.dart`.
-Current frontier: content editing tiers (stamping → element deletion →
-text editing).
+Content editing is in: `PdfEditor.stampPage` (text/shapes/JPEG via
+`PdfStamp`), `PdfPageElements.of` + `PdfEditor.deleteElements` (element
+enumeration with approximate bounds, stream rewriting), and
+`PdfEditor.replaceText` (simple fonts only) — all in
+`content_editor.dart`/`content_elements.dart`; the content-stream
+tokenizer (`ContentStreamParser`) now lives in pdf_cos.
+The roadmap is complete; current frontier: the editing UI in
+pdf_flutter. Known gaps: deep-zoom tiling, encrypt-on-write,
+trust-store chain validation, JPX/CCITT/JBIG2 decoders, real ICC.

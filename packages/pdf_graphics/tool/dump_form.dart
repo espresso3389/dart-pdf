@@ -4,7 +4,6 @@ import 'dart:io';
 
 import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
-import 'package:pdf_graphics/pdf_graphics.dart';
 
 void main(List<String> args) {
   final doc = PdfDocument.open(File(args[0]).readAsBytesSync());

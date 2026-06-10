@@ -1,7 +1,6 @@
 import 'dart:typed_data';
 
 import 'package:pdf_cos/pdf_cos.dart';
-import 'package:pdf_graphics/pdf_graphics.dart';
 import 'package:test/test.dart';
 
 Uint8List ascii(String s) => Uint8List.fromList(s.codeUnits);

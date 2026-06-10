@@ -4,7 +4,7 @@
 library;
 
 export 'src/color.dart';
-export 'src/content_parser.dart';
+export 'package:pdf_cos/pdf_cos.dart' show ContentOperation, ContentStreamParser;
 export 'src/device.dart';
 export 'src/font_info.dart';
 export 'src/function.dart';

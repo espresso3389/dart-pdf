@@ -5,7 +5,6 @@ import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
 
 import 'color.dart';
-import 'content_parser.dart';
 import 'device.dart';
 import 'font_info.dart';
 import 'function.dart';

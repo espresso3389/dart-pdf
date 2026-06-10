@@ -1,0 +1,403 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:pdf_cos/pdf_cos.dart';
+
+import 'content_writer.dart';
+import 'document.dart';
+import 'rect.dart';
+
+/// What a content element draws.
+enum PdfElementKind {
+  /// One text-showing operation (`Tj`, `'`, `"`, or `TJ`).
+  text,
+
+  /// A painted path: construction operators through their paint operator.
+  path,
+
+  /// An image XObject invocation.
+  image,
+
+  /// A form XObject invocation.
+  form,
+
+  /// An inline image (`BI … EI`).
+  inlineImage,
+
+  /// A `sh` shading fill.
+  shading,
+}
+
+/// One deletable drawing on a page: a contiguous run of content-stream
+/// operations together with what they paint and roughly where.
+class PdfContentElement {
+  PdfContentElement._({
+    required this.id,
+    required this.kind,
+    required this.start,
+    required this.end,
+    this.text,
+    this.resourceName,
+    this.bounds,
+  });
+
+  /// Stable handle for [PdfContentEditing.deleteElements].
+  final int id;
+
+  final PdfElementKind kind;
+
+  /// Operation index range `[start, end)` in the parsed content.
+  final int start;
+  final int end;
+
+  /// The shown characters, Latin-1-decoded, for [PdfElementKind.text].
+  /// Multi-byte and symbolic encodings come out garbled but unique.
+  final String? text;
+
+  /// The /XObject resource name for [PdfElementKind.image] and
+  /// [PdfElementKind.form].
+  final String? resourceName;
+
+  /// Approximate user-space bounding box: exact anchor points for paths
+  /// and placed images, estimated extents for text (Helvetica metrics
+  /// stand in for the real font). Null when no geometry is tracked
+  /// (shading fills, degenerate transforms).
+  final PdfRect? bounds;
+
+  @override
+  String toString() => 'PdfContentElement#$id($kind'
+      '${text != null ? ' "$text"' : ''}'
+      '${resourceName != null ? ' /$resourceName' : ''}'
+      '${bounds != null ? ' $bounds' : ''})';
+}
+
+/// The drawable elements of one page's content stream, in paint order.
+///
+/// Parsing tracks the transformation and text matrices well enough to
+/// attach approximate bounds to each element; it is not a renderer.
+/// Elements inside form XObjects belong to the form, not the page, and
+/// are not listed.
+class PdfPageElements {
+  PdfPageElements._(
+      this.document, this.pageIndex, this.operations, this.elements);
+
+  final PdfDocument document;
+  final int pageIndex;
+
+  /// The parsed content-stream operations the elements index into.
+  final List<ContentOperation> operations;
+
+  final List<PdfContentElement> elements;
+
+  static PdfPageElements of(PdfDocument document, int pageIndex) {
+    final page = document.page(pageIndex);
+    final operations = ContentStreamParser.parse(page.contentBytes());
+    final cos = document.cos;
+    final resources = page.resources;
+
+    final elements = <PdfContentElement>[];
+    var ctm = _identity;
+    final stack = <_Matrix>[];
+    var text = _TextState();
+    var pathStart = -1;
+    var pathPoints = <(double, double)>[];
+
+    void addElement(PdfElementKind kind, int start, int end,
+        {String? shown, String? resource, PdfRect? bounds}) {
+      elements.add(PdfContentElement._(
+        id: elements.length,
+        kind: kind,
+        start: start,
+        end: end,
+        text: shown,
+        resourceName: resource,
+        bounds: bounds,
+      ));
+    }
+
+    double number(CosObject o) => switch (o) {
+          CosInteger(:final value) => value.toDouble(),
+          CosReal(:final value) => value,
+          _ => 0,
+        };
+
+    for (var i = 0; i < operations.length; i++) {
+      final op = operations[i];
+      final operands = op.operands;
+      switch (op.operator) {
+        case 'q':
+          stack.add(ctm);
+        case 'Q':
+          if (stack.isNotEmpty) ctm = stack.removeLast();
+        case 'cm':
+          if (operands.length >= 6) {
+            ctm = _multiply(
+                (
+                  number(operands[0]),
+                  number(operands[1]),
+                  number(operands[2]),
+                  number(operands[3]),
+                  number(operands[4]),
+                  number(operands[5]),
+                ),
+                ctm);
+          }
+
+        // path construction
+        case 'm' || 'l':
+          if (pathStart < 0) pathStart = i;
+          if (operands.length >= 2) {
+            pathPoints.add((number(operands[0]), number(operands[1])));
+          }
+        case 'c':
+          if (pathStart < 0) pathStart = i;
+          for (var j = 0; j + 1 < operands.length; j += 2) {
+            pathPoints.add((number(operands[j]), number(operands[j + 1])));
+          }
+        case 'v' || 'y':
+          if (pathStart < 0) pathStart = i;
+          for (var j = 0; j + 1 < operands.length; j += 2) {
+            pathPoints.add((number(operands[j]), number(operands[j + 1])));
+          }
+        case 're':
+          if (pathStart < 0) pathStart = i;
+          if (operands.length >= 4) {
+            final x = number(operands[0]), y = number(operands[1]);
+            final w = number(operands[2]), h = number(operands[3]);
+            pathPoints
+              ..add((x, y))
+              ..add((x + w, y + h));
+          }
+        case 'h':
+          if (pathStart < 0) pathStart = i;
+        // W/W* mark the path as a clip; they ride along as state
+
+        // path painting
+        case 'S' || 's' || 'f' || 'F' || 'f*' || 'B' || 'B*' || 'b' || 'b*':
+          if (pathStart >= 0) {
+            addElement(PdfElementKind.path, pathStart, i + 1,
+                bounds: _hull([
+                  for (final (x, y) in pathPoints) _apply(ctm, x, y),
+                ]));
+          }
+          pathStart = -1;
+          pathPoints = [];
+        case 'n':
+          // a no-op paint: with W it defines a clip (kept as state),
+          // without it the path simply vanishes — either way no element
+          pathStart = -1;
+          pathPoints = [];
+
+        // text
+        case 'BT':
+          text = _TextState();
+        case 'Tf':
+          if (operands.length >= 2) {
+            text.size = number(operands[1]);
+            text.fontName =
+                operands[0] is CosName ? (operands[0] as CosName).value : null;
+          }
+        case 'TL':
+          if (operands.isNotEmpty) text.leading = number(operands[0]);
+        case 'Td':
+          if (operands.length >= 2) {
+            text.newline(number(operands[0]), number(operands[1]));
+          }
+        case 'TD':
+          if (operands.length >= 2) {
+            text.leading = -number(operands[1]);
+            text.newline(number(operands[0]), number(operands[1]));
+          }
+        case 'Tm':
+          if (operands.length >= 6) {
+            text.setMatrix((
+              number(operands[0]),
+              number(operands[1]),
+              number(operands[2]),
+              number(operands[3]),
+              number(operands[4]),
+              number(operands[5]),
+            ));
+          }
+        case 'T*':
+          text.newline(0, -text.leading);
+        case 'Tj' || "'" || '"' || 'TJ':
+          if (op.operator == "'") text.newline(0, -text.leading);
+          if (op.operator == '"') text.newline(0, -text.leading);
+          final shown = StringBuffer();
+          void show(CosObject o) {
+            if (o is CosString) shown.write(latin1.decode(o.bytes));
+          }
+
+          if (op.operator == 'TJ' && operands.isNotEmpty) {
+            final array = operands[0];
+            if (array is CosArray) array.items.forEach(show);
+          } else if (op.operator == '"' && operands.length >= 3) {
+            show(operands[2]);
+          } else if (operands.isNotEmpty) {
+            show(operands[0]);
+          }
+          final string = shown.toString();
+          final width = measureHelvetica(string, text.size);
+          final m = _multiply(text.matrix, ctm);
+          addElement(PdfElementKind.text, i, i + 1,
+              shown: string,
+              bounds: _hull([
+                _apply(m, 0, -0.2 * text.size),
+                _apply(m, width, -0.2 * text.size),
+                _apply(m, 0, text.size),
+                _apply(m, width, text.size),
+              ]));
+          text.advance(width);
+
+        // XObjects, inline images, shading
+        case 'Do':
+          final name =
+              operands.isNotEmpty && operands[0] is CosName
+                  ? (operands[0] as CosName).value
+                  : null;
+          final xobjects = cos.resolve(resources['XObject']);
+          final xobject = name != null && xobjects is CosDictionary
+              ? cos.resolve(xobjects[name])
+              : null;
+          final subtypeName = xobject is CosStream
+              ? cos.resolve(xobject.dictionary['Subtype'])
+              : null;
+          final subtype = subtypeName is CosName ? subtypeName.value : null;
+          if (subtype == 'Form') {
+            PdfRect? bounds;
+            final bbox = xobject is CosStream
+                ? pdfRectFrom(cos, xobject.dictionary['BBox'])
+                : null;
+            if (bbox != null) {
+              bounds = _hull([
+                _apply(ctm, bbox.left, bbox.bottom),
+                _apply(ctm, bbox.right, bbox.bottom),
+                _apply(ctm, bbox.left, bbox.top),
+                _apply(ctm, bbox.right, bbox.top),
+              ]);
+            }
+            addElement(PdfElementKind.form, i, i + 1,
+                resource: name, bounds: bounds);
+          } else {
+            addElement(PdfElementKind.image, i, i + 1,
+                resource: name, bounds: _unitSquare(ctm));
+          }
+        case 'BI':
+          addElement(PdfElementKind.inlineImage, i, i + 1,
+              bounds: _unitSquare(ctm));
+        case 'sh':
+          addElement(PdfElementKind.shading, i, i + 1);
+      }
+    }
+    return PdfPageElements._(document, pageIndex, operations, elements);
+  }
+
+  /// Elements whose bounds contain the user-space point ([x], [y]),
+  /// topmost (painted last) first.
+  List<PdfContentElement> elementsAt(double x, double y) => [
+        for (final element in elements.reversed)
+          if (element.bounds?.contains(x, y) ?? false) element,
+      ];
+
+  /// Serializes [operations] back into content-stream bytes, skipping the
+  /// operation indexes in [drop] and writing [replacements] instead where
+  /// provided (used to keep the side effects of `'` and `"`).
+  Uint8List serialize({
+    Set<int> drop = const {},
+    Map<int, String> replacements = const {},
+  }) {
+    final out = BytesBuilder();
+    for (var i = 0; i < operations.length; i++) {
+      if (drop.contains(i)) {
+        final replacement = replacements[i];
+        if (replacement != null) out.add(latin1.encode('$replacement\n'));
+        continue;
+      }
+      final op = operations[i];
+      if (op.operator == 'BI') {
+        out.add(_inlineImage(op));
+        continue;
+      }
+      for (final operand in op.operands) {
+        out
+          ..add(CosSerializer.serialize(operand))
+          ..add(const [0x20]);
+      }
+      out.add(latin1.encode('${op.operator}\n'));
+    }
+    return out.takeBytes();
+  }
+
+  static Uint8List _inlineImage(ContentOperation op) {
+    final out = BytesBuilder()..add(latin1.encode('BI'));
+    final dict = op.operands[0] as CosDictionary;
+    dict.entries.forEach((key, value) {
+      out
+        ..add(latin1.encode(' /$key '))
+        ..add(CosSerializer.serialize(value));
+    });
+    out.add(latin1.encode(' ID\n'));
+    out.add((op.operands[1] as CosString).bytes);
+    out.add(latin1.encode('\nEI\n'));
+    return out.takeBytes();
+  }
+}
+
+class _TextState {
+  _Matrix matrix = _identity;
+  _Matrix lineMatrix = _identity;
+  double size = 0;
+  double leading = 0;
+  String? fontName;
+
+  void setMatrix(_Matrix m) {
+    matrix = m;
+    lineMatrix = m;
+  }
+
+  void newline(double tx, double ty) {
+    lineMatrix = _multiply((1, 0, 0, 1, tx, ty), lineMatrix);
+    matrix = lineMatrix;
+  }
+
+  void advance(double width) {
+    matrix = _multiply((1, 0, 0, 1, width, 0), matrix);
+  }
+}
+
+typedef _Matrix = (double, double, double, double, double, double);
+
+const _Matrix _identity = (1, 0, 0, 1, 0, 0);
+
+_Matrix _multiply(_Matrix m, _Matrix n) => (
+      m.$1 * n.$1 + m.$2 * n.$3,
+      m.$1 * n.$2 + m.$2 * n.$4,
+      m.$3 * n.$1 + m.$4 * n.$3,
+      m.$3 * n.$2 + m.$4 * n.$4,
+      m.$5 * n.$1 + m.$6 * n.$3 + n.$5,
+      m.$5 * n.$2 + m.$6 * n.$4 + n.$6,
+    );
+
+(double, double) _apply(_Matrix m, double x, double y) =>
+    (m.$1 * x + m.$3 * y + m.$5, m.$2 * x + m.$4 * y + m.$6);
+
+PdfRect? _hull(List<(double, double)> points) {
+  if (points.isEmpty) return null;
+  var minX = points.first.$1, maxX = points.first.$1;
+  var minY = points.first.$2, maxY = points.first.$2;
+  for (final (x, y) in points) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return PdfRect(minX, minY, maxX, maxY);
+}
+
+PdfRect? _unitSquare(_Matrix ctm) => _hull([
+      _apply(ctm, 0, 0),
+      _apply(ctm, 1, 0),
+      _apply(ctm, 0, 1),
+      _apply(ctm, 1, 1),
+    ]);

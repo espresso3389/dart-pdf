@@ -282,7 +282,8 @@ void main() {
       );
       final images = await decodeImages(cos, [image]);
       final pixels = await pixelsOf(images[image]!);
-      expect(pixels.sublist(0, 4), [0, 255, 255, 255]); // cyan
+      // pure cyan converts as process ink, not monitor cyan
+      expect(pixels.sublist(0, 4), [0, 158, 224, 255]);
       expect(pixels.sublist(4, 8), [0, 0, 0, 255]); // black
     });
   });

@@ -393,11 +393,11 @@ Uint8List? _toRgba(CosDocument cos, CosDictionary dict, Uint8List data,
       final luts = [for (var c = 0; c < 4; c++) _lutFor(ranges, c)];
       for (var i = 0; i < count; i++) {
         final s = [for (var c = 0; c < 4; c++) data[i * 4 + c]];
-        final c = luts[0][s[0]] / 255, m = luts[1][s[1]] / 255;
-        final y = luts[2][s[2]] / 255, k = luts[3][s[3]] / 255;
-        out[i * 4] = ((1 - c) * (1 - k) * 255).round();
-        out[i * 4 + 1] = ((1 - m) * (1 - k) * 255).round();
-        out[i * 4 + 2] = ((1 - y) * (1 - k) * 255).round();
+        final color = PdfColor.cmyk(luts[0][s[0]] / 255, luts[1][s[1]] / 255,
+            luts[2][s[2]] / 255, luts[3][s[3]] / 255);
+        out[i * 4] = (color.red * 255).round();
+        out[i * 4 + 1] = (color.green * 255).round();
+        out[i * 4 + 2] = (color.blue * 255).round();
         out[i * 4 + 3] = keyed(s) ? 0 : 255;
       }
       return out;
@@ -450,11 +450,11 @@ Uint8List? _indexedToRgba(CosDocument cos, CosDictionary dict, Uint8List data,
       case 1:
         palette[p * 3] = palette[p * 3 + 1] = palette[p * 3 + 2] = lookup[src];
       case 4:
-        final c = lookup[src] / 255, m = lookup[src + 1] / 255;
-        final y = lookup[src + 2] / 255, k = lookup[src + 3] / 255;
-        palette[p * 3] = ((1 - c) * (1 - k) * 255).round();
-        palette[p * 3 + 1] = ((1 - m) * (1 - k) * 255).round();
-        palette[p * 3 + 2] = ((1 - y) * (1 - k) * 255).round();
+        final color = PdfColor.cmyk(lookup[src] / 255, lookup[src + 1] / 255,
+            lookup[src + 2] / 255, lookup[src + 3] / 255);
+        palette[p * 3] = (color.red * 255).round();
+        palette[p * 3 + 1] = (color.green * 255).round();
+        palette[p * 3 + 2] = (color.blue * 255).round();
     }
   }
 

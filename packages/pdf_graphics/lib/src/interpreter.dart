@@ -8,6 +8,7 @@ import 'color.dart';
 import 'content_parser.dart';
 import 'device.dart';
 import 'font_info.dart';
+import 'function.dart';
 import 'matrix.dart';
 import 'path.dart';
 import 'shading.dart';
@@ -26,6 +27,8 @@ class _GraphicsState {
         strokeComponents = 1,
         fillPattern = null,
         fillPatternComponents = const [],
+        fillTintTransform = null,
+        strokeTintTransform = null,
         font = null,
         fontDict = null,
         fontSize = 0,
@@ -47,6 +50,8 @@ class _GraphicsState {
         strokeComponents = other.strokeComponents,
         fillPattern = other.fillPattern,
         fillPatternComponents = other.fillPatternComponents,
+        fillTintTransform = other.fillTintTransform,
+        strokeTintTransform = other.strokeTintTransform,
         softMask = other.softMask,
         blendMode = other.blendMode,
         font = other.font,
@@ -69,6 +74,11 @@ class _GraphicsState {
   /// Component counts of the active /Fill and /Stroke color spaces, used to
   /// interpret bare `sc`/`scn` operands.
   int fillComponents;
+
+  /// Active Separation/DeviceN tint transforms (§8.6.6.4); null when the
+  /// current space carries raw device components.
+  PdfColor Function(double)? fillTintTransform;
+  PdfColor Function(double)? strokeTintTransform;
   int strokeComponents;
 
   /// The active fill pattern (stream for tiling, dictionary for shading)
@@ -361,9 +371,11 @@ class PdfInterpreter {
               PdfColor.cmyk(_num(o, 0), _num(o, 1), _num(o, 2), _num(o, 3));
         case 'cs':
           _state.fillComponents = _componentsOf(resources, o);
+          _state.fillTintTransform = _tintTransformOf(resources, o);
           _state.fillPattern = null;
         case 'CS':
           _state.strokeComponents = _componentsOf(resources, o);
+          _state.strokeTintTransform = _tintTransformOf(resources, o);
         case 'sc' || 'scn':
           _state.fillPattern = null;
           if (o.isNotEmpty && o.last is CosName) {
@@ -374,7 +386,8 @@ class PdfInterpreter {
                 if (v is CosInteger || v is CosReal) _numOf(v),
             ];
           } else {
-            _state.fillColor = _colorFromComponents(o, _state.fillColor);
+            _state.fillColor = _tintedColor(
+                _state.fillTintTransform, o, _state.fillColor);
           }
         case 'SC' || 'SCN':
           if (o.isNotEmpty && o.last is CosName) {
@@ -383,7 +396,8 @@ class PdfInterpreter {
                 _patternAverageColor(_resource(resources, 'Pattern', o.last as CosName));
             if (color != null) _state.strokeColor = color;
           } else {
-            _state.strokeColor = _colorFromComponents(o, _state.strokeColor);
+            _state.strokeColor = _tintedColor(
+                _state.strokeTintTransform, o, _state.strokeColor);
           }
 
         // --- text ---
@@ -568,6 +582,66 @@ class PdfInterpreter {
         }
         if (family is CosName && family.value == 'Indexed') return 1;
         if (family is CosName && family.value == 'Separation') return 1;
+      }
+    }
+    return 3;
+  }
+
+  /// sc/scn through the active tint transform when one is set, else by
+  /// raw component count.
+  PdfColor _tintedColor(PdfColor Function(double)? transform,
+      List<CosObject> o, PdfColor current) {
+    if (transform != null) {
+      final values = [
+        for (final item in o)
+          if (item is CosInteger || item is CosReal) _numOf(item),
+      ];
+      if (values.length == 1) return transform(values[0]);
+    }
+    return _colorFromComponents(o, current);
+  }
+
+  /// A converter for Separation (or single-colorant DeviceN) spaces: the
+  /// tint runs through the transform function into the alternate space
+  /// (§8.6.6.4). Null for every other space.
+  PdfColor Function(double)? _tintTransformOf(
+      CosDictionary resources, List<CosObject> o) {
+    if (o.isEmpty || o[0] is! CosName) return null;
+    final spaces = cos.resolve(resources['ColorSpace']);
+    if (spaces is! CosDictionary) return null;
+    final space = cos.resolve(spaces[(o[0] as CosName).value]);
+    if (space is! CosArray || space.length < 4) return null;
+    final family = cos.resolve(space[0]);
+    if (family is! CosName ||
+        (family.value != 'Separation' && family.value != 'DeviceN')) {
+      return null;
+    }
+    if (family.value == 'DeviceN') {
+      final names = cos.resolve(space[1]);
+      if (names is! CosArray || names.length != 1) return null;
+    }
+    final fn = PdfFunction.parse(cos, space[3]);
+    if (fn == null) return null;
+    final altComponents = _alternateComponents(cos.resolve(space[2]));
+    return (tint) => colorFromComponents(fn.evaluate(tint), altComponents);
+  }
+
+  int _alternateComponents(CosObject space) {
+    if (space is CosName) {
+      return switch (space.value) {
+        'DeviceGray' || 'CalGray' || 'G' => 1,
+        'DeviceCMYK' || 'CMYK' => 4,
+        _ => 3,
+      };
+    }
+    if (space is CosArray && space.length > 1) {
+      final family = cos.resolve(space[0]);
+      if (family is CosName && family.value == 'ICCBased') {
+        final profile = cos.resolve(space[1]);
+        if (profile is CosStream) {
+          final n = cos.resolve(profile.dictionary['N']);
+          if (n is CosInteger) return n.value;
+        }
       }
     }
     return 3;

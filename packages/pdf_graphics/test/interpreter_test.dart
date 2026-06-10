@@ -135,6 +135,48 @@ void main() {
     expect(device.fills[1].$2, const PdfColor.gray(0.5));
   });
 
+  test('pure process cyan converts as ink, not monitor cyan', () {
+    final device = interpret('1 0 0 0 k 0 0 1 1 re f');
+    final color = device.fills.single.$2;
+    expect(color.red, 0);
+    expect(color.green, closeTo(0.62, 0.01));
+    expect(color.blue, closeTo(0.878, 0.01));
+  });
+
+  test('Separation colors evaluate the tint transform', () {
+    final doc = CosDocument.open(buildClassicPdf());
+    final device = RecordingDevice();
+    final resources = CosDictionary({
+      'ColorSpace': CosDictionary({
+        // /All over CMYK: tint 1 → rich black, tint 0 → white
+        'CS1': CosArray([
+          const CosName('Separation'),
+          const CosName('All'),
+          const CosName('DeviceCMYK'),
+          CosDictionary({
+            'FunctionType': const CosInteger(2),
+            'Domain': CosArray([const CosInteger(0), const CosInteger(1)]),
+            'N': const CosInteger(1),
+            'C0': CosArray([
+              for (var i = 0; i < 4; i++) const CosInteger(0),
+            ]),
+            'C1': CosArray([
+              for (var i = 0; i < 4; i++) const CosInteger(1),
+            ]),
+          }),
+        ]),
+      }),
+    });
+    PdfInterpreter(cos: doc, device: device).run(
+      ContentStreamParser.parse(Uint8List.fromList(
+          '/CS1 cs 1 scn 0 0 1 1 re f 0 scn 0 0 1 1 re f'.codeUnits)),
+      resources,
+    );
+    expect(device.fills[0].$2.red, lessThan(0.05), reason: 'tint 1 ≈ black');
+    expect(device.fills[0].$2.green, lessThan(0.05));
+    expect(device.fills[1].$2, const PdfColor(1, 1, 1));
+  });
+
   test('ExtGState alpha applies to fills', () {
     final doc = CosDocument.open(buildClassicPdf());
     final device = RecordingDevice();

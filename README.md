@@ -41,10 +41,10 @@ core runs on servers and in plain Dart tests.
 6. ✅ Flutter rendering device + viewer widget (zoom, page cache; deep-zoom
    tiling still pending)
 7. ✅ Text extraction with positions → selection and search
-8. Annotations: model ✅, rendering of appearance streams ✅;
-   **appearance-stream generation** (ink, highlight, shapes, free text,
-   notes, stamps) and flattening are next
-9. AcroForm: field model, filling, appearance regeneration
+8. ✅ Annotations: model, appearance-stream rendering, authoring with
+   generated appearances (highlight/underline/strike-out/squiggly, ink,
+   shapes, free text, notes, stamps), and flattening
+9. **AcroForm: field model, filling, appearance regeneration** — next
 10. Page manipulation: reorder, merge, split (cross-document object copying)
 11. Digital signatures: signing and validation
 12. Content editing tiers: stamping → element deletion → text editing

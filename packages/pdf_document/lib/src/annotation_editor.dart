@@ -323,8 +323,142 @@ extension PdfAnnotationEditing on PdfEditor {
     );
   }
 
+  /// Bakes the page's annotation appearances into its content streams and
+  /// removes those annotations, making them permanent, non-interactive
+  /// page graphics.
+  ///
+  /// Annotations without a paintable appearance — hidden or no-view ones,
+  /// popups, and any without /AP — are left in place untouched.
+  void flattenAnnotations(int pageIndex) {
+    final cos = document.cos;
+    final page = document.page(pageIndex);
+
+    // copy-on-write resources: the page's dict may be shared between
+    // pages (inherited), so additions go into clones
+    final ownResources = cos.resolve(page.dict['Resources']);
+    final resources = CosDictionary({
+      ...(ownResources is CosDictionary ? ownResources : page.resources)
+          .entries,
+    });
+    final existingXObjects = cos.resolve(resources['XObject']);
+    final xObjects = CosDictionary({
+      if (existingXObjects is CosDictionary) ...existingXObjects.entries,
+    });
+
+    final w = ContentWriter()
+      // restore the state the prefix stream saved before the original
+      // content ran, so annotations paint over a clean slate
+      ..restore();
+    final flattened = <CosDictionary>{};
+    var index = 0;
+    for (final annot in page.annotations) {
+      if (annot.isHidden || annot.isNoView || annot.subtype == 'Popup') {
+        continue;
+      }
+      final form = annot.normalAppearance;
+      if (form == null) continue;
+      final rect = annot.rect;
+      final bbox = pdfRectFrom(cos, form.dictionary['BBox']);
+      if (bbox == null || rect.width <= 0 || rect.height <= 0) continue;
+
+      // §12.5.5 algorithm: transform the BBox corners by the form /Matrix,
+      // then scale/translate the resulting bounds onto /Rect. The /Matrix
+      // itself is applied by the Do operator, so only the fit goes in cm.
+      final m = _formMatrix(form);
+      var minX = double.infinity, minY = double.infinity;
+      var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+      for (final (x, y) in [
+        (bbox.left, bbox.bottom),
+        (bbox.right, bbox.bottom),
+        (bbox.right, bbox.top),
+        (bbox.left, bbox.top),
+      ]) {
+        final tx = m[0] * x + m[2] * y + m[4];
+        final ty = m[1] * x + m[3] * y + m[5];
+        if (tx < minX) minX = tx;
+        if (tx > maxX) maxX = tx;
+        if (ty < minY) minY = ty;
+        if (ty > maxY) maxY = ty;
+      }
+      final sx = maxX - minX > 1e-9 ? rect.width / (maxX - minX) : 1.0;
+      final sy = maxY - minY > 1e-9 ? rect.height / (maxY - minY) : 1.0;
+
+      var name = 'FlatAnnot$index';
+      while (xObjects.containsKey(name)) {
+        name = 'FlatAnnot${++index}';
+      }
+      index++;
+      xObjects[name] = cos.referenceTo(form) ?? _updater.addObject(form);
+      w
+        ..save()
+        ..concatMatrix(sx, 0, 0, sy, rect.left - minX * sx,
+            rect.bottom - minY * sy)
+        ..drawXObject(name)
+        ..restore();
+      flattened.add(annot.dict);
+    }
+    if (flattened.isEmpty) return;
+
+    resources['XObject'] = xObjects;
+    page.dict['Resources'] = resources;
+
+    // sandwich the original content between q and Q so its leftover
+    // graphics state cannot leak into the appearance drawing
+    final rawContents = page.dict['Contents'];
+    final resolvedContents = cos.resolve(rawContents);
+    final items = <CosObject>[_updater.addObject(_rawStream('q\n'))];
+    if (resolvedContents is CosArray) {
+      items.addAll(resolvedContents.items);
+    } else if (resolvedContents is CosStream) {
+      items.add(rawContents is CosReference
+          ? rawContents
+          : _updater.addObject(resolvedContents));
+    }
+    final suffix = w.takeBytes();
+    items.add(_updater.addObject(CosStream(
+        CosDictionary({'Length': CosInteger(suffix.length)}), suffix)));
+    page.dict['Contents'] = CosArray(items);
+
+    final annotsArray = cos.resolve(page.dict['Annots']);
+    if (annotsArray is CosArray) {
+      final remaining = [
+        for (final item in annotsArray.items)
+          if (!flattened.contains(cos.resolve(item))) item,
+      ];
+      if (remaining.isEmpty) {
+        page.dict.entries.remove('Annots');
+      } else {
+        page.dict['Annots'] = CosArray(remaining);
+      }
+    }
+    _updater.markChanged(page.dict);
+  }
+
   // ---------------------------------------------------------------------
   // shared machinery
+
+  List<double> _formMatrix(CosStream form) {
+    final raw = document.cos.resolve(form.dictionary['Matrix']);
+    if (raw is CosArray && raw.length >= 6) {
+      final values = <double>[];
+      for (var i = 0; i < 6; i++) {
+        final n = document.cos.resolve(raw[i]);
+        values.add(n is CosInteger
+            ? n.value.toDouble()
+            : n is CosReal
+                ? n.value
+                : (i == 0 || i == 3 ? 1.0 : 0.0));
+      }
+      return values;
+    }
+    return const [1, 0, 0, 1, 0, 0];
+  }
+
+  CosStream _rawStream(String text) {
+    final bytes = Uint8List.fromList(text.codeUnits);
+    return CosStream(
+        CosDictionary({'Length': CosInteger(bytes.length)}), bytes);
+  }
 
   void _addLineMarkup(
     String subtype,

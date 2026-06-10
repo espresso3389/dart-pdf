@@ -7,6 +7,7 @@ import 'package:test/test.dart';
 /// end to end through the interpreter.
 class CountingDevice implements PdfDevice {
   final fills = <PdfColor>[];
+  final fillPaths = <PdfPath>[];
   final strokes = <PdfColor>[];
   final texts = <PdfTextRun>[];
   final blendModes = <PdfBlendMode>[];
@@ -15,6 +16,7 @@ class CountingDevice implements PdfDevice {
   @override
   void fillPath(PdfPath path, PdfColor color, PdfFillRule rule, double alpha) {
     fills.add(color);
+    fillPaths.add(path);
     alphas.add(alpha);
   }
 
@@ -48,6 +50,27 @@ class CountingDevice implements PdfDevice {
       {required bool luminosity,
       required PdfRect backdrop,
       required void Function() drawMask}) {}
+}
+
+/// Serializes fills as color plus path geometry, so flattened output can be
+/// compared with live annotation rendering point for point.
+String dump(CountingDevice d) {
+  String pt(double v) => v.toStringAsFixed(2);
+  final lines = <String>[];
+  for (var i = 0; i < d.fills.length; i++) {
+    final c = d.fills[i];
+    final segments = [
+      for (final s in d.fillPaths[i].segments)
+        switch (s) {
+          PdfMoveTo(:final x, :final y) => 'M${pt(x)},${pt(y)}',
+          PdfLineTo(:final x, :final y) => 'L${pt(x)},${pt(y)}',
+          PdfCubicTo(:final x3, :final y3) => 'C${pt(x3)},${pt(y3)}',
+          _ => 'Z',
+        },
+    ].join(' ');
+    lines.add('fill ${pt(c.red)} ${pt(c.green)} ${pt(c.blue)}: $segments');
+  }
+  return lines.join('\n');
 }
 
 void main() {
@@ -90,6 +113,26 @@ void main() {
         fontSize: 14)));
     final shown = device.texts.map((t) => t.text).join();
     expect(shown, contains('Generated note'));
+  });
+
+  test('flattened pages paint exactly like live annotation rendering', () {
+    // the fixture exercises the hard appearance cases: a BBox that scales
+    // ×10/×5 onto its rect, a 90°-rotation /Matrix, and an /AS state
+    final live = CountingDevice();
+    final liveDoc = PdfDocument.open(buildAppearanceAnnotationsPdf());
+    final livePage = liveDoc.page(0);
+    PdfInterpreter(cos: liveDoc.cos, device: live)
+      ..drawPage(livePage)
+      ..drawAnnotations(livePage);
+
+    final editor = PdfEditor(PdfDocument.open(buildAppearanceAnnotationsPdf()))
+      ..flattenAnnotations(0);
+    final flatDoc = PdfDocument.open(editor.save());
+    final flat = CountingDevice();
+    PdfInterpreter(cos: flatDoc.cos, device: flat).drawPage(flatDoc.page(0));
+
+    expect(flat.fills.length, live.fills.length);
+    expect(dump(flat), dump(live));
   });
 
   test('a generated stamp shows its caption in Helvetica-Bold', () {

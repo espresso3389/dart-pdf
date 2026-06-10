@@ -46,5 +46,7 @@ to validate changes:
 See README.md. The pipeline through the viewer is done: interpreter, font
 engine, Flutter rendering, text selection/search, annotation appearance
 rendering, and decryption (RC4/AES-128/AES-256; the updater refuses
-encrypted files until encrypt-on-write lands). Current frontier: annotation
-appearance-stream generation, then AcroForm filling.
+encrypted files until encrypt-on-write lands). Annotation authoring is in:
+`PdfEditor` creates highlights/ink/shapes/free text/notes/stamps with
+generated appearance streams (`annotation_editor.dart`) and can flatten
+them into page content. Current frontier: AcroForm filling.

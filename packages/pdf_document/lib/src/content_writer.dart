@@ -114,6 +114,13 @@ class ContentWriter {
 
   void nextLine() => op('T*');
 
+  /// References /[name] in the resources' /XObject dictionary.
+  void drawXObject(String name) => _buffer.write('/$name Do\n');
+
+  void concatMatrix(
+          double a, double b, double c, double d, double e, double f) =>
+      op('cm', [a, b, c, d, e, f]);
+
   Uint8List takeBytes() =>
       Uint8List.fromList(latin1.encode(_buffer.toString()));
 

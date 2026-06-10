@@ -111,6 +111,8 @@ void main() {
 
     // start just right of the run (inside the hit tolerance), drag left
     // past its start so the whole string is selected
+    final pageViewState = tester.state(find.byType(PdfPageView).first);
+
     final gesture = await tester.startGesture(view(154, 720),
         kind: PointerDeviceKind.mouse);
     await gesture.moveBy(const Offset(-20, 0)); // pass the drag slop
@@ -122,6 +124,10 @@ void main() {
 
     expect(controller.selectedText, 'Page 1');
     expect(controller.hasSelection, isTrue);
+    // selection painting must not reshape the tree and recreate the page
+    // view (that drops its raster: a white flash)
+    expect(tester.state(find.byType(PdfPageView).first),
+        same(pageViewState));
 
     final copied = <String?>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -139,6 +145,40 @@ void main() {
     expect(controller.hasSelection, isFalse);
     // drain the double-tap recognizer's timeout timer
     await tester.pump(const Duration(milliseconds: 400));
+  });
+
+  testWidgets('hovering text shows the text cursor', (tester) async {
+    await pumpViewer(tester);
+    const scale = 800 / 612;
+    Offset view(double x, double y) => Offset(x * scale, (792 - y) * scale);
+
+    MouseRegion region() => tester.widget<MouseRegion>(find
+        .descendant(
+            of: find.byType(PdfViewer), matching: find.byType(MouseRegion))
+        .first);
+
+    final gesture =
+        await tester.createGesture(kind: PointerDeviceKind.mouse, pointer: 7);
+    await gesture.addPointer(location: view(300, 500)); // empty page area
+    addTearDown(gesture.removePointer);
+    await tester.pump();
+    expect(region().cursor, MouseCursor.defer);
+
+    await gesture.moveTo(view(100, 720)); // over 'Page 1'
+    await tester.pump();
+    expect(region().cursor, SystemMouseCursors.text);
+
+    await gesture.moveTo(view(300, 500));
+    await tester.pump();
+    expect(region().cursor, MouseCursor.defer);
+
+    // leaving the viewer entirely must also reset the cursor
+    await gesture.moveTo(view(100, 720));
+    await tester.pump();
+    expect(region().cursor, SystemMouseCursors.text);
+    await gesture.moveTo(const Offset(400, 900)); // outside the window
+    await tester.pump();
+    expect(region().cursor, MouseCursor.defer);
   });
 
   testWidgets('jumpToPage scrolls to the requested page', (tester) async {

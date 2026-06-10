@@ -180,6 +180,7 @@ class _PdfViewerState extends State<PdfViewer>
   // text selection: (pageIndex, offset into that page's text)
   (int, int)? _selAnchor;
   (int, int)? _selFocus;
+  MouseCursor _hoverCursor = MouseCursor.defer;
 
   @override
   void initState() {
@@ -327,6 +328,13 @@ class _PdfViewerState extends State<PdfViewer>
       top += height + widget.pageSpacing;
     }
     return null;
+  }
+
+  void _onHover(PointerHoverEvent event) {
+    final overText =
+        _textPositionAt(event.localPosition, tolerance: 8) != null;
+    final cursor = overText ? SystemMouseCursors.text : MouseCursor.defer;
+    if (cursor != _hoverCursor) setState(() => _hoverCursor = cursor);
   }
 
   void _onSelectionStart(DragStartDetails details) {
@@ -480,13 +488,22 @@ class _PdfViewerState extends State<PdfViewer>
               // selection drags: scroll wheels and touch scrolling go to
               // the list (its drag recognizers win the arena for touch);
               // mouse drags fall through to this detector
-              child: GestureDetector(
-                onTap: _clearSelection,
-                onPanStart: _onSelectionStart,
-                onPanUpdate: _onSelectionUpdate,
-                child: ColoredBox(
-                  color: const Color(0xFF404347),
-                  child: list,
+              child: MouseRegion(
+                cursor: _hoverCursor,
+                onHover: _onHover,
+                onExit: (_) {
+                  if (_hoverCursor != MouseCursor.defer) {
+                    setState(() => _hoverCursor = MouseCursor.defer);
+                  }
+                },
+                child: GestureDetector(
+                  onTap: _clearSelection,
+                  onPanStart: _onSelectionStart,
+                  onPanUpdate: _onSelectionUpdate,
+                  child: ColoredBox(
+                    color: const Color(0xFF404347),
+                    child: list,
+                  ),
                 ),
               ),
             ),
@@ -514,10 +531,11 @@ class _PdfViewerPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final view = PdfPageView(page: page, scale: scale);
-    if (matches.isEmpty && selection.isEmpty) return view;
+    // the Stack is always present — toggling it when highlights appear
+    // would reshape the element tree and recreate PdfPageView's state
+    // (dropping its rendered image: a white flash)
     return Stack(children: [
-      view,
+      PdfPageView(page: page, scale: scale),
       Positioned.fill(
         child: CustomPaint(
           painter: _HighlightPainter(

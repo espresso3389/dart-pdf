@@ -53,6 +53,19 @@ class PdfViewerController extends ChangeNotifier {
 
   void clearSelection() => _state?._clearSelection();
 
+  /// Pages the current selection touches, in document order; empty
+  /// without a selection.
+  List<int> get selectionPages {
+    final range = _state?._selRange;
+    if (range == null) return const [];
+    return [for (var i = range.$1.$1; i <= range.$2.$1; i++) i];
+  }
+
+  /// The selection's rectangles on [pageIndex], in PDF page coordinates —
+  /// ready to use as the quads of a text-markup annotation.
+  List<PdfRect> selectionRectsOn(int pageIndex) =>
+      _state?._selectionRectsOn(pageIndex) ?? const [];
+
   void _setSelection(String text) {
     if (text == _selectedText) return;
     _selectedText = text;

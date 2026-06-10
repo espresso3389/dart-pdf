@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_flutter/pdf_flutter.dart';
 
 import 'demo_document.dart';
+import 'editing.dart';
 
 void main() => runApp(const ViewerApp());
 
@@ -34,8 +36,14 @@ class _ViewerScreenState extends State<ViewerScreen> {
   final _controller = PdfViewerController();
   final _searchField = TextEditingController();
   PdfDocument? _document;
+  Uint8List? _bytes;
   String _title = '';
   String? _error;
+
+  // annotation editing
+  EditTool? _tool;
+  Color _editColor = EditBar.palette.first;
+  final Map<int, List<List<(double, double)>>> _inkByPage = {};
 
   // app state the interactive demo's PDF links and overlays manipulate
   bool _isDemo = false;
@@ -81,12 +89,16 @@ class _ViewerScreenState extends State<ViewerScreen> {
   }
 
   void _openDemo() {
+    final bytes = buildDemoPdf();
     setState(() {
-      _document = PdfDocument.open(buildDemoPdf());
+      _bytes = bytes;
+      _document = PdfDocument.open(bytes);
       _title = 'Interactive demo';
       _error = null;
       _isDemo = true;
       _counter = 0;
+      _tool = null;
+      _inkByPage.clear();
       _searchField.clear();
     });
   }
@@ -182,15 +194,167 @@ class _ViewerScreenState extends State<ViewerScreen> {
       final bytes = await File(path).readAsBytes();
       final document = PdfDocument.open(bytes);
       setState(() {
+        _bytes = bytes;
         _document = document;
         _title = path.split(Platform.pathSeparator).last;
         _error = null;
         _isDemo = false;
+        _tool = null;
+        _inkByPage.clear();
         _searchField.clear();
       });
     } catch (e) {
       setState(() => _error = 'Could not open $path\n$e');
     }
+  }
+
+  // -----------------------------------------------------------------
+  // annotation editing
+
+  int get _colorValue => _editColor.toARGB32() & 0xFFFFFF;
+
+  bool get _hasPendingInk => _inkByPage.values.any((s) => s.isNotEmpty);
+
+  /// Runs [edit], swaps the viewer onto the updated bytes, and restores
+  /// the reading position. Every edit is an incremental update, so the
+  /// original file content is preserved inside the new bytes.
+  void _applyEdit(void Function(PdfEditor) edit, String message) {
+    final document = _document;
+    if (document == null) return;
+    try {
+      final editor = PdfEditor(document);
+      edit(editor);
+      if (!editor.hasChanges) return;
+      final bytes = editor.save();
+      final page = _controller.currentPage;
+      setState(() {
+        _bytes = bytes;
+        _document = PdfDocument.open(bytes);
+      });
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => unawaited(_controller.jumpToPage(page)));
+      _toast(message);
+    } catch (e) {
+      _toast('Edit failed: $e');
+    }
+  }
+
+  void _markupSelection(String kind) {
+    // capture before the edit — swapping documents clears the selection
+    final byPage = {
+      for (final page in _controller.selectionPages)
+        page: _controller.selectionRectsOn(page),
+    };
+    if (byPage.values.every((quads) => quads.isEmpty)) return;
+    _applyEdit((editor) {
+      byPage.forEach((page, quads) {
+        if (quads.isEmpty) return;
+        switch (kind) {
+          case 'highlight':
+            editor.addHighlight(page, quads, color: _colorValue);
+          case 'underline':
+            editor.addUnderline(page, quads, color: _colorValue);
+          case 'strikeout':
+            editor.addStrikeOut(page, quads, color: _colorValue);
+        }
+      });
+    }, 'Marked up the selection');
+  }
+
+  void _setTool(EditTool? tool) {
+    if (_hasPendingInk && tool != EditTool.draw) _finishInk();
+    setState(() => _tool = tool);
+    if (tool != null) _controller.clearSelection();
+  }
+
+  void _finishInk() {
+    final strokes = Map.of(_inkByPage);
+    _inkByPage.clear();
+    _applyEdit((editor) {
+      strokes.forEach((page, pageStrokes) {
+        if (pageStrokes.isNotEmpty) {
+          editor.addInk(page, pageStrokes, color: _colorValue);
+        }
+      });
+    }, 'Ink annotation added');
+  }
+
+  void _onRectDone(int pageIndex, PdfRect rect) async {
+    switch (_tool) {
+      case EditTool.rect:
+        _applyEdit(
+            (e) => e.addSquare(pageIndex, rect, strokeColor: _colorValue),
+            'Rectangle added');
+      case EditTool.ellipse:
+        _applyEdit(
+            (e) => e.addCircle(pageIndex, rect, strokeColor: _colorValue),
+            'Ellipse added');
+      case EditTool.text:
+        final text = await promptForText(context, title: 'Text box');
+        if (text == null || text.isEmpty) return;
+        _applyEdit(
+            (e) => e.addFreeText(pageIndex, rect, text,
+                fontSize: 14, color: _colorValue),
+            'Text added');
+      case EditTool.stamp:
+        final text = await promptForText(context,
+            title: 'Stamp text', initial: 'APPROVED');
+        if (text == null || text.isEmpty) return;
+        _applyEdit((e) => e.addStamp(pageIndex, rect, text, color: _colorValue),
+            'Stamp added');
+      default:
+        break;
+    }
+  }
+
+  void _onPointDone(int pageIndex, double x, double y) async {
+    final text = await promptForText(context, title: 'New note');
+    if (text == null || text.isEmpty) return;
+    _applyEdit(
+        (e) => e.addNote(pageIndex, x, y, text, color: 0xFFD100),
+        'Note added');
+  }
+
+  void _flatten() => _applyEdit((editor) {
+        for (var i = 0; i < (_document?.pageCount ?? 0); i++) {
+          editor.flattenAnnotations(i);
+        }
+      }, 'Annotations flattened into the pages');
+
+  Future<void> _saveAs() async {
+    final bytes = _bytes;
+    if (bytes == null) return;
+    final location = await getSaveLocation(
+      suggestedName: 'annotated.pdf',
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'PDF documents', extensions: ['pdf']),
+      ],
+    );
+    if (location == null) return;
+    await File(location.path).writeAsBytes(bytes);
+    _toast('Saved to ${location.path}');
+  }
+
+  List<Widget> _pageOverlays(
+      BuildContext context, int pageIndex, PdfPageGeometry geometry) {
+    final tool = _tool;
+    return [
+      if (_isDemo) ..._demoOverlays(context, pageIndex, geometry),
+      if (tool != null)
+        Positioned.fill(
+          child: EditOverlay(
+            tool: tool,
+            pageIndex: pageIndex,
+            geometry: geometry,
+            color: _editColor,
+            inkStrokes: _inkByPage[pageIndex] ?? const [],
+            onRect: _onRectDone,
+            onPoint: _onPointDone,
+            onStroke: (page, stroke) => setState(
+                () => _inkByPage.putIfAbsent(page, () => []).add(stroke)),
+          ),
+        ),
+    ];
   }
 
   @override
@@ -279,9 +443,25 @@ class _ViewerScreenState extends State<ViewerScreen> {
             document: document,
             controller: _controller,
             onAction: _onAction,
-            pageOverlayBuilder: _isDemo ? _demoOverlays : null,
+            pageOverlayBuilder: _pageOverlays,
           ),
       },
+      bottomNavigationBar: _document == null
+          ? null
+          : EditBar(
+              controller: _controller,
+              tool: _tool,
+              color: _editColor,
+              hasPendingInk: _hasPendingInk,
+              canSave: _bytes != null,
+              onMarkup: _markupSelection,
+              onToolChanged: _setTool,
+              onColorChanged: (color) => setState(() => _editColor = color),
+              onFinishInk: _finishInk,
+              onCancelInk: () => setState(_inkByPage.clear),
+              onFlatten: _flatten,
+              onSave: _saveAs,
+            ),
     );
   }
 }

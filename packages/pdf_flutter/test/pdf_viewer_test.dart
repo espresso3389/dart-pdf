@@ -178,6 +178,42 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
   });
 
+  testWidgets('selection geometry is exposed in PDF page coordinates',
+      (tester) async {
+    final controller = await pumpViewer(tester);
+    const scale = 800 / 612;
+    Offset view(double x, double y) => Offset(x * scale, (792 - y) * scale);
+
+    expect(controller.selectionPages, isEmpty);
+    expect(controller.selectionRectsOn(0), isEmpty);
+
+    final gesture = await tester.startGesture(view(154, 720),
+        kind: PointerDeviceKind.mouse);
+    await gesture.moveBy(const Offset(-20, 0));
+    await tester.pump();
+    await gesture.moveTo(view(50, 720));
+    await tester.pump();
+    await gesture.up();
+    await tester.pump();
+
+    expect(controller.selectedText, 'Page 1');
+    expect(controller.selectionPages, [0]);
+    final rects = controller.selectionRectsOn(0);
+    expect(rects, isNotEmpty);
+    // 'Page 1' is drawn at 72,720 in 24pt — the quads must surround it,
+    // in page space (y up), not view space
+    final bounds = rects.reduce((a, b) => PdfRect(
+          a.left < b.left ? a.left : b.left,
+          a.bottom < b.bottom ? a.bottom : b.bottom,
+          a.right > b.right ? a.right : b.right,
+          a.top > b.top ? a.top : b.top,
+        ));
+    expect(bounds.left, moreOrLessEquals(72, epsilon: 3));
+    expect(bounds.bottom, lessThan(721));
+    expect(bounds.top, greaterThan(720));
+    expect(controller.selectionRectsOn(1), isEmpty);
+  });
+
   testWidgets('hovering text shows the text cursor', (tester) async {
     await pumpViewer(tester);
     const scale = 800 / 612;

@@ -164,8 +164,8 @@ typedef PdfPageOverlayBuilder = List<Widget> Function(
 /// A scrolling, zoomable PDF viewer.
 ///
 /// Supports pinch zoom, double-tap zoom toggle, page tracking, and document
-/// search with highlights. Pages re-rasterize at the device pixel ratio;
-/// tile-based re-rendering at deep zoom is a TODO.
+/// search with highlights. Pages re-rasterize at the settled zoom; past the
+/// full-page raster caps a detail patch keeps the visible region sharp.
 class PdfViewer extends StatefulWidget {
   const PdfViewer({
     super.key,
@@ -224,6 +224,8 @@ class _PdfViewerState extends State<PdfViewer>
   /// settles (pinch end, wheel pause, double-tap animation end).
   double _renderScale = 1;
   Timer? _settleTimer;
+  Timer? _scrollSettleTimer;
+  int _settleGeneration = 0;
 
   late List<PdfPage> _pages;
   late List<double> _aspects; // height / width, after /Rotate
@@ -290,6 +292,7 @@ class _PdfViewerState extends State<PdfViewer>
       });
     _loadPages();
     _scroll.addListener(_onScroll);
+    _scroll.addListener(_onScrollForDetail);
     _transform.addListener(_onTransformChanged);
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
     // Cmd+Tab and friends: the modifier's key-up goes to the other app, so
@@ -404,10 +407,23 @@ class _PdfViewerState extends State<PdfViewer>
       // wheel zoom never fires onInteractionEnd, so the pan flag also
       // settles here
       final zoomed = target > 1.01;
-      if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
-      if ((target - _renderScale).abs() > 0.1 * _renderScale) {
-        setState(() => _renderScale = target);
-      }
+      setState(() {
+        if (zoomed != _zoomed) _zoomed = zoomed;
+        if ((target - _renderScale).abs() > 0.1 * _renderScale) {
+          _renderScale = target;
+        }
+        // any settled transform change moves the deep-zoom detail patch
+        _settleGeneration++;
+      });
+    });
+  }
+
+  /// Debounced scroll-settle: scrolling moves pages under a deep-zoom
+  /// detail patch, so the patch must follow once movement stops.
+  void _onScrollForDetail() {
+    _scrollSettleTimer?.cancel();
+    _scrollSettleTimer = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() => _settleGeneration++);
     });
   }
 
@@ -452,6 +468,7 @@ class _PdfViewerState extends State<PdfViewer>
     HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     _lifecycle.dispose();
     _settleTimer?.cancel();
+    _scrollSettleTimer?.cancel();
     _controller._state = null;
     if (_ownsController) _controller.dispose();
     _scroll.dispose();
@@ -943,6 +960,7 @@ class _PdfViewerState extends State<PdfViewer>
                 page: _pages[index],
                 index: index,
                 scale: _renderScale,
+                settleGeneration: _settleGeneration,
                 matches: _controller._matchesOn(index),
                 currentMatch: _controller._currentMatch >= 0
                     ? _controller._matches[_controller._currentMatch]
@@ -1096,6 +1114,7 @@ class _PdfViewerPage extends StatelessWidget {
     required this.page,
     required this.index,
     required this.scale,
+    required this.settleGeneration,
     required this.matches,
     required this.currentMatch,
     required this.selection,
@@ -1105,6 +1124,7 @@ class _PdfViewerPage extends StatelessWidget {
   final PdfPage page;
   final int index;
   final double scale;
+  final int settleGeneration;
   final List<PdfTextMatch> matches;
   final PdfTextMatch? currentMatch;
   final List<PdfRect> selection;
@@ -1117,7 +1137,8 @@ class _PdfViewerPage extends StatelessWidget {
     // (dropping its rendered image: a white flash)
     final builder = overlayBuilder;
     return Stack(children: [
-      PdfPageView(page: page, scale: scale),
+      PdfPageView(
+          page: page, scale: scale, settleGeneration: settleGeneration),
       Positioned.fill(
         child: CustomPaint(
           painter: _HighlightPainter(

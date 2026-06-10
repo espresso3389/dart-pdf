@@ -10,15 +10,27 @@ import 'renderer.dart';
 ///
 /// The page is interpreted once into a [ui.Picture]; changing [scale] only
 /// re-rasterizes that cached picture, so zoom-driven re-renders are cheap.
-/// Tiled rendering past the resolution caps is a TODO.
+/// Past the full-page raster caps, a detail patch covering the visible
+/// part of the page (inflated for panning headroom) renders at full
+/// resolution on top of the capped base — single patch, not a tile grid,
+/// so the page is never interpreted more than once per zoom level.
 class PdfPageView extends StatefulWidget {
-  const PdfPageView({super.key, required this.page, this.scale = 1});
+  const PdfPageView({
+    super.key,
+    required this.page,
+    this.scale = 1,
+    this.settleGeneration = 0,
+  });
 
   final PdfPage page;
 
   /// Resolution multiplier on top of the device pixel ratio. The viewer
   /// raises it to the settled zoom level so pages stay sharp.
   final double scale;
+
+  /// Bumped by the viewer when scrolling/zooming settles, so the detail
+  /// patch can follow the viewport without the viewer knowing about it.
+  final int settleGeneration;
 
   @override
   State<PdfPageView> createState() => _PdfPageViewState();
@@ -31,9 +43,13 @@ class _PdfPageViewState extends State<PdfPageView> {
   double? _pixelRatio;
   double? _layoutWidth;
 
-  // Deep-zoom rasters stay within GPU texture limits and sane memory:
+  ui.Image? _detailImage;
+  Rect? _detailFraction; // patch placement as fractions of the page
+  int _detailGeneration = 0;
+
+  // Full-page rasters stay within GPU texture limits and sane memory:
   // at most ~16.7M px (64 MB RGBA) and 8192 px per side. Past these caps
-  // the bitmap is upscaled (blurry) — sharp deep zoom needs tiles.
+  // the detail patch takes over for the visible region.
   static const _maxPixels = 1 << 24;
   static const _maxDimension = 8192.0;
 
@@ -68,9 +84,15 @@ class _PdfPageViewState extends State<PdfPageView> {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.page, widget.page)) {
       _dropPicture();
+      _dropDetail();
       _render();
     } else if (oldWidget.scale != widget.scale) {
       _render();
+    } else if (oldWidget.settleGeneration != widget.settleGeneration) {
+      // viewport settled somewhere new: refresh only the detail patch
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _updateDetail();
+      });
     }
   }
 
@@ -78,6 +100,7 @@ class _PdfPageViewState extends State<PdfPageView> {
   void dispose() {
     _dropPicture();
     _image?.dispose();
+    _detailImage?.dispose();
     super.dispose();
   }
 
@@ -86,15 +109,32 @@ class _PdfPageViewState extends State<PdfPageView> {
     _picture = null;
   }
 
-  double _effectiveRatio() {
+  void _dropDetail() {
+    _detailGeneration++;
+    if (_detailImage != null) {
+      _detailImage?.dispose();
+      _detailImage = null;
+      _detailFraction = null;
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// The resolution the current zoom actually wants, uncapped.
+  double _desiredRatio() {
     final size = PdfPageRenderer.pageSize(widget.page);
     final width = math.max(1.0, size.width);
-    final height = math.max(1.0, size.height);
     // pages display fit-width, so the raster must match the on-screen
     // width — a 612pt page across a wide window needs far more pixels
     // than its nominal point size
     final fitWidth = (_layoutWidth ?? width) / width;
-    var ratio = fitWidth * (_pixelRatio ?? 1.0) * widget.scale;
+    return math.max(fitWidth * (_pixelRatio ?? 1.0) * widget.scale, 0.05);
+  }
+
+  double _effectiveRatio() {
+    final size = PdfPageRenderer.pageSize(widget.page);
+    final width = math.max(1.0, size.width);
+    final height = math.max(1.0, size.height);
+    var ratio = _desiredRatio();
     ratio = math.min(ratio, math.sqrt(_maxPixels / (width * height)));
     ratio = math.min(ratio, _maxDimension / math.max(width, height));
     return math.max(ratio, 0.05);
@@ -117,6 +157,79 @@ class _PdfPageViewState extends State<PdfPageView> {
       _image?.dispose();
       _image = image;
     });
+    await _updateDetail();
+  }
+
+  /// Renders (or drops) the deep-zoom patch: the visible slice of the
+  /// page, inflated by half a viewport on each side, at the resolution
+  /// the zoom actually asks for.
+  Future<void> _updateDetail() async {
+    final generation = ++_detailGeneration;
+    final desired = _desiredRatio();
+    final effective = _effectiveRatio();
+    if (desired <= effective * 1.05) {
+      _dropDetail();
+      return;
+    }
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return;
+    final pageRect = Rect.fromPoints(
+      box.localToGlobal(Offset.zero),
+      box.localToGlobal(Offset(box.size.width, box.size.height)),
+    );
+    final screen = Offset.zero & MediaQuery.sizeOf(context);
+    final visible = pageRect.intersect(screen);
+    if (visible.isEmpty ||
+        pageRect.width <= 0 ||
+        pageRect.height <= 0) {
+      _dropDetail();
+      return;
+    }
+
+    // visible slice as fractions of the page, inflated 50% per side
+    final fraction = Rect.fromLTRB(
+      ((visible.left - pageRect.left - visible.width / 2) / pageRect.width)
+          .clamp(0.0, 1.0),
+      ((visible.top - pageRect.top - visible.height / 2) / pageRect.height)
+          .clamp(0.0, 1.0),
+      ((visible.right - pageRect.left + visible.width / 2) / pageRect.width)
+          .clamp(0.0, 1.0),
+      ((visible.bottom - pageRect.top + visible.height / 2) /
+              pageRect.height)
+          .clamp(0.0, 1.0),
+    );
+    final size = PdfPageRenderer.pageSize(widget.page);
+    final region = Rect.fromLTRB(
+      fraction.left * size.width,
+      fraction.top * size.height,
+      fraction.right * size.width,
+      fraction.bottom * size.height,
+    );
+    if (region.width <= 0 || region.height <= 0) {
+      _dropDetail();
+      return;
+    }
+    // the patch obeys the same pixel budget as the base
+    var ratio = desired;
+    ratio = math.min(
+        ratio, math.sqrt(_maxPixels / (region.width * region.height)));
+    ratio =
+        math.min(ratio, _maxDimension / math.max(region.width, region.height));
+
+    final picture =
+        await (_picture ??= PdfPageRenderer.renderPicture(widget.page));
+    if (!mounted || generation != _detailGeneration) return;
+    final image =
+        await PdfPageRenderer.rasterizeRegion(picture, region, ratio);
+    if (!mounted || generation != _detailGeneration) {
+      image.dispose();
+      return;
+    }
+    setState(() {
+      _detailImage?.dispose();
+      _detailImage = image;
+      _detailFraction = fraction;
+    });
   }
 
   @override
@@ -128,13 +241,37 @@ class _PdfPageViewState extends State<PdfPageView> {
       if (width.isFinite && width > 0) _noteLayoutWidth(width);
       return AspectRatio(
         aspectRatio: hasArea ? size.width / size.height : 1,
-        child: _image == null
-            ? const ColoredBox(color: Color(0xFFFFFFFF))
-            : RawImage(
+        child: LayoutBuilder(builder: (context, inner) {
+          final w = inner.maxWidth;
+          final h = inner.maxHeight;
+          final detail = _detailImage;
+          final fraction = _detailFraction;
+          return Stack(
+              alignment: Alignment.topLeft,
+              fit: StackFit.expand,
+              children: [
+            if (_image == null)
+              const ColoredBox(color: Color(0xFFFFFFFF))
+            else
+              RawImage(
                 image: _image,
                 fit: BoxFit.contain,
                 filterQuality: FilterQuality.medium,
               ),
+            if (detail != null && fraction != null && w.isFinite)
+              Positioned(
+                left: fraction.left * w,
+                top: fraction.top * h,
+                width: fraction.width * w,
+                height: fraction.height * h,
+                child: RawImage(
+                  image: detail,
+                  fit: BoxFit.fill,
+                  filterQuality: FilterQuality.medium,
+                ),
+              ),
+          ]);
+        }),
       );
     });
   }

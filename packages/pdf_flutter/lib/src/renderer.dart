@@ -89,6 +89,26 @@ class PdfPageRenderer {
     }
   }
 
+  /// Rasterizes only [region] (in page points, y-down raster space) of a
+  /// recorded page [picture] at [pixelRatio] — the deep-zoom detail patch.
+  static Future<ui.Image> rasterizeRegion(
+      ui.Picture picture, Rect region, double pixelRatio) async {
+    final recorder = ui.PictureRecorder();
+    Canvas(recorder)
+      ..scale(pixelRatio)
+      ..translate(-region.left, -region.top)
+      ..drawPicture(picture);
+    final scaled = recorder.endRecording();
+    try {
+      return await scaled.toImage(
+        (region.width * pixelRatio).ceil().clamp(1, 1 << 14),
+        (region.height * pixelRatio).ceil().clamp(1, 1 << 14),
+      );
+    } finally {
+      scaled.dispose();
+    }
+  }
+
   /// Page size in points after applying /Rotate.
   static Size pageSize(PdfPage page) {
     final box = page.cropBox;

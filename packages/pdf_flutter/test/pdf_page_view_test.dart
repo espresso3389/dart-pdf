@@ -71,11 +71,61 @@ void main() {
     );
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
     await tester.pump();
-    final image = tester.widget<RawImage>(find.byType(RawImage)).image!;
-    // 612x792 capped to ~2^24 total pixels (plus ceil() rounding) and
-    // 8192 per side
-    expect(image.width * image.height, lessThan((1 << 24) * 1.001));
-    expect(image.width, lessThanOrEqualTo(8192));
-    expect(image.height, lessThanOrEqualTo(8192));
+    final images = tester
+        .widgetList<RawImage>(find.byType(RawImage))
+        .map((w) => w.image!)
+        .toList();
+    // the base raster plus the deep-zoom detail patch
+    expect(images, hasLength(2));
+    for (final image in images) {
+      // capped to ~2^24 total pixels (plus ceil() rounding), 8192/side
+      expect(image.width * image.height, lessThan((1 << 24) * 1.001));
+      expect(image.width, lessThanOrEqualTo(8192));
+      expect(image.height, lessThanOrEqualTo(8192));
+    }
+  });
+
+  testWidgets('no detail patch below the raster caps', (tester) async {
+    final doc = PdfDocument.open(buildClassicPdf());
+    await tester.pumpWidget(
+      Center(child: PdfPageView(page: doc.page(0))),
+    );
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+    expect(find.byType(RawImage), findsOneWidget);
+  });
+
+  testWidgets('the detail patch is sharper than the capped base',
+      (tester) async {
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final doc = PdfDocument.open(buildClassicPdf());
+    // page laid out 10x wider than its point size: only a slice fits the
+    // viewport, so the patch covers a fraction of the page (OverflowBox
+    // lets the page exceed the test surface without overflow errors)
+    await tester.pumpWidget(
+      Center(
+        child: OverflowBox(
+          maxWidth: double.infinity,
+          maxHeight: double.infinity,
+          child: SizedBox(
+              width: 6120, child: PdfPageView(page: doc.page(0))),
+        ),
+      ),
+    );
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+    final rawImages = find.byType(RawImage);
+    expect(rawImages, findsNWidgets(2));
+    final base = tester.widgetList<RawImage>(rawImages).first.image!;
+    final patch = tester.widgetList<RawImage>(rawImages).last.image!;
+    // base: 612x792 capped to sqrt(2^24/(612*792)) ≈ 5.88 px per point
+    final baseDensity = base.width / 612;
+    expect(baseDensity, lessThan(6));
+    // patch density: raster pixels per page point of the area it covers
+    final patchLayoutWidth = tester.getSize(rawImages.last).width;
+    final patchPoints = patchLayoutWidth / 6120 * 612;
+    expect(patch.width / patchPoints,
+        moreOrLessEquals(10, epsilon: 0.5)); // the uncapped desired ratio
   });
 }

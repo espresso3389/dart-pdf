@@ -286,6 +286,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
         if (text == null || text.isEmpty) return;
         _controller.addFreeText(widget.pageIndex, rect, text);
       case PdfEditTool.stamp:
+        final stamp = _controller.activeStamp;
+        if (stamp != null) {
+          _controller.addStamp(widget.pageIndex, rect, stamp.text,
+              color: stamp.color);
+          return;
+        }
         final text = await widget.textPrompt(context,
             title: 'Stamp text', initial: 'APPROVED');
         if (text == null || text.isEmpty) return;
@@ -364,6 +370,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
         _controller.addNote(widget.pageIndex, x, y, text);
       case PdfEditTool.signature:
         _controller.placeSignature(widget.pageIndex, x, y);
+      case PdfEditTool.stamp:
+        // no-op without an active custom stamp (the classic flow drags)
+        _controller.placeStamp(widget.pageIndex, x, y);
       default:
         break;
     }

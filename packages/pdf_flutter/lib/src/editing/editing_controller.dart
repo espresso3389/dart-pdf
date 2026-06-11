@@ -4,6 +4,7 @@ import 'package:pdf_document/pdf_document.dart';
 
 import 'editing_preferences.dart';
 import 'editing_signature.dart';
+import 'editing_stamps.dart';
 
 /// The annotation tools a [PdfEditingController] can arm.
 ///
@@ -31,7 +32,8 @@ enum PdfEditTool {
   /// Tap to place a sticky note (/Text).
   note,
 
-  /// Drag out a box, then type the rubber-stamp caption (/Stamp).
+  /// Rubber stamps (/Stamp). With a [PdfEditingController.activeStamp]
+  /// a tap places it; otherwise drag out a box and type the caption.
   stamp,
 
   /// Tap to place the saved hand-drawn signature
@@ -348,8 +350,9 @@ class PdfEditingController extends ChangeNotifier {
       apply((e) => e.addFreeText(pageIndex, rect, text,
           fontSize: preferences.fontSize, color: _colorValue));
 
-  void addStamp(int pageIndex, PdfRect rect, String text) => apply((e) =>
-      e.addStamp(pageIndex, rect, text, color: _colorValue, opacity: preferences.opacity));
+  void addStamp(int pageIndex, PdfRect rect, String text, {int? color}) =>
+      apply((e) => e.addStamp(pageIndex, rect, text,
+          color: color ?? _colorValue, opacity: preferences.opacity));
 
   /// Adds a sticky note with its top-left corner at ([x], [y]).
   void addNote(int pageIndex, double x, double y, String text) =>
@@ -396,6 +399,68 @@ class PdfEditingController extends ChangeNotifier {
         strokeWidth: w / 75, // pen-like: ~2pt at the default width
         opacity: 1,
         pressures: signature.pressures));
+  }
+
+  // ---------------------------------------------------------------------
+  // custom stamps
+
+  /// The user's saved custom stamps. Persisted with the other
+  /// [preferences], so they survive app restarts. Created in
+  /// [showPdfStampEditor] (usually via the picker, [showPdfStampPicker]).
+  List<PdfCustomStamp> get customStamps => preferences.customStamps;
+
+  /// Appends [stamp] to the saved list.
+  void saveCustomStamp(PdfCustomStamp stamp) =>
+      preferences.customStamps = [...preferences.customStamps, stamp];
+
+  /// Removes [stamp] from the saved list. If it was the active stamp,
+  /// the stamp tool falls back to prompting for text.
+  void removeCustomStamp(PdfCustomStamp stamp) {
+    preferences.customStamps = [
+      for (final saved in preferences.customStamps)
+        if (saved != stamp) saved
+    ];
+    if (_activeStamp == stamp) {
+      _activeStamp = null;
+      notifyListeners();
+    }
+  }
+
+  PdfCustomStamp? _activeStamp;
+
+  /// The custom stamp the stamp tool places on tap. Null means the
+  /// classic flow: drag out a box and type the caption. Not persisted —
+  /// each session starts in the classic flow.
+  PdfCustomStamp? get activeStamp => _activeStamp;
+
+  set activeStamp(PdfCustomStamp? value) {
+    if (value == _activeStamp) return;
+    _activeStamp = value;
+    notifyListeners();
+  }
+
+  /// Places [activeStamp] centered on ([x], [y]) in page space,
+  /// [height] points tall and auto-sized from its caption (clamped,
+  /// with the center, so the whole stamp stays on the page). Returns
+  /// false when no stamp is active.
+  bool placeStamp(int pageIndex, double x, double y, {double height = 40}) {
+    final stamp = _activeStamp;
+    if (stamp == null) return false;
+    final box = _document.page(pageIndex).cropBox;
+    final h = height.clamp(8.0, box.height * 0.9);
+    // mirror addStamp's appearance math (6pt padding, text 72% of the
+    // height) so the caption fills the box without shrinking
+    final fontSize = (h - 12) * 0.72;
+    final w = (measureHelvetica(stamp.text, fontSize, bold: true) + 24)
+        .clamp(h, box.width * 0.9);
+    final cx = x.clamp(box.left + w / 2, box.right - w / 2);
+    final cy = y.clamp(box.bottom + h / 2, box.top - h / 2);
+    return apply((e) => e.addStamp(
+        pageIndex,
+        PdfRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2),
+        stamp.text,
+        color: stamp.color,
+        opacity: preferences.opacity));
   }
 
   /// Bakes every page's annotation appearances into its content and

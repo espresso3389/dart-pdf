@@ -5,6 +5,7 @@ import 'package:flutter/painting.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'editing_signature.dart';
+import 'editing_stamps.dart';
 
 /// Editing-UI preferences, persisted on the local device.
 ///
@@ -47,6 +48,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   bool _showThumbnailSidebar = false;
   bool _showAnnotationSidebar = false;
   PdfInkSignature? _signature;
+  List<PdfCustomStamp> _customStamps = const [];
 
   Future<void> _load() async {
     final SharedPreferences store;
@@ -72,6 +74,13 @@ class PdfEditingPreferences extends ChangeNotifier {
               _showAnnotationSidebar;
       final signature = store.getString('${_prefix}signature');
       if (signature != null) _signature = PdfInkSignature.decode(signature);
+      final stamps = store.getStringList('${_prefix}customStamps');
+      if (stamps != null) {
+        _customStamps = List.unmodifiable([
+          for (final stamp in stamps)
+            if (PdfCustomStamp.decode(stamp) case final decoded?) decoded
+        ]);
+      }
     }
     _store = store;
     notifyListeners();
@@ -156,6 +165,17 @@ class PdfEditingPreferences extends ChangeNotifier {
     _write((s) => value == null
         ? s.remove('${_prefix}signature')
         : s.setString('${_prefix}signature', value.encode()));
+    notifyListeners();
+  }
+
+  /// The user's saved custom rubber stamps, oldest first.
+  List<PdfCustomStamp> get customStamps => _customStamps;
+
+  set customStamps(List<PdfCustomStamp> value) {
+    if (listEquals(value, _customStamps)) return;
+    _customStamps = List.unmodifiable(value);
+    _write((s) => s.setStringList('${_prefix}customStamps',
+        [for (final stamp in value) stamp.encode()]));
     notifyListeners();
   }
 

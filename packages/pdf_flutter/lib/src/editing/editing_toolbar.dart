@@ -6,6 +6,7 @@ import '../pdf_viewer.dart';
 import 'editing_color_picker.dart';
 import 'editing_controller.dart';
 import 'editing_signature.dart';
+import 'editing_stamps.dart';
 import 'text_prompt.dart';
 
 /// A ready-made Material toolbar for [PdfEditingController]: text-markup
@@ -207,6 +208,14 @@ class PdfEditingToolbar extends StatelessWidget {
               toolButton(
                   PdfEditTool.note, Icons.sticky_note_2_outlined, 'Note'),
               toolButton(PdfEditTool.stamp, Icons.approval, 'Stamp'),
+              if (controller.tool == PdfEditTool.stamp)
+                IconButton(
+                  icon: const Icon(Icons.style),
+                  tooltip: 'Custom stamps…',
+                  isSelected: controller.activeStamp != null,
+                  onPressed: () =>
+                      showPdfStampPicker(context, controller: controller),
+                ),
               IconButton(
                 icon: const Icon(Icons.history_edu),
                 tooltip: 'Signature — tap a page to place it',

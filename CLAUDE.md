@@ -203,3 +203,18 @@ needs `scrollable:` scoped to the toolbar once a viewer is in the tree
 (two Scrollables otherwise). Example app: ⌘F/Ctrl+F focuses search via
 CallbackShortcuts wrapping the Scaffold (shortcuts bubble up the focus
 tree from the viewer's focus node).
+Custom stamps (editing_stamps.dart, Ben's ask): `PdfCustomStamp`
+(caption + RGB color, JSON) — saved list persists via preferences
+`customStamps` (a string-list key, one JSON blob per stamp).
+`controller.activeStamp` is transient (each session starts in the
+classic type-the-caption flow); with one set, a stamp-tool tap calls
+`placeStamp(page, x, y, height: 40)` — width mirrors addStamp's
+appearance math (measureHelvetica bold + 24pt padding) so the caption
+isn't shrunk, center-clamped to the crop box like placeSignature.
+Drag-out still works and uses the active stamp's text/color; with no
+active stamp it prompts as before. Toolbar: a `style` icon button
+('Custom stamps…') appears while the stamp tool is armed →
+`showPdfStampPicker` (tap to select, trailing delete, 'New stamp…' →
+`showPdfStampEditor`, text field key 'pdf-stamp-text'; the 'Type the
+text for each stamp' tile clears activeStamp). Deleting the active
+stamp also clears it.

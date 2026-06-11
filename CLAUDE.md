@@ -218,3 +218,17 @@ active stamp it prompts as before. Toolbar: a `style` icon button
 `showPdfStampEditor`, text field key 'pdf-stamp-text'; the 'Type the
 text for each stamp' tile clears activeStamp). Deleting the active
 stamp also clears it.
+Live drag preview (Ben's ask): moving/resizing a selected annotation
+shows its real appearance at the dragged rect, Acrobat-style — the
+original stays rendered, a ~75% ghost rides the drag.
+`PdfInterpreter.drawAnnotation(page, annotation)` (single-annotation
+slice of drawAnnotations) + `PdfPageRenderer.renderAnnotationPicture`
+(appearance alone, page raster space, transparent bg, null without an
+/AP). The overlay caches the picture per (document, page, slot) —
+`_ensureGhost()` from build, so it's ready before the drag — and the
+painter calls `paintAnnotationDragPreview` (public in
+editing_overlay.dart, @visibleForTesting): saveLayer 0xBF alpha,
+translate/scale from the resting view rect onto the preview rect (the
+same §12.5.5 stretch resizeAnnotation commits). Tests in
+editing_drag_preview_test.dart; the mid-drag pixel check captures a
+RepaintBoundary via tester.runAsync(toImage) while the gesture is held.

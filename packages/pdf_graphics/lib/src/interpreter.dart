@@ -194,6 +194,16 @@ class PdfInterpreter {
     }
   }
 
+  /// Draws a single annotation's appearance stream — the one-annotation
+  /// slice of [drawAnnotations], for callers that need an annotation
+  /// rendered in isolation (e.g. a live drag preview).
+  void drawAnnotation(PdfPage page, PdfAnnotation annotation) {
+    _pageBox = page.mediaBox;
+    final form = annotation.normalAppearance;
+    if (form == null) return;
+    _drawAppearance(form, annotation.rect);
+  }
+
   /// Renders one appearance form: the /BBox corners go through /Matrix,
   /// their bounding box is fitted onto the annotation's /Rect, and the
   /// content runs clipped to the BBox (the algorithm in §12.5.5).

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -79,6 +80,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   _Handle? _resizeHandle;
   Rect? _resizeRect;
 
+  // live drag preview: the selected annotation's appearance, rendered
+  // once per (revision, selection) and drawn stretched while dragging
+  ui.Picture? _ghost;
+  (PdfDocument, int, int)? _ghostKey;
+
   MouseCursor _cursor = MouseCursor.defer;
 
   PdfEditingController get _controller => widget.controller;
@@ -130,6 +136,44 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     if (_controller.selectedElementPage != widget.pageIndex) return null;
     final bounds = _controller.selectedElement?.bounds;
     return bounds == null ? null : _geometry.toViewRect(bounds);
+  }
+
+  /// Keeps [_ghost] current: the selected annotation's appearance as a
+  /// page-space picture, so a move/resize drag can show the artwork at
+  /// its new place instead of just the chrome. Re-renders only when the
+  /// revision or the selection changes; called from [build] so the
+  /// picture is usually ready before a drag starts.
+  void _ensureGhost() {
+    final slot = _controller.selectedAnnotationSlot;
+    final document = _controller.document;
+    if (slot == null || slot.$1 != widget.pageIndex) {
+      _ghost?.dispose();
+      _ghost = null;
+      _ghostKey = null;
+      return;
+    }
+    final key = (document, slot.$1, slot.$2);
+    if (key == _ghostKey) return;
+    _ghostKey = key;
+    _ghost?.dispose();
+    _ghost = null;
+    final annotation = _controller.selectedAnnotation;
+    if (annotation == null) return;
+    unawaited(PdfPageRenderer.renderAnnotationPicture(
+            document.page(widget.pageIndex), annotation)
+        .then((picture) {
+      if (!mounted || _ghostKey != key) {
+        picture?.dispose();
+        return;
+      }
+      setState(() => _ghost = picture);
+    }));
+  }
+
+  @override
+  void dispose() {
+    _ghost?.dispose();
+    super.dispose();
   }
 
   Offset _handleCenter(Rect rect, _Handle handle) => Offset(
@@ -415,11 +459,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
 
   @override
   Widget build(BuildContext context) {
+    _ensureGhost();
     final selected = _selectedViewRect;
     final moveDelta =
         _resizeHandle == null && _moveStart != null && _moveCurrent != null
             ? _moveCurrent! - _moveStart!
             : Offset.zero;
+    final dragging = _resizeHandle != null || moveDelta != Offset.zero;
     // warm the eyedropper's raster so the first preview is instant-ish
     if (_controller.isPickingColor) unawaited(_ensureSampler());
     final preview = _controller.isPickingColor ? _pickPosition : null;
@@ -482,6 +528,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
                   selectionRect: _resizeHandle != null
                       ? _resizeRect
                       : selected?.shift(moveDelta),
+                  ghost: _ghost,
+                  ghostFrom: selected,
+                  dragging: dragging,
                   showHandles: selected != null &&
                       _controller.canResizeSelected &&
                       _moveStart == null,
@@ -554,6 +603,9 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.pressures,
     required this.dragRect,
     required this.selectionRect,
+    required this.ghost,
+    required this.ghostFrom,
+    required this.dragging,
     required this.showHandles,
     required this.elementRect,
   });
@@ -570,6 +622,14 @@ class _EditingPreviewPainter extends CustomPainter {
 
   final Rect? dragRect;
   final Rect? selectionRect;
+
+  /// The selected annotation's appearance in page raster space, and its
+  /// resting view rect — drawn stretched onto [selectionRect] while
+  /// [dragging], so the user sees the move/resize result live.
+  final ui.Picture? ghost;
+  final Rect? ghostFrom;
+  final bool dragging;
+
   final bool showHandles;
 
   /// The selected content element's box — orange, to read as "page
@@ -643,6 +703,15 @@ class _EditingPreviewPainter extends CustomPainter {
     }
 
     final selection = selectionRect;
+    final ghost = this.ghost;
+    final ghostFrom = this.ghostFrom;
+    if (dragging && selection != null && ghost != null && ghostFrom != null) {
+      paintAnnotationDragPreview(canvas,
+          picture: ghost,
+          from: ghostFrom,
+          to: selection,
+          scale: geometry.scale);
+    }
     if (selection != null) {
       final box = selection.inflate(2);
       canvas.drawRect(box, Paint()..color = const Color(0x1A1E88E5));
@@ -690,10 +759,39 @@ class _EditingPreviewPainter extends CustomPainter {
       oldDelegate.strokeWidth != strokeWidth ||
       oldDelegate.dragRect != dragRect ||
       oldDelegate.selectionRect != selectionRect ||
+      oldDelegate.ghost != ghost ||
+      oldDelegate.ghostFrom != ghostFrom ||
+      oldDelegate.dragging != dragging ||
       oldDelegate.showHandles != showHandles ||
       oldDelegate.elementRect != elementRect ||
       oldDelegate.strokes.length != strokes.length ||
       (strokes.isNotEmpty &&
           oldDelegate.strokes.isNotEmpty &&
           oldDelegate.strokes.last.length != strokes.last.length);
+}
+
+/// Paints [picture] — an annotation appearance recorded in page raster
+/// space (1 unit = 1 point, y down; see
+/// [PdfPageRenderer.renderAnnotationPicture]) — mapped from its resting
+/// view rect [from] onto [to], the live preview of a move/resize drag.
+/// [scale] is the view's pixels-per-point.
+///
+/// Drawn at ~75% opacity: solid enough to judge the result, light
+/// enough to read as a preview over the still-rendered original.
+@visibleForTesting
+void paintAnnotationDragPreview(
+  Canvas canvas, {
+  required ui.Picture picture,
+  required Rect from,
+  required Rect to,
+  required double scale,
+}) {
+  if (from.width <= 0 || from.height <= 0) return;
+  canvas.saveLayer(to.inflate(4), Paint()..color = const Color(0xBFFFFFFF));
+  canvas.translate(to.left, to.top);
+  canvas.scale(to.width / from.width, to.height / from.height);
+  canvas.translate(-from.left, -from.top);
+  canvas.scale(scale, scale);
+  canvas.drawPicture(picture);
+  canvas.restore();
 }

@@ -75,7 +75,9 @@ The editing UI shipped with `pdf_flutter`: a `PdfEditingController`
 revision a byte prefix of the next, so undo is just a shorter view of
 the same buffer), tool overlays on every page (text markup from the
 selection, ink, shapes, free text, notes, stamps; select/move/resize
-with handles; a content tool that selects page elements for deletion or
+with handles, with a live translucent preview of the annotation's
+artwork riding along while it moves or stretches; a content tool that
+selects page elements for deletion or
 in-place text replacement), keyboard shortcuts, style controls (stroke
 width, opacity, font size), an annotation list sidebar
 (`PdfAnnotationSidebar`), a page thumbnail sidebar

@@ -59,6 +59,44 @@ class PdfPageRenderer {
     return recorder.endRecording();
   }
 
+  /// Renders one annotation's appearance into a picture in the same page
+  /// raster space as [renderPicture] (post-rotation, y down, 1 unit =
+  /// 1 point) but with a transparent background — for live drag/resize
+  /// previews. Null when the annotation has no appearance stream.
+  static Future<ui.Picture?> renderAnnotationPicture(
+      PdfPage page, PdfAnnotation annotation) async {
+    if (annotation.normalAppearance == null) return null;
+    final cos = page.document.cos;
+
+    final collector = ImageCollector();
+    PdfInterpreter(cos: cos, device: collector)
+        .drawAnnotation(page, annotation);
+    final images = await decodeImages(cos, collector.streams);
+
+    final box = page.cropBox;
+    final size = pageSize(page);
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    switch (page.rotation) {
+      case 90:
+        canvas.translate(size.width, 0);
+        canvas.rotate(math.pi / 2);
+      case 180:
+        canvas.translate(size.width, size.height);
+        canvas.rotate(math.pi);
+      case 270:
+        canvas.translate(0, size.height);
+        canvas.rotate(-math.pi / 2);
+    }
+    canvas.translate(0, box.height);
+    canvas.scale(1, -1);
+    canvas.translate(-box.left, -box.bottom);
+
+    PdfInterpreter(cos: cos, device: CanvasPdfDevice(canvas, images: images))
+        .drawAnnotation(page, annotation);
+    return recorder.endRecording();
+  }
+
   /// Renders [page] to a bitmap. [pixelRatio] of 2 doubles the resolution.
   static Future<ui.Image> renderImage(PdfPage page,
       {double pixelRatio = 1}) async {

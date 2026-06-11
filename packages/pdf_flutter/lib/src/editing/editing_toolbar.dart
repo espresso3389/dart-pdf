@@ -168,7 +168,10 @@ class PdfEditingToolbar extends StatelessWidget {
               if (selected != null) ...[
                 IconButton(
                   icon: const Icon(Icons.delete_outline),
-                  tooltip: 'Delete annotation',
+                  tooltip: switch (controller.selectedAnnotationSlots.length) {
+                    1 => 'Delete annotation',
+                    final n => 'Delete $n annotations',
+                  },
                   onPressed: controller.deleteSelected,
                 ),
                 if (controller.canEditSelectedText)

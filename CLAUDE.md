@@ -408,3 +408,40 @@ toolbar's Scrollable (the row overflows 800px); dialog-dismiss asserts
 need two pumps (one starts the route pop, one finishes it); tests seed
 SharedPreferences.setMockInitialValues({}) since the mock store is
 process-global.
+Selection model overhaul (session 1 of batch 2): the controller's
+selection is an ordered slot list (`_selected`, last = primary;
+`selectedAnnotationSlots` / `hasAnnotationSelection` /
+`isAnnotationSelected` / `annotationAt(page, slot)`); pages are cached
+per revision (`_page()` / `_pageCache`, cleared in
+`_invalidateElements`) because `PdfDocument.page()` re-walks the tree
+and re-parses /Annots on every call and selection hit tests run per
+pointer event. `selectAnnotationAt(toggle:)` is shift/⌘/ctrl-click
+(toggle miss leaves the selection alone), `selectAnnotationsIn` is the
+marquee (rect-intersect), `selectAllAnnotationsOn` is ⌘A;
+`moveSelected`/`deleteSelected` act on the whole selection in one
+apply (single undo); resize/rotate/text-edit/restyle gates demand
+exactly one selected; `deleteAnnotation` remaps surviving same-page
+slots past the removed index (slot−1) so the selection follows the
+annotation. Overlay: `_selectMode` = select tool armed OR a tool-null
+selection — the viewer mounts the overlay for `hasAnnotationSelection`
+too, which is how default-mode mouse selection gets move/resize/
+marquee; empty-area drags marquee for mouse-like kinds
+(DragStartDetails.kind, null treated as mouse) and pan the viewer for
+touch via `onPanViewport` (viewer `_grabPanBy` = negated
+`_scrollbarScrollBy`/`_scrollbarPanBy`, list-space deltas); dragging
+an unselected annotation selects it and moves it in the same gesture;
+the ghost rides only single selections (multi moves as chrome boxes —
+painter `extraSelectionRects` + `marqueeRect`). Viewer: a default-mode
+mouse tap selects annotations (`_lastPointerKind` from the raw
+pointer-down — tap details carry no device kind; touch taps stay
+reader gestures), mouse drags from empty/textless space grab-pan
+(`_grabPanning` in the selection pan handlers, grab/grabbing cursors;
+hover shows `click` over selectable annotations and links, `text`
+over text), ⌘A/Ctrl+A → `_onSelectAll` (all annotations on the
+current page when the select tool or a selection is live, else the
+page's whole text). Test gotchas (editing_multiselect_test.dart,
+pdf_viewer_test.dart): MouseRegion.onHover doesn't fire for
+addPointer — moveTo somewhere first or the cursor assert reads the
+initial value; tapAt(kind: PointerDeviceKind.mouse) resolves without
+the 350ms double-tap wait (that recognizer is touch/stylus-only); the
+hover-test "empty area" points must sit inside the 800×600 viewport.

@@ -222,11 +222,12 @@ void main() {
       expect(editing.selectedAnnotationSlot, (0, 1));
       expect(editing.selectAnnotation(0, 5), isFalse);
 
-      // deleting slot 0 shifts the circle into it; the stale selection
-      // (slot 1) no longer resolves and is dropped
+      // deleting slot 0 shifts the circle into it; the selection is
+      // remapped to follow the annotation, not the stale slot number
       editing.deleteAnnotation(0, 0);
       expect(editing.document.page(0).annotations.single.subtype, 'Circle');
-      expect(editing.selectedAnnotation, isNull);
+      expect(editing.selectedAnnotationSlot, (0, 0));
+      expect(editing.selectedAnnotation!.subtype, 'Circle');
     });
 
     test('selectAnnotation refuses links and widgets', () {

@@ -137,6 +137,17 @@ match the app) — a pure display setting that leaves the document
 untouched, mirrored by the thumbnails and the eyedropper, persisted via
 `PdfEditingPreferences.pageColor`, and exposed in the example app
 through a color-picker button in the app bar.
+The selection model is desktop-grade. With a mouse, selection is the
+default mode: clicking an annotation selects it with no tool armed,
+dragging empty page area grab-pans the document, and the cursor tells
+the story — a pointer over annotations, an I-beam over text, an open
+hand over pannable space. Annotations multi-select like desktop apps:
+drag a rubber band across them, shift/⌘-click to toggle one in and
+out, ⌘A/Ctrl+A to select every annotation on the page (with no select
+tool in play it selects the page's text instead). A multi-selection
+moves as a group and deletes as a group — one undo step — and while
+the select tool is armed, touch drags on empty page area still scroll
+the document, so selecting and getting around never fight each other.
 Text boxes are written and edited in place, like a desktop editor:
 dragging out the free-text tool opens an inline editor right on the
 page — same font, size, and color the committed annotation will have —

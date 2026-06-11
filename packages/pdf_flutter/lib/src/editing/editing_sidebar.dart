@@ -91,7 +91,7 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
       });
 
   Widget _tile(BuildContext context, int pageIndex, int index,
-      PdfAnnotation annotation, (int, int)? selected) {
+      PdfAnnotation annotation) {
     final slot = (pageIndex, index);
     final selectable = !_unselectable.contains(annotation.subtype);
     // on widgets /T is the field name, not an author
@@ -113,7 +113,9 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
       subtitle: detail.isEmpty
           ? null
           : Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis),
-      selected: !_selecting && selected == slot,
+      // viewer multi-selection shows here too
+      selected:
+          !_selecting && widget.controller.isAnnotationSelected(pageIndex, index),
       onTap: _selecting
           ? (selectable ? () => _toggle(slot) : null)
           : () {
@@ -182,7 +184,6 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
               _checked.clear();
               _selecting = false;
             }
-            final selected = widget.controller.selectedAnnotationSlot;
             final children = <Widget>[];
             for (var page = 0; page < document.pageCount; page++) {
               final annotations = document.page(page).annotations;
@@ -190,7 +191,7 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
               for (var i = 0; i < annotations.length; i++) {
                 final annotation = annotations[i];
                 if (_unlisted.contains(annotation.subtype)) continue;
-                tiles.add(_tile(context, page, i, annotation, selected));
+                tiles.add(_tile(context, page, i, annotation));
               }
               if (tiles.isNotEmpty) {
                 children

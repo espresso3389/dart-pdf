@@ -382,6 +382,14 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   bool _wordDrag = false;
   ((int, int), (int, int))? _wordAnchor;
 
+  /// The device kind of the latest pointer down — tap callbacks don't
+  /// carry one, and default-mode annotation selection is mouse-only.
+  PointerDeviceKind? _lastPointerKind;
+
+  /// A mouse drag that started on empty page area (no text under the
+  /// press) grab-pans the document instead of selecting text.
+  bool _grabPanning = false;
+
   /// Set when a raw-pointer gesture (mouse double-click word select) has
   /// consumed the press, so the tap recognizer's late-firing callback for
   /// the same press must not clear it again. Reset on every pointer down.
@@ -822,7 +830,23 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     }
     _clearSelection();
     final annotation = _annotationAt(details.localPosition);
-    if (annotation != null) _activate(annotation);
+    if (annotation != null) {
+      _activate(annotation);
+      return;
+    }
+    // selection is the default mode for mice: clicking an annotation
+    // selects it without arming a tool (the editing overlay then mounts
+    // and takes over until the selection is cleared)
+    final editing = widget.editing;
+    if (editing != null &&
+        editing.tool == null &&
+        !editing.isPickingColor &&
+        _lastPointerKind == PointerDeviceKind.mouse) {
+      final point = _pagePointAt(details.localPosition);
+      if (point != null) {
+        editing.selectAnnotationAt(point.$1, point.$2, point.$3);
+      }
+    }
   }
 
   void _activate(PdfAnnotation annotation) {
@@ -871,16 +895,50 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     );
   }
 
+  /// Whether the point sits over an annotation a default-mode mouse
+  /// click would select.
+  bool _selectableAnnotationAt(Offset local) {
+    final editing = widget.editing;
+    if (editing == null || editing.tool != null) return false;
+    final point = _pagePointAt(local);
+    return point != null &&
+        editing.selectableAnnotationAt(point.$1, point.$2, point.$3) != null;
+  }
+
   void _onHover(PointerHoverEvent event) {
+    if (_grabPanning) return; // grabbing keeps its cursor mid-drag
     final MouseCursor cursor;
-    if (_annotationAt(event.localPosition) != null) {
+    if (_annotationAt(event.localPosition) != null ||
+        _selectableAnnotationAt(event.localPosition)) {
       cursor = SystemMouseCursors.click;
     } else if (_textPositionAt(event.localPosition, tolerance: 8) != null) {
       cursor = SystemMouseCursors.text;
     } else {
-      cursor = MouseCursor.defer;
+      // empty page or canvas: a mouse drag grab-pans the document
+      cursor = SystemMouseCursors.grab;
     }
     if (cursor != _hoverCursor) setState(() => _hoverCursor = cursor);
+  }
+
+  /// ⌘A/Ctrl+A: with the select tool armed (or an annotation selection
+  /// in play) selects every annotation on the current page; otherwise
+  /// selects the current page's whole text.
+  void _onSelectAll() {
+    final page = _controller.currentPage;
+    final editing = widget.editing;
+    if (editing != null &&
+        (editing.tool == PdfEditTool.select || editing.hasAnnotationSelection)) {
+      editing.selectAllAnnotationsOn(page);
+      return;
+    }
+    final length = _pageText(page).text.length;
+    if (length == 0) return;
+    _wordAnchor = null;
+    setState(() {
+      _selAnchor = (page, 0);
+      _selFocus = (page, length);
+    });
+    _controller._setSelection(_selectedText());
   }
 
   /// Escape backs out of editing state layer by layer before it clears
@@ -893,7 +951,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
         editing.cancelColorPick();
         return;
       }
-      if (editing.selectedAnnotation != null) {
+      if (editing.hasAnnotationSelection) {
         editing.clearAnnotationSelection();
         return;
       }
@@ -915,6 +973,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
 
   void _onPointerDown(PointerDownEvent event) {
     _suppressTap = false;
+    _lastPointerKind = event.kind;
     _panFlinger.stop();
     // a raw listener fires regardless of who wins the gesture arena, so
     // clicking anywhere — including editing overlays — focuses the viewer
@@ -970,6 +1029,14 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     }
     _wordAnchor = null;
     final position = _textPositionAt(details.localPosition, tolerance: 14);
+    if (position == null) {
+      // nothing to select under the press: the drag grabs the document
+      // instead (mouse drags don't reach the list's scrollable)
+      _grabPanning = true;
+      setState(() => _hoverCursor = SystemMouseCursors.grabbing);
+      _controller._setSelection('');
+      return;
+    }
     setState(() {
       _selAnchor = position;
       _selFocus = position;
@@ -978,6 +1045,10 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   }
 
   void _onSelectionUpdate(DragUpdateDetails details) {
+    if (_grabPanning) {
+      _grabPanBy(details.delta);
+      return;
+    }
     final wordAnchor = _wordAnchor;
     if (wordAnchor != null) {
       // word granularity: span from the anchor word through the word
@@ -1002,6 +1073,21 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     if (position == null || position == _selFocus) return;
     setState(() => _selFocus = position);
     _controller._setSelection(_selectedText());
+  }
+
+  void _onSelectionEnd(DragEndDetails details) {
+    if (!_grabPanning) return;
+    _grabPanning = false;
+    setState(() => _hoverCursor = SystemMouseCursors.grab);
+  }
+
+  /// Grab panning: moves the document with the pointer. Deltas are in
+  /// list-space pixels (the gesture detector sits inside the zoom
+  /// transform); the scroll extents absorb what they can and the rest
+  /// pans the zoom window, like the scrollbars.
+  void _grabPanBy(Offset delta) {
+    _scrollbarScrollBy(-delta.dy);
+    _scrollbarPanBy(-delta.dx);
   }
 
   void _clearSelection() {
@@ -1357,6 +1443,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                 editing: editing,
                 editingTextPrompt:
                     widget.editingTextPrompt ?? showPdfTextPrompt,
+                onPanViewport: _grabPanBy,
               ),
             ),
           ),
@@ -1377,6 +1464,10 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                     _controller.copySelection,
                 const SingleActivator(LogicalKeyboardKey.keyC, control: true):
                     _controller.copySelection,
+                const SingleActivator(LogicalKeyboardKey.keyA, meta: true):
+                    _onSelectAll,
+                const SingleActivator(LogicalKeyboardKey.keyA, control: true):
+                    _onSelectAll,
                 const SingleActivator(LogicalKeyboardKey.escape): _onEscape,
                 if (editing != null) ...{
                   const SingleActivator(LogicalKeyboardKey.keyZ, meta: true):
@@ -1502,6 +1593,9 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                             onTapUp: _onTapUp,
                             onPanStart: _onSelectionStart,
                             onPanUpdate: _onSelectionUpdate,
+                            onPanEnd: _onSelectionEnd,
+                            onPanCancel: () =>
+                                _onSelectionEnd(DragEndDetails()),
                             child: ColoredBox(
                               color: canvasColor,
                               // with ctrl/cmd held the list stops claiming wheel
@@ -1567,6 +1661,7 @@ class _PdfViewerPage extends StatelessWidget {
     required this.overlayBuilder,
     required this.editing,
     required this.editingTextPrompt,
+    required this.onPanViewport,
   });
 
   final PdfPage page;
@@ -1580,6 +1675,7 @@ class _PdfViewerPage extends StatelessWidget {
   final PdfPageOverlayBuilder? overlayBuilder;
   final PdfEditingController? editing;
   final PdfTextPrompt editingTextPrompt;
+  final void Function(Offset delta) onPanViewport;
 
   @override
   Widget build(BuildContext context) {
@@ -1620,18 +1716,22 @@ class _PdfViewerPage extends StatelessWidget {
               if (editing != null)
                 ListenableBuilder(
                   listenable: editing!,
-                  builder: (context, _) =>
-                      editing!.tool == null && !editing!.isPickingColor
-                          ? const SizedBox.shrink()
-                          : Positioned.fill(
-                              child: EditingPageOverlay(
-                                controller: editing!,
-                                pageIndex: index,
-                                geometry: geometry,
-                                textPrompt: editingTextPrompt,
-                                pageColor: pageColor,
-                              ),
-                            ),
+                  // mounted for an armed tool, the eyedropper, or a
+                  // default-mode (mouse click) annotation selection
+                  builder: (context, _) => editing!.tool == null &&
+                          !editing!.isPickingColor &&
+                          !editing!.hasAnnotationSelection
+                      ? const SizedBox.shrink()
+                      : Positioned.fill(
+                          child: EditingPageOverlay(
+                            controller: editing!,
+                            pageIndex: index,
+                            geometry: geometry,
+                            textPrompt: editingTextPrompt,
+                            pageColor: pageColor,
+                            onPanViewport: onPanViewport,
+                          ),
+                        ),
                 ),
             ]);
           }),

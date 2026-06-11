@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -27,6 +28,7 @@ class EditingPageOverlay extends StatefulWidget {
     required this.geometry,
     required this.textPrompt,
     this.pageColor = const Color(0xFFFFFFFF),
+    this.onPanViewport,
   });
 
   final PdfEditingController controller;
@@ -37,6 +39,12 @@ class EditingPageOverlay extends StatefulWidget {
   /// The paper color the page is displayed with — the eyedropper's
   /// raster must match what's on screen.
   final Color pageColor;
+
+  /// Pans the viewer by a pointer delta (this overlay's local space).
+  /// Lets a drag on empty page area scroll the document even though the
+  /// overlay's recognizers won the arena — grab panning and annotation
+  /// selection co-existing in the select tool.
+  final void Function(Offset delta)? onPanViewport;
 
   @override
   State<EditingPageOverlay> createState() => _EditingPageOverlayState();
@@ -106,6 +114,14 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   _Handle? _resizeHandle;
   Rect? _resizeRect;
 
+  // rubber-band selection (mouse drags on empty page area)
+  Offset? _marqueeStart;
+  Offset? _marqueeCurrent;
+  bool _marqueeAdd = false;
+
+  // touch drags on empty page area pan the viewer instead
+  bool _viewportPanning = false;
+
   // rotate drag: the pointer's start angle about the selection center,
   // and the current delta (view space, clockwise positive — y is down)
   double? _rotateStartAngle;
@@ -121,8 +137,24 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   PdfEditingController get _controller => widget.controller;
   PdfPageGeometry get _geometry => widget.geometry;
 
-  /// Null only while the eyedropper is armed without a tool.
+  /// Null while the eyedropper is armed without a tool, or while a
+  /// default-mode (mouse click) selection exists without one.
   PdfEditTool? get _tool => _controller.tool;
+
+  /// Select-tool behavior applies: the tool is armed, or an annotation
+  /// was selected in default mode (no tool) by a mouse click — the
+  /// selection needs its move/resize/marquee interactions either way.
+  bool get _selectMode =>
+      _tool == PdfEditTool.select ||
+      (_tool == null && _controller.hasAnnotationSelection);
+
+  /// Shift/⌘/Ctrl held — a click toggles membership, a marquee adds.
+  static bool get _additiveModifier {
+    final keyboard = HardwareKeyboard.instance;
+    return keyboard.isShiftPressed ||
+        keyboard.isMetaPressed ||
+        keyboard.isControlPressed;
+  }
 
   static double? _normalizedPressure(PointerEvent event) =>
       event.pressureMax > event.pressureMin
@@ -155,12 +187,23 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     if (_controller.isPickingColor) _updatePickPreview(event.localPosition);
   }
 
-  /// The selected annotation's view rect when it lives on this page.
+  /// The primary selected annotation's view rect when it lives on this
+  /// page — the one that gets resize/rotate handles (single selection).
   Rect? get _selectedViewRect {
     if (_controller.selectedPage != widget.pageIndex) return null;
     final annotation = _controller.selectedAnnotation;
     return annotation == null ? null : _geometry.toViewRect(annotation.rect);
   }
+
+  /// Every selected annotation's view rect on this page, in selection
+  /// order (so the primary is last).
+  List<Rect> get _selectedViewRects => [
+        for (final slot in _controller.selectedAnnotationSlots)
+          if (slot.$1 == widget.pageIndex)
+            if (_controller.annotationAt(slot.$1, slot.$2)
+                case final annotation?)
+              _geometry.toViewRect(annotation.rect)
+      ];
 
   /// The selected content element's view rect when it lives on this page.
   Rect? get _selectedElementViewRect {
@@ -175,7 +218,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   /// revision or the selection changes; called from [build] so the
   /// picture is usually ready before a drag starts.
   void _ensureGhost() {
-    final slot = _controller.selectedAnnotationSlot;
+    // only a single selection drags with its artwork; a multi-selection
+    // moves as plain chrome boxes
+    final slot = _controller.selectedAnnotationSlots.length == 1
+        ? _controller.selectedAnnotationSlot
+        : null;
     final document = _controller.document;
     if (slot == null || slot.$1 != widget.pageIndex) {
       _ghost?.dispose();
@@ -345,31 +392,15 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       _commitTextEdit();
       return;
     }
+    if (_selectMode) {
+      _selectPanStart(details);
+      return;
+    }
     switch (_tool) {
       case null:
         break; // eyedropper only — taps, no drags
       case PdfEditTool.select:
-        final selected = _selectedViewRect;
-        if (selected == null) return;
-        final handle = _handleAt(selected, position);
-        if (handle != null) {
-          setState(() {
-            _resizeHandle = handle;
-            _resizeRect = selected;
-            _moveStart = position;
-            _moveCurrent = position;
-          });
-        } else if (_hitsRotateHandle(selected, position)) {
-          setState(() {
-            _rotateStartAngle = (position - selected.center).direction;
-            _rotateDelta = 0;
-          });
-        } else if (selected.contains(position)) {
-          setState(() {
-            _moveStart = position;
-            _moveCurrent = position;
-          });
-        }
+        break; // handled by _selectPanStart above
       case PdfEditTool.ink:
         final pressure = _pointerPressure;
         setState(() {
@@ -391,8 +422,77 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     }
   }
 
+  /// Select-mode drags, by what's under the press: a handle resizes, the
+  /// rotate knob spins, a selected annotation moves the whole selection,
+  /// an unselected one is selected and moved in the same drag. Empty
+  /// page area drags a rubber band with a mouse and pans the viewer with
+  /// touch (so the document stays scrollable while selecting).
+  void _selectPanStart(DragStartDetails details) {
+    final position = details.localPosition;
+    final selected = _selectedViewRect;
+    if (selected != null) {
+      final handle = _handleAt(selected, position);
+      if (handle != null) {
+        setState(() {
+          _resizeHandle = handle;
+          _resizeRect = selected;
+          _moveStart = position;
+          _moveCurrent = position;
+        });
+        return;
+      }
+      if (_hitsRotateHandle(selected, position)) {
+        setState(() {
+          _rotateStartAngle = (position - selected.center).direction;
+          _rotateDelta = 0;
+        });
+        return;
+      }
+    }
+    // dragging any selected annotation moves the whole selection
+    for (final rect in _selectedViewRects) {
+      if (rect.contains(position)) {
+        setState(() {
+          _moveStart = position;
+          _moveCurrent = position;
+        });
+        return;
+      }
+    }
+    final (x, y) = _geometry.toPagePoint(position);
+    if (_controller.selectableAnnotationAt(widget.pageIndex, x, y) != null) {
+      // grab an unselected annotation: select it and move it in one drag
+      _controller.selectAnnotationAt(widget.pageIndex, x, y);
+      setState(() {
+        _moveStart = position;
+        _moveCurrent = position;
+      });
+      return;
+    }
+    final mouseLike = details.kind == null ||
+        details.kind == PointerDeviceKind.mouse ||
+        details.kind == PointerDeviceKind.trackpad;
+    if (mouseLike) {
+      setState(() {
+        _marqueeStart = position;
+        _marqueeCurrent = position;
+        _marqueeAdd = _additiveModifier;
+      });
+    } else if (widget.onPanViewport != null) {
+      _viewportPanning = true;
+    }
+  }
+
   void _panUpdate(DragUpdateDetails details) {
     final position = details.localPosition;
+    if (_viewportPanning) {
+      widget.onPanViewport?.call(details.delta);
+      return;
+    }
+    if (_marqueeStart != null) {
+      setState(() => _marqueeCurrent = position);
+      return;
+    }
     if (_rotateStartAngle != null) {
       final selected = _selectedViewRect;
       if (selected == null) return;
@@ -426,6 +526,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     final resizeRect = _resizeHandle != null ? _resizeRect : null;
     final rotating = _rotateStartAngle != null;
     final rotateDelta = _rotateDelta;
+    final marquee = _marqueeStart != null && _marqueeCurrent != null
+        ? Rect.fromPoints(_marqueeStart!, _marqueeCurrent!)
+        : null;
+    final marqueeAdd = _marqueeAdd;
+    final panned = _viewportPanning;
     setState(() {
       _activeStroke = null;
       _activeStrokePressures = null;
@@ -437,8 +542,20 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       _resizeRect = null;
       _rotateStartAngle = null;
       _rotateDelta = 0;
+      _marqueeStart = null;
+      _marqueeCurrent = null;
+      _marqueeAdd = false;
+      _viewportPanning = false;
     });
 
+    if (panned) return;
+    if (marquee != null) {
+      if (marquee.width < 4 && marquee.height < 4) return; // a click
+      _controller.selectAnnotationsIn(
+          widget.pageIndex, _geometry.toPageRect(marquee),
+          add: marqueeAdd);
+      return;
+    }
     if (rotating) {
       // view-space clockwise (y down) is page-space clockwise, and PDF
       // rotation is counterclockwise-positive — hence the sign flip
@@ -554,19 +671,27 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       return;
     }
     final (x, y) = _geometry.toPagePoint(details.localPosition);
+    if (_selectMode) {
+      // tapping the already-selected free text edits it in place,
+      // like clicking into a text box in any editor
+      if (_controller.selectedAnnotationSlots.length == 1 &&
+          _controller.selectedAnnotationSlot?.$1 == widget.pageIndex &&
+          _controller.selectedAnnotation?.subtype == 'FreeText' &&
+          !_additiveModifier &&
+          (_selectedViewRect?.contains(details.localPosition) ?? false)) {
+        _openTextEditor(_selectedViewRect!, existing: true);
+        return;
+      }
+      // shift/⌘-click toggles membership in the selection
+      _controller.selectAnnotationAt(widget.pageIndex, x, y,
+          toggle: _additiveModifier);
+      return;
+    }
     switch (_tool) {
       case null:
         break;
       case PdfEditTool.select:
-        // tapping the already-selected free text edits it in place,
-        // like clicking into a text box in any editor
-        if (_controller.selectedAnnotationSlot?.$1 == widget.pageIndex &&
-            _controller.selectedAnnotation?.subtype == 'FreeText' &&
-            (_selectedViewRect?.contains(details.localPosition) ?? false)) {
-          _openTextEditor(_selectedViewRect!, existing: true);
-          return;
-        }
-        _controller.selectAnnotationAt(widget.pageIndex, x, y);
+        break; // handled above
       case PdfEditTool.content:
         _controller.selectElementAt(widget.pageIndex, x, y);
       case PdfEditTool.note:
@@ -589,7 +714,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     if (_controller.isPickingColor) {
       _updatePickPreview(event.localPosition);
       cursor = SystemMouseCursors.precise;
-    } else if (_tool == PdfEditTool.select) {
+    } else if (_selectMode) {
       final selected = _selectedViewRect;
       final handle =
           selected == null ? null : _handleAt(selected, event.localPosition);
@@ -603,10 +728,17 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       } else if (selected != null &&
           _hitsRotateHandle(selected, event.localPosition)) {
         cursor = SystemMouseCursors.grab;
-      } else if (selected != null && selected.contains(event.localPosition)) {
+      } else if (_selectedViewRects
+          .any((rect) => rect.contains(event.localPosition))) {
         cursor = SystemMouseCursors.move;
       } else {
-        cursor = SystemMouseCursors.basic;
+        final (x, y) = _geometry.toPagePoint(event.localPosition);
+        // a pointer over a selectable annotation, a crosshair-ish basic
+        // over empty page (a drag there rubber-bands)
+        cursor =
+            _controller.selectableAnnotationAt(widget.pageIndex, x, y) != null
+                ? SystemMouseCursors.click
+                : SystemMouseCursors.basic;
       }
     } else if (_tool == PdfEditTool.note) {
       cursor = SystemMouseCursors.click;
@@ -646,6 +778,15 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
         _resizeHandle == null && _moveStart != null && _moveCurrent != null
             ? _moveCurrent! - _moveStart!
             : Offset.zero;
+    // the rest of a multi-selection on this page: chrome boxes without
+    // handles, riding along with a move drag
+    final allSelected = _selectedViewRects;
+    final extraSelected = [
+      for (final rect in selected == null
+          ? allSelected
+          : allSelected.sublist(0, allSelected.length - 1))
+        rect.shift(moveDelta)
+    ];
     final rotating = _rotateStartAngle != null;
     final dragging =
         _resizeHandle != null || moveDelta != Offset.zero || rotating;
@@ -711,6 +852,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
                   selectionRect: _resizeHandle != null
                       ? _resizeRect
                       : selected?.shift(moveDelta),
+                  extraSelectionRects: extraSelected,
+                  marqueeRect: _marqueeStart != null && _marqueeCurrent != null
+                      ? Rect.fromPoints(_marqueeStart!, _marqueeCurrent!)
+                      : null,
                   ghost: _ghost,
                   ghostFrom: selected,
                   dragging: dragging,
@@ -838,6 +983,8 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.pressures,
     required this.dragRect,
     required this.selectionRect,
+    required this.extraSelectionRects,
+    required this.marqueeRect,
     required this.ghost,
     required this.ghostFrom,
     required this.dragging,
@@ -859,6 +1006,13 @@ class _EditingPreviewPainter extends CustomPainter {
 
   final Rect? dragRect;
   final Rect? selectionRect;
+
+  /// The non-primary members of a multi-selection on this page: chrome
+  /// boxes without handles.
+  final List<Rect> extraSelectionRects;
+
+  /// The select tool's in-flight rubber band.
+  final Rect? marqueeRect;
 
   /// The selected annotation's appearance in page raster space, and its
   /// resting view rect — drawn stretched onto [selectionRect] while
@@ -957,6 +1111,28 @@ class _EditingPreviewPainter extends CustomPainter {
       }
     }
 
+    for (final rect in extraSelectionRects) {
+      final box = rect.inflate(2);
+      canvas.drawRect(box, Paint()..color = const Color(0x1A1E88E5));
+      canvas.drawRect(
+          box,
+          Paint()
+            ..color = _chrome
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5);
+    }
+
+    final marquee = marqueeRect;
+    if (marquee != null) {
+      canvas.drawRect(marquee, Paint()..color = const Color(0x141E88E5));
+      canvas.drawRect(
+          marquee,
+          Paint()
+            ..color = _chrome
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1);
+    }
+
     final selection = selectionRect;
     final ghost = this.ghost;
     final ghostFrom = this.ghostFrom;
@@ -1033,6 +1209,8 @@ class _EditingPreviewPainter extends CustomPainter {
       oldDelegate.strokeWidth != strokeWidth ||
       oldDelegate.dragRect != dragRect ||
       oldDelegate.selectionRect != selectionRect ||
+      !listEquals(oldDelegate.extraSelectionRects, extraSelectionRects) ||
+      oldDelegate.marqueeRect != marqueeRect ||
       oldDelegate.ghost != ghost ||
       oldDelegate.ghostFrom != ghostFrom ||
       oldDelegate.dragging != dragging ||

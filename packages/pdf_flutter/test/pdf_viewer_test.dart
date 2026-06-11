@@ -255,7 +255,11 @@ void main() {
     await gesture.addPointer(location: view(300, 500)); // empty page area
     addTearDown(gesture.removePointer);
     await tester.pump();
-    expect(region().cursor, MouseCursor.defer);
+    // onHover fires on moves, not on the pointer appearing
+    await gesture.moveTo(view(301, 500));
+    await tester.pump();
+    // empty page area: a drag grab-pans, so the cursor advertises it
+    expect(region().cursor, SystemMouseCursors.grab);
 
     await gesture.moveTo(view(100, 720)); // over 'Page 1'
     await tester.pump();
@@ -263,7 +267,7 @@ void main() {
 
     await gesture.moveTo(view(300, 500));
     await tester.pump();
-    expect(region().cursor, MouseCursor.defer);
+    expect(region().cursor, SystemMouseCursors.grab);
 
     // leaving the viewer entirely must also reset the cursor
     await gesture.moveTo(view(100, 720));
@@ -744,10 +748,14 @@ void main() {
 
     final gesture =
         await tester.createGesture(kind: PointerDeviceKind.mouse, pointer: 9);
-    await gesture.addPointer(location: annotView(400, 300)); // empty area
+    // an empty area inside the 800x600 test viewport (y=300 sits below it)
+    await gesture.addPointer(location: annotView(450, 690));
     addTearDown(gesture.removePointer);
     await tester.pump();
-    expect(region().cursor, MouseCursor.defer);
+    // onHover fires on moves, not on the pointer appearing
+    await gesture.moveTo(annotView(451, 690));
+    await tester.pump();
+    expect(region().cursor, SystemMouseCursors.grab);
 
     await gesture.moveTo(annotView(136, 652)); // over the URI link
     await tester.pump();
@@ -757,9 +765,10 @@ void main() {
     await tester.pump();
     expect(region().cursor, SystemMouseCursors.text);
 
-    await gesture.moveTo(annotView(350, 612)); // hidden link: no cursor
+    await gesture.moveTo(annotView(350, 612)); // hidden link: grab like
+    // any other empty area
     await tester.pump();
-    expect(region().cursor, MouseCursor.defer);
+    expect(region().cursor, SystemMouseCursors.grab);
   });
 
   testWidgets('jumpToPage scrolls to the requested page', (tester) async {

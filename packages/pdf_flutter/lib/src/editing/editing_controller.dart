@@ -138,7 +138,7 @@ class PdfEditingController extends ChangeNotifier {
   void _reopen() {
     _document = PdfDocument.open(bytes, password: _password);
     // the same /Annots slot may hold a different annotation now
-    _selected = null;
+    _selected.clear();
     _invalidateElements();
     notifyListeners();
   }
@@ -156,12 +156,16 @@ class PdfEditingController extends ChangeNotifier {
     _bytes = saved;
     _revisions.add(saved.length);
     _cursor++;
-    final selected = _selected;
+    final selected = List.of(_selected);
     _document = PdfDocument.open(bytes, password: _password);
     // annotations keep their /Annots slot across move/resize edits, so a
     // still-valid selection survives the document swap
-    _selected =
-        selected != null && _annotationAt(selected) != null ? selected : null;
+    _selected
+      ..clear()
+      ..addAll([
+        for (final slot in selected)
+          if (_annotationAt(slot) != null) slot
+      ]);
     _invalidateElements();
     notifyListeners();
     return true;
@@ -180,7 +184,7 @@ class PdfEditingController extends ChangeNotifier {
     // leaving the ink tool commits the drawing, like lifting the pen
     if (_tool == PdfEditTool.ink && value != PdfEditTool.ink) finishInk();
     _tool = value;
-    if (value != PdfEditTool.select) _selected = null;
+    if (value != PdfEditTool.select) _selected.clear();
     if (value != PdfEditTool.content) _selectedElement = null;
     notifyListeners();
   }
@@ -422,7 +426,7 @@ class PdfEditingController extends ChangeNotifier {
   bool placeSignature(int pageIndex, double x, double y, {double width = 160}) {
     final signature = preferences.signature;
     if (signature == null) return false;
-    final box = _document.page(pageIndex).cropBox;
+    final box = _page(pageIndex).cropBox;
     final aspect = signature.aspect > 0 ? signature.aspect : 2.0;
     var w = width.clamp(8.0, box.width * 0.9);
     var h = w / aspect;
@@ -493,7 +497,7 @@ class PdfEditingController extends ChangeNotifier {
   bool placeStamp(int pageIndex, double x, double y, {double height = 40}) {
     final stamp = _activeStamp;
     if (stamp == null) return false;
-    final box = _document.page(pageIndex).cropBox;
+    final box = _page(pageIndex).cropBox;
     final h = height.clamp(8.0, box.height * 0.9);
     // mirror addStamp's appearance math (6pt padding, text 72% of the
     // height) so the caption fills the box without shrinking
@@ -523,7 +527,7 @@ class PdfEditingController extends ChangeNotifier {
   /// page-indexed slot) is cleared first.
   void movePage(int from, int to) {
     if (from == to) return;
-    _selected = null;
+    _selected.clear();
     apply((e) => e.movePage(from, to));
   }
 
@@ -531,7 +535,7 @@ class PdfEditingController extends ChangeNotifier {
   /// a document must keep at least one.
   void removePage(int index) {
     if (_document.pageCount <= 1) return;
-    _selected = null;
+    _selected.clear();
     apply((e) => e.removePage(index));
   }
 
@@ -550,61 +554,154 @@ class PdfEditingController extends ChangeNotifier {
   /// Subtypes whose text the controller can rewrite in place.
   static const _textEditable = {'FreeText', 'Stamp', 'Text'};
 
-  (int page, int index)? _selected;
+  /// Selected (page, /Annots slot) pairs in selection order; the last
+  /// one is the primary selection (the one handles and text edits act
+  /// on when exactly one is selected).
+  final List<(int page, int index)> _selected = [];
+
+  /// Pages cached per revision: [PdfDocument.page] rebuilds the page
+  /// (and its lazily parsed annotation list) on every call, and the
+  /// selection hit tests run per pointer event.
+  final Map<int, PdfPage> _pageCache = {};
+
+  PdfPage _page(int index) =>
+      _pageCache.putIfAbsent(index, () => _document.page(index));
 
   PdfAnnotation? _annotationAt((int, int) selected) {
     final (page, index) = selected;
     if (page < 0 || page >= _document.pageCount) return null;
-    final annotations = _document.page(page).annotations;
+    final annotations = _page(page).annotations;
     return index < annotations.length ? annotations[index] : null;
   }
 
+  /// The annotation in slot [index] of [pageIndex]'s /Annots at the
+  /// current revision, or null for invalid slots.
+  PdfAnnotation? annotationAt(int pageIndex, int index) =>
+      _annotationAt((pageIndex, index));
+
   /// The selected annotation, resolved against the current revision.
-  PdfAnnotation? get selectedAnnotation {
-    final selected = _selected;
-    return selected == null ? null : _annotationAt(selected);
-  }
+  /// With several selected, the primary (most recently selected) one.
+  PdfAnnotation? get selectedAnnotation =>
+      _selected.isEmpty ? null : _annotationAt(_selected.last);
 
-  /// The page the selected annotation lives on.
-  int? get selectedPage => selectedAnnotation == null ? null : _selected!.$1;
+  /// The page the (primary) selected annotation lives on.
+  int? get selectedPage =>
+      selectedAnnotation == null ? null : _selected.last.$1;
 
-  /// (pageIndex, /Annots slot) of the selected annotation, for comparing
-  /// against a list position (the annotation sidebar's selected tile).
+  /// (pageIndex, /Annots slot) of the primary selected annotation, for
+  /// comparing against a list position (the annotation sidebar's
+  /// selected tile).
   (int page, int index)? get selectedAnnotationSlot =>
-      selectedAnnotation == null ? null : _selected;
+      selectedAnnotation == null ? null : _selected.last;
 
+  /// Every selected (pageIndex, /Annots slot), in selection order.
+  List<(int page, int index)> get selectedAnnotationSlots =>
+      List.unmodifiable(_selected);
+
+  bool get hasAnnotationSelection => selectedAnnotation != null;
+
+  /// Whether the annotation in slot [index] of [pageIndex]'s /Annots is
+  /// part of the selection.
+  bool isAnnotationSelected(int pageIndex, int index) =>
+      _selected.contains((pageIndex, index));
+
+  /// Resizing manipulates one /Rect; only a single selection has handles.
   bool get canResizeSelected =>
-      _resizable.contains(selectedAnnotation?.subtype);
+      _selected.length == 1 && _resizable.contains(selectedAnnotation?.subtype);
 
   /// Rotation rides the appearance stream's /Matrix, so it needs one.
   bool get canRotateSelected =>
+      _selected.length == 1 &&
       _resizable.contains(selectedAnnotation?.subtype) &&
       selectedAnnotation?.normalAppearance != null;
 
   bool get canEditSelectedText =>
+      _selected.length == 1 &&
       _textEditable.contains(selectedAnnotation?.subtype);
 
-  /// Selects the topmost selectable annotation under ([x], [y]) on
-  /// [pageIndex]; clears the selection when nothing is hit. Returns
-  /// whether an annotation was selected.
-  bool selectAnnotationAt(int pageIndex, double x, double y) {
-    final annotations = _document.page(pageIndex).annotations;
-    // later /Annots entries draw on top, so they win the hit test
+  /// The topmost selectable annotation under ([x], [y]) on [pageIndex],
+  /// with its /Annots slot — the select tool's hit test (later entries
+  /// draw on top, so they win).
+  (int index, PdfAnnotation)? selectableAnnotationAt(
+      int pageIndex, double x, double y) {
+    final annotations = _page(pageIndex).annotations;
     for (var i = annotations.length - 1; i >= 0; i--) {
       final annotation = annotations[i];
       if (annotation.isHidden || _unselectable.contains(annotation.subtype)) {
         continue;
       }
-      if (annotation.rect.contains(x, y)) {
-        if (_selected != (pageIndex, i)) {
-          _selected = (pageIndex, i);
-          notifyListeners();
-        }
-        return true;
+      if (annotation.rect.contains(x, y)) return (i, annotation);
+    }
+    return null;
+  }
+
+  /// Selects the topmost selectable annotation under ([x], [y]) on
+  /// [pageIndex]; clears the selection when nothing is hit. With
+  /// [toggle] (shift/⌘-click) the hit is added to or removed from the
+  /// selection instead, and a miss leaves the selection alone. Returns
+  /// whether an annotation was hit.
+  bool selectAnnotationAt(int pageIndex, double x, double y,
+      {bool toggle = false}) {
+    final hit = selectableAnnotationAt(pageIndex, x, y);
+    if (hit == null) {
+      if (!toggle) clearAnnotationSelection();
+      return false;
+    }
+    final slot = (pageIndex, hit.$1);
+    if (toggle) {
+      if (!_selected.remove(slot)) _selected.add(slot);
+      notifyListeners();
+    } else if (_selected.length != 1 || _selected.single != slot) {
+      _selected
+        ..clear()
+        ..add(slot);
+      notifyListeners();
+    }
+    return true;
+  }
+
+  /// Selects every selectable annotation on [pageIndex] whose rect
+  /// intersects [rect] (page space) — the select tool's rubber band.
+  /// With [add] the hits join the existing selection instead of
+  /// replacing it. Returns how many annotations the band hit.
+  int selectAnnotationsIn(int pageIndex, PdfRect rect, {bool add = false}) {
+    final annotations = _page(pageIndex).annotations;
+    final hits = <(int, int)>[];
+    for (var i = 0; i < annotations.length; i++) {
+      final annotation = annotations[i];
+      if (annotation.isHidden || _unselectable.contains(annotation.subtype)) {
+        continue;
+      }
+      final r = annotation.rect;
+      if (r.left <= rect.right &&
+          r.right >= rect.left &&
+          r.bottom <= rect.top &&
+          r.top >= rect.bottom) {
+        hits.add((pageIndex, i));
       }
     }
-    clearAnnotationSelection();
-    return false;
+    final next = [
+      if (add) ..._selected,
+      for (final hit in hits)
+        if (!add || !_selected.contains(hit)) hit
+    ];
+    if (!listEquals(next, _selected)) {
+      _selected
+        ..clear()
+        ..addAll(next);
+      notifyListeners();
+    }
+    return hits.length;
+  }
+
+  /// Selects every selectable annotation on [pageIndex] (⌘A). Returns
+  /// how many are selected afterwards.
+  int selectAllAnnotationsOn(int pageIndex) {
+    final box = _page(pageIndex).cropBox;
+    return selectAnnotationsIn(
+        pageIndex,
+        PdfRect(box.left - 1e6, box.bottom - 1e6, box.right + 1e6,
+            box.top + 1e6));
   }
 
   /// Selects the annotation in slot [index] of [pageIndex]'s /Annots
@@ -617,8 +714,10 @@ class PdfEditingController extends ChangeNotifier {
       return false;
     }
     tool = PdfEditTool.select;
-    if (_selected != (pageIndex, index)) {
-      _selected = (pageIndex, index);
+    if (_selected.length != 1 || _selected.single != (pageIndex, index)) {
+      _selected
+        ..clear()
+        ..add((pageIndex, index));
       notifyListeners();
     }
     return true;
@@ -629,7 +728,12 @@ class PdfEditingController extends ChangeNotifier {
   void deleteAnnotation(int pageIndex, int index) {
     final annotation = _annotationAt((pageIndex, index));
     if (annotation == null) return;
-    if (_selected == (pageIndex, index)) _selected = null;
+    // removing one /Annots entry shifts the slots after it down by one
+    _selected.remove((pageIndex, index));
+    for (var i = 0; i < _selected.length; i++) {
+      final (page, slot) = _selected[i];
+      if (page == pageIndex && slot > index) _selected[i] = (page, slot - 1);
+    }
     apply((e) => e.removeAnnotation(pageIndex, annotation));
   }
 
@@ -644,7 +748,7 @@ class PdfEditingController extends ChangeNotifier {
     ];
     if (targets.isEmpty) return;
     // surviving annotations may land in different slots
-    _selected = null;
+    _selected.clear();
     apply((e) {
       for (final (page, annotation) in targets) {
         e.removeAnnotation(page, annotation);
@@ -653,17 +757,25 @@ class PdfEditingController extends ChangeNotifier {
   }
 
   void clearAnnotationSelection() {
-    if (_selected == null) return;
-    _selected = null;
+    if (_selected.isEmpty) return;
+    _selected.clear();
     notifyListeners();
   }
 
-  /// Translates the selected annotation by ([dx], [dy]) in page space.
-  /// The selection survives: the annotation keeps its /Annots slot.
+  /// Translates every selected annotation by ([dx], [dy]) in page space,
+  /// as one revision. The selection survives: annotations keep their
+  /// /Annots slots across a move.
   void moveSelected(double dx, double dy) {
-    final annotation = selectedAnnotation;
-    if (annotation == null) return;
-    apply((e) => e.moveAnnotation(_selected!.$1, annotation, dx, dy));
+    final targets = <(int, PdfAnnotation)>[
+      for (final slot in _selected)
+        if (_annotationAt(slot) case final annotation?) (slot.$1, annotation)
+    ];
+    if (targets.isEmpty) return;
+    apply((e) {
+      for (final (page, annotation) in targets) {
+        e.moveAnnotation(page, annotation, dx, dy);
+      }
+    });
   }
 
   /// Resizes the selected annotation so its /Rect becomes [to].
@@ -671,7 +783,7 @@ class PdfEditingController extends ChangeNotifier {
     final annotation = selectedAnnotation;
     if (annotation == null || !canResizeSelected) return;
     if (to.width < 1 || to.height < 1) return;
-    apply((e) => e.resizeAnnotation(_selected!.$1, annotation, to));
+    apply((e) => e.resizeAnnotation(_selected.last.$1, annotation, to));
   }
 
   /// Rotates the selected annotation by [degrees] counterclockwise (page
@@ -680,21 +792,19 @@ class PdfEditingController extends ChangeNotifier {
     final annotation = selectedAnnotation;
     if (annotation == null || !canRotateSelected) return;
     if (degrees.abs() < 0.01) return;
-    apply((e) => e.rotateAnnotation(_selected!.$1, annotation, degrees));
+    apply((e) => e.rotateAnnotation(_selected.last.$1, annotation, degrees));
   }
 
   /// Deletes whatever is selected: the content element when the content
-  /// tool has one, otherwise the selected annotation.
+  /// tool has one, otherwise every selected annotation (one revision, so
+  /// a single undo restores them all).
   void deleteSelected() {
     if (_selectedElement != null) {
       deleteSelectedElement();
       return;
     }
-    final selected = _selected;
-    final annotation = selectedAnnotation;
-    if (selected == null || annotation == null) return;
-    _selected = null;
-    apply((e) => e.removeAnnotation(selected.$1, annotation));
+    if (_selected.isEmpty) return;
+    deleteAnnotations(List.of(_selected));
   }
 
   /// The selected annotation's text, for pre-filling an edit prompt.
@@ -714,9 +824,10 @@ class PdfEditingController extends ChangeNotifier {
     );
   }
 
-  /// Whether the selection is a free-text annotation whose font and size
-  /// [restyleSelectedText] can change.
-  bool get canRestyleSelectedText => selectedAnnotation?.subtype == 'FreeText';
+  /// Whether the selection is a single free-text annotation whose font
+  /// and size [restyleSelectedText] can change.
+  bool get canRestyleSelectedText =>
+      _selected.length == 1 && selectedAnnotation?.subtype == 'FreeText';
 
   /// The selected free-text annotation's font and size (parsed from its
   /// /DA), or null when the selection isn't free text.
@@ -748,13 +859,12 @@ class PdfEditingController extends ChangeNotifier {
 
   void _rewriteSelected(PdfAnnotation annotation, String text,
       {PdfStandardFont? font, double? size}) {
-    final selected = _selected;
-    if (selected == null) return;
-    final page = selected.$1;
+    if (_selected.isEmpty) return;
+    final page = _selected.last.$1;
     final rect = annotation.rect;
     final color = annotation.color;
     final by = annotation.author; // a text edit doesn't change ownership
-    _selected = null;
+    _selected.clear();
     apply((e) {
       e.removeAnnotation(page, annotation);
       switch (annotation.subtype) {
@@ -774,9 +884,11 @@ class PdfEditingController extends ChangeNotifier {
     });
     // the rewritten annotation lands in the last /Annots slot — keep it
     // selected so consecutive restyles (a settings popup) stay anchored
-    final annotations = _document.page(page).annotations;
+    final annotations = _page(page).annotations;
     if (annotations.isNotEmpty) {
-      _selected = (page, annotations.length - 1);
+      _selected
+        ..clear()
+        ..add((page, annotations.length - 1));
       notifyListeners();
     }
   }
@@ -793,6 +905,7 @@ class PdfEditingController extends ChangeNotifier {
 
   void _invalidateElements() {
     _elements.clear();
+    _pageCache.clear();
     _selectedElement = null;
   }
 

@@ -76,7 +76,10 @@ revision a byte prefix of the next, so undo is just a shorter view of
 the same buffer), tool overlays on every page (text markup from the
 selection, ink, shapes, free text, notes, stamps; select/move/resize
 with handles, with a live translucent preview of the annotation's
-artwork riding along while it moves or stretches; a content tool that
+artwork riding along while it moves or stretches; a rotate handle
+above the selection spins the annotation freely (snapping near 45°
+steps), folding the rotation into the appearance stream's matrix so
+any conforming viewer renders it rotated; a content tool that
 selects page elements for deletion or
 in-place text replacement), keyboard shortcuts, style controls (stroke
 width, opacity, font size), an annotation list sidebar

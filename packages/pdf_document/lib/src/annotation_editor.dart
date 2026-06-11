@@ -471,6 +471,121 @@ extension PdfAnnotationEditing on PdfEditor {
     _markAnnotationChanged(pageIndex, dict);
   }
 
+  /// Rotates [annotation] by [degrees] counterclockwise about the center
+  /// of its /Rect.
+  ///
+  /// The rotation is folded into the appearance stream's /Matrix — with
+  /// the current BBox→Rect fit baked in first, so artwork whose BBox
+  /// aspect differs from /Rect rotates without shearing — and /Rect
+  /// becomes the bounding box of the rotated annotation, same center.
+  /// Every viewer that implements the §12.5.5 fit then renders the
+  /// artwork rotated. The absolute-coordinate entries that travel with
+  /// the rect (/QuadPoints, /InkList, /L, /Vertices, /CL) rotate too, so
+  /// viewers that regenerate appearances stay consistent.
+  void rotateAnnotation(
+      int pageIndex, PdfAnnotation annotation, double degrees) {
+    final form = annotation.normalAppearance;
+    if (form == null) {
+      throw StateError('rotateAnnotation needs an appearance stream');
+    }
+    final rect = annotation.rect;
+    if (rect.width <= 0 || rect.height <= 0) {
+      throw ArgumentError('rotateAnnotation needs a non-degenerate rect');
+    }
+    final cos = document.cos;
+    final bbox = pdfRectFrom(cos, form.dictionary['BBox']);
+    if (bbox == null) return; // no BBox: §12.5.5 has nothing to map
+
+    // the current BBox→Rect fit (the same bounds walk as the renderer)
+    final m = _formMatrix(form);
+    var minX = double.infinity, minY = double.infinity;
+    var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    for (final (x, y) in [
+      (bbox.left, bbox.bottom),
+      (bbox.right, bbox.bottom),
+      (bbox.right, bbox.top),
+      (bbox.left, bbox.top),
+    ]) {
+      final tx = m[0] * x + m[2] * y + m[4];
+      final ty = m[1] * x + m[3] * y + m[5];
+      minX = math.min(minX, tx);
+      maxX = math.max(maxX, tx);
+      minY = math.min(minY, ty);
+      maxY = math.max(maxY, ty);
+    }
+    if (maxX - minX < 1e-9 || maxY - minY < 1e-9) return;
+    final sx = rect.width / (maxX - minX);
+    final sy = rect.height / (maxY - minY);
+    final fit = [sx, 0.0, 0.0, sy, rect.left - minX * sx,
+        rect.bottom - minY * sy];
+
+    final theta = degrees * math.pi / 180;
+    final cosT = math.cos(theta), sinT = math.sin(theta);
+    final cx = (rect.left + rect.right) / 2;
+    final cy = (rect.bottom + rect.top) / 2;
+    final rotation = [
+      cosT, sinT, -sinT, cosT,
+      cx - (cx * cosT - cy * sinT),
+      cy - (cx * sinT + cy * cosT),
+    ];
+    final matrix = _mulAffine(_mulAffine(m, fit), rotation);
+    form.dictionary['Matrix'] =
+        CosArray([for (final v in matrix) CosReal(v)]);
+
+    // /Rect: the BBox corners' bounds under the new matrix. The matrix
+    // carries the whole rotation history, so this stays the tightest box
+    // around the rotated artwork — two 45° turns land exactly where one
+    // 90° turn does, instead of compounding loose bounding boxes.
+    var newMinX = double.infinity, newMinY = double.infinity;
+    var newMaxX = double.negativeInfinity, newMaxY = double.negativeInfinity;
+    for (final (x, y) in [
+      (bbox.left, bbox.bottom),
+      (bbox.right, bbox.bottom),
+      (bbox.right, bbox.top),
+      (bbox.left, bbox.top),
+    ]) {
+      final tx = matrix[0] * x + matrix[2] * y + matrix[4];
+      final ty = matrix[1] * x + matrix[3] * y + matrix[5];
+      newMinX = math.min(newMinX, tx);
+      newMaxX = math.max(newMaxX, tx);
+      newMinY = math.min(newMinY, ty);
+      newMaxY = math.max(newMaxY, ty);
+    }
+    annotation.dict['Rect'] =
+        _rectArray(PdfRect(newMinX, newMinY, newMaxX, newMaxY));
+
+    (double, double) rotate(double x, double y) => (
+          cx + (x - cx) * cosT - (y - cy) * sinT,
+          cy + (x - cx) * sinT + (y - cy) * cosT,
+        );
+    for (final key in const ['QuadPoints', 'L', 'Vertices', 'CL']) {
+      final rotated = _mapPointPairs(annotation.dict[key], rotate);
+      if (rotated != null) annotation.dict[key] = rotated;
+    }
+    final ink = cos.resolve(annotation.dict['InkList']);
+    if (ink is CosArray) {
+      annotation.dict['InkList'] = CosArray([
+        for (final stroke in ink.items)
+          _mapPointPairs(stroke, rotate) ?? stroke,
+      ]);
+    }
+
+    final formRef = cos.referenceTo(form);
+    if (formRef != null) _updater.replaceObject(formRef.objectNumber, form);
+    _markAnnotationChanged(pageIndex, annotation.dict);
+  }
+
+  /// `first`, then `second` — the affine product in PDF's row-vector
+  /// convention, both as `[a b c d e f]`.
+  static List<double> _mulAffine(List<double> first, List<double> second) => [
+        first[0] * second[0] + first[1] * second[2],
+        first[0] * second[1] + first[1] * second[3],
+        first[2] * second[0] + first[3] * second[2],
+        first[2] * second[1] + first[3] * second[3],
+        first[4] * second[0] + first[5] * second[2] + second[4],
+        first[4] * second[1] + first[5] * second[3] + second[5],
+      ];
+
   /// An x y x y ... array translated by (dx, dy), or null if [raw] is not
   /// a numeric array.
   CosArray? _shiftPoints(CosObject? raw, double dx, double dy) =>
@@ -479,7 +594,13 @@ extension PdfAnnotationEditing on PdfEditor {
   /// An x y x y ... array with each coordinate mapped, or null if [raw]
   /// is not a numeric array.
   CosArray? _mapPoints(CosObject? raw, double Function(double) mapX,
-      double Function(double) mapY) {
+          double Function(double) mapY) =>
+      _mapPointPairs(raw, (x, y) => (mapX(x), mapY(y)));
+
+  /// An x y x y ... array with each point mapped jointly (rotation needs
+  /// both coordinates), or null if [raw] is not a numeric array.
+  CosArray? _mapPointPairs(
+      CosObject? raw, (double, double) Function(double x, double y) map) {
     final cos = document.cos;
     final array = cos.resolve(raw);
     if (array is! CosArray) return null;
@@ -494,10 +615,14 @@ extension PdfAnnotationEditing on PdfEditor {
         return null;
       }
     }
-    return CosArray([
-      for (var i = 0; i < values.length; i++)
-        CosReal(i.isEven ? mapX(values[i]) : mapY(values[i])),
-    ]);
+    final mapped = <CosObject>[];
+    for (var i = 0; i + 1 < values.length; i += 2) {
+      final (x, y) = map(values[i], values[i + 1]);
+      mapped
+        ..add(CosReal(x))
+        ..add(CosReal(y));
+    }
+    return CosArray(mapped);
   }
 
   /// Stages whatever object owns [dict]'s bytes: the annotation itself

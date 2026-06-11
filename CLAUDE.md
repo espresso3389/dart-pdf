@@ -232,3 +232,19 @@ translate/scale from the resting view rect onto the preview rect (the
 same §12.5.5 stretch resizeAnnotation commits). Tests in
 editing_drag_preview_test.dart; the mid-drag pixel check captures a
 RepaintBoundary via tester.runAsync(toImage) while the gesture is held.
+Annotation rotation: `PdfEditor.rotateAnnotation(page, annot, degrees)`
+(annotation_editor.dart) — degrees CCW about the rect center; bakes the
+current BBox→Rect fit into the appearance /Matrix (no shear when BBox
+aspect ≠ Rect), concats the rotation, then sets /Rect to the BBox
+corners' bounds under the *new* matrix (the matrix carries the whole
+rotation history, so 45°+45° lands exactly where 90° does — never
+compute the rect from the old rect's dims). Point arrays
+(QuadPoints/InkList/L/Vertices/CL) rotate jointly via _mapPointPairs.
+UI: rotate knob 22px above the selection's top-center
+(editing_overlay.dart; resize handles win the overlap), drag sweeps
+about the center with 45°-multiple snap (±3°), ghost + chrome spin live
+(paintAnnotationDragPreview takes `rotation`), commit flips sign —
+view clockwise = page −CCW: `rotateSelected(-delta*180/pi)`.
+`canRotateSelected` = resizable subtype + has /AP. Tests:
+annotation_editor_test.dart (matrix/rect/ink math, 45+45≡90),
+editing_rotate_test.dart (pixels + handle-drag sign chain).

@@ -532,6 +532,11 @@ class PdfEditingController extends ChangeNotifier {
   bool get canResizeSelected =>
       _resizable.contains(selectedAnnotation?.subtype);
 
+  /// Rotation rides the appearance stream's /Matrix, so it needs one.
+  bool get canRotateSelected =>
+      _resizable.contains(selectedAnnotation?.subtype) &&
+      selectedAnnotation?.normalAppearance != null;
+
   bool get canEditSelectedText =>
       _textEditable.contains(selectedAnnotation?.subtype);
 
@@ -604,6 +609,15 @@ class PdfEditingController extends ChangeNotifier {
     if (annotation == null || !canResizeSelected) return;
     if (to.width < 1 || to.height < 1) return;
     apply((e) => e.resizeAnnotation(_selected!.$1, annotation, to));
+  }
+
+  /// Rotates the selected annotation by [degrees] counterclockwise (page
+  /// space) about its center. The selection keeps its /Annots slot.
+  void rotateSelected(double degrees) {
+    final annotation = selectedAnnotation;
+    if (annotation == null || !canRotateSelected) return;
+    if (degrees.abs() < 0.01) return;
+    apply((e) => e.rotateAnnotation(_selected!.$1, annotation, degrees));
   }
 
   /// Deletes whatever is selected: the content element when the content

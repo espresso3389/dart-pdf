@@ -354,6 +354,88 @@ void main() {
         throwsArgumentError);
   });
 
+  test('rotateAnnotation rotates rect, appearance matrix, and ink points',
+      () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150))
+      ..addInk(0, [
+        [(100, 100), (200, 150)],
+      ]);
+    final doc = PdfDocument.open(first.save());
+
+    final editor = PdfEditor(doc)
+      ..rotateAnnotation(0, doc.page(0).annotations[0], 90)
+      ..rotateAnnotation(0, doc.page(0).annotations[1], 90);
+    final reopened = PdfDocument.open(editor.save());
+
+    // the square: 100×50 centered (150,125) → 50×100, same center
+    final square = reopened.page(0).annotations[0];
+    expect(square.rect.left, closeTo(125, 1e-6));
+    expect(square.rect.bottom, closeTo(75, 1e-6));
+    expect(square.rect.right, closeTo(175, 1e-6));
+    expect(square.rect.top, closeTo(175, 1e-6));
+
+    // generated appearances have BBox == old rect (identity fit), so the
+    // matrix is exactly the +90° rotation about the center: b=1, c=−1,
+    // and the old bottom-left corner lands on the new bottom-right
+    final matrix =
+        reopened.cos.resolve(square.normalAppearance!.dictionary['Matrix'])
+            as CosArray;
+    double m(int i) {
+      final n = reopened.cos.resolve(matrix[i]);
+      return n is CosInteger ? n.value.toDouble() : (n as CosReal).value;
+    }
+    expect(m(0), closeTo(0, 1e-9));
+    expect(m(1), closeTo(1, 1e-9));
+    expect(m(2), closeTo(-1, 1e-9));
+    expect(m(3), closeTo(0, 1e-9));
+    expect(m(0) * 100 + m(2) * 100 + m(4), closeTo(175, 1e-6));
+    expect(m(1) * 100 + m(3) * 100 + m(5), closeTo(75, 1e-6));
+
+    // ink points rotate about the ink rect's center (150,125):
+    // (100,100) → (175,75)
+    final ink = reopened.page(0).annotations[1];
+    final inkList = reopened.cos.resolve(ink.dict['InkList']) as CosArray;
+    final stroke = reopened.cos.resolve(inkList[0]) as CosArray;
+    double at(int i) => (reopened.cos.resolve(stroke[i]) as CosReal).value;
+    expect(at(0), closeTo(175, 1e-6));
+    expect(at(1), closeTo(75, 1e-6));
+    expect(at(2), closeTo(125, 1e-6));
+    expect(at(3), closeTo(175, 1e-6));
+  });
+
+  test('two 45° rotations land where one 90° does', () {
+    PdfRect rotatedRect(List<double> steps) {
+      var doc = PdfDocument.open((PdfEditor(
+              PdfDocument.open(buildClassicPdf()))
+            ..addSquare(0, const PdfRect(100, 100, 200, 150)))
+          .save());
+      for (final degrees in steps) {
+        final editor = PdfEditor(doc)
+          ..rotateAnnotation(0, doc.page(0).annotations.single, degrees);
+        doc = PdfDocument.open(editor.save());
+      }
+      return doc.page(0).annotations.single.rect;
+    }
+
+    final twice = rotatedRect([45, 45]);
+    final once = rotatedRect([90]);
+    expect(twice.left, closeTo(once.left, 1e-6));
+    expect(twice.bottom, closeTo(once.bottom, 1e-6));
+    expect(twice.right, closeTo(once.right, 1e-6));
+    expect(twice.top, closeTo(once.top, 1e-6));
+  });
+
+  test('rotateAnnotation requires an appearance stream', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150));
+    final doc = PdfDocument.open(first.save());
+    final square = doc.page(0).annotations.single;
+    square.dict.entries.remove('AP');
+    expect(() => PdfEditor(doc).rotateAnnotation(0, square, 90),
+        throwsStateError);
+  });
+
   test('print flag is set so annotations survive printing', () {
     final doc =
         roundTrip((e) => e.addHighlight(0, const [PdfRect(72, 700, 200, 712)]));

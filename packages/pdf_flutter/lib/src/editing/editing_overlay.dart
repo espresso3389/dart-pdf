@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -54,6 +55,12 @@ const double _handleSize = 8;
 const double _handleHitRadius = 12;
 const double _minSizeView = 12;
 
+/// How far the rotation knob floats above the selection's top edge.
+const double _rotateHandleDistance = 22;
+
+/// Rotation drags snap to 45° multiples when within this margin.
+const double _rotateSnapRadians = 3 * math.pi / 180;
+
 class _EditingPageOverlayState extends State<EditingPageOverlay> {
   // shape/text/stamp drag
   Offset? _dragStart;
@@ -79,6 +86,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   Offset? _moveCurrent;
   _Handle? _resizeHandle;
   Rect? _resizeRect;
+
+  // rotate drag: the pointer's start angle about the selection center,
+  // and the current delta (view space, clockwise positive — y is down)
+  double? _rotateStartAngle;
+  double _rotateDelta = 0;
 
   // live drag preview: the selected annotation's appearance, rendered
   // once per (revision, selection) and drawn stretched while dragging
@@ -192,6 +204,30 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     return null;
   }
 
+  Offset _rotateHandleCenter(Rect rect) =>
+      Offset(rect.center.dx, rect.top - _rotateHandleDistance);
+
+  /// Resize handles get first claim (the top-center knob sits close),
+  /// so this is only consulted after [_handleAt] misses.
+  bool _hitsRotateHandle(Rect rect, Offset position) =>
+      _controller.canRotateSelected &&
+      (position - _rotateHandleCenter(rect)).distance <= _handleHitRadius;
+
+  /// The drag's rotation delta for the pointer at [position]: the angle
+  /// swept about the selection center, snapped near 45° multiples.
+  double _rotationDelta(Rect selected, Offset position) {
+    var delta =
+        (position - selected.center).direction - _rotateStartAngle!;
+    while (delta > math.pi) {
+      delta -= 2 * math.pi;
+    }
+    while (delta <= -math.pi) {
+      delta += 2 * math.pi;
+    }
+    final snapped = (delta / (math.pi / 4)).round() * (math.pi / 4);
+    return (delta - snapped).abs() <= _rotateSnapRadians ? snapped : delta;
+  }
+
   Rect _resizedRect(Rect from, _Handle handle, Offset delta) {
     var left = from.left, top = from.top;
     var right = from.right, bottom = from.bottom;
@@ -233,6 +269,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
             _moveStart = position;
             _moveCurrent = position;
           });
+        } else if (_hitsRotateHandle(selected, position)) {
+          setState(() {
+            _rotateStartAngle = (position - selected.center).direction;
+            _rotateDelta = 0;
+          });
         } else if (selected.contains(position)) {
           setState(() {
             _moveStart = position;
@@ -262,7 +303,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
 
   void _panUpdate(DragUpdateDetails details) {
     final position = details.localPosition;
-    if (_resizeHandle != null) {
+    if (_rotateStartAngle != null) {
+      final selected = _selectedViewRect;
+      if (selected == null) return;
+      setState(() => _rotateDelta = _rotationDelta(selected, position));
+    } else if (_resizeHandle != null) {
       setState(() {
         _moveCurrent = position;
         _resizeRect = _resizedRect(
@@ -289,6 +334,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     final moveStart = _moveStart;
     final moveCurrent = _moveCurrent;
     final resizeRect = _resizeHandle != null ? _resizeRect : null;
+    final rotating = _rotateStartAngle != null;
+    final rotateDelta = _rotateDelta;
     setState(() {
       _activeStroke = null;
       _activeStrokePressures = null;
@@ -298,9 +345,15 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       _moveCurrent = null;
       _resizeHandle = null;
       _resizeRect = null;
+      _rotateStartAngle = null;
+      _rotateDelta = 0;
     });
 
-    if (resizeRect != null) {
+    if (rotating) {
+      // view-space clockwise (y down) is page-space clockwise, and PDF
+      // rotation is counterclockwise-positive — hence the sign flip
+      _controller.rotateSelected(-rotateDelta * 180 / math.pi);
+    } else if (resizeRect != null) {
       _controller.resizeSelected(_geometry.toPageRect(resizeRect));
     } else if (moveStart != null && moveCurrent != null) {
       if ((moveCurrent - moveStart).distance < 2) return; // a click
@@ -438,6 +491,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
           (-1, -1) || (1, 1) => SystemMouseCursors.resizeUpLeftDownRight,
           _ => SystemMouseCursors.resizeUpRightDownLeft,
         };
+      } else if (selected != null &&
+          _hitsRotateHandle(selected, event.localPosition)) {
+        cursor = SystemMouseCursors.grab;
       } else if (selected != null && selected.contains(event.localPosition)) {
         cursor = SystemMouseCursors.move;
       } else {
@@ -465,7 +521,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
         _resizeHandle == null && _moveStart != null && _moveCurrent != null
             ? _moveCurrent! - _moveStart!
             : Offset.zero;
-    final dragging = _resizeHandle != null || moveDelta != Offset.zero;
+    final rotating = _rotateStartAngle != null;
+    final dragging =
+        _resizeHandle != null || moveDelta != Offset.zero || rotating;
     // warm the eyedropper's raster so the first preview is instant-ish
     if (_controller.isPickingColor) unawaited(_ensureSampler());
     final preview = _controller.isPickingColor ? _pickPosition : null;
@@ -531,8 +589,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
                   ghost: _ghost,
                   ghostFrom: selected,
                   dragging: dragging,
+                  rotation: rotating ? _rotateDelta : 0,
                   showHandles: selected != null &&
                       _controller.canResizeSelected &&
+                      _moveStart == null,
+                  showRotateHandle: selected != null &&
+                      _controller.canRotateSelected &&
                       _moveStart == null,
                   elementRect: _selectedElementViewRect,
                 ),
@@ -606,7 +668,9 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.ghost,
     required this.ghostFrom,
     required this.dragging,
+    required this.rotation,
     required this.showHandles,
+    required this.showRotateHandle,
     required this.elementRect,
   });
 
@@ -630,7 +694,12 @@ class _EditingPreviewPainter extends CustomPainter {
   final Rect? ghostFrom;
   final bool dragging;
 
+  /// A rotate drag's current sweep (view radians, clockwise positive):
+  /// the ghost and the chrome spin by it about the selection center.
+  final double rotation;
+
   final bool showHandles;
+  final bool showRotateHandle;
 
   /// The selected content element's box — orange, to read as "page
   /// content", distinct from the blue annotation chrome.
@@ -710,9 +779,16 @@ class _EditingPreviewPainter extends CustomPainter {
           picture: ghost,
           from: ghostFrom,
           to: selection,
-          scale: geometry.scale);
+          scale: geometry.scale,
+          rotation: rotation);
     }
     if (selection != null) {
+      canvas.save();
+      if (rotation != 0) {
+        canvas.translate(selection.center.dx, selection.center.dy);
+        canvas.rotate(rotation);
+        canvas.translate(-selection.center.dx, -selection.center.dy);
+      }
       final box = selection.inflate(2);
       canvas.drawRect(box, Paint()..color = const Color(0x1A1E88E5));
       canvas.drawRect(
@@ -737,6 +813,19 @@ class _EditingPreviewPainter extends CustomPainter {
           canvas.drawRect(knob, stroke);
         }
       }
+      if (showRotateHandle) {
+        final stroke = Paint()
+          ..color = _chrome
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5;
+        final knob = Offset(
+            box.center.dx, box.top - _rotateHandleDistance + 2);
+        canvas.drawLine(box.topCenter, knob, stroke);
+        canvas.drawCircle(
+            knob, _handleSize / 2 + 1, Paint()..color = const Color(0xFFFFFFFF));
+        canvas.drawCircle(knob, _handleSize / 2 + 1, stroke);
+      }
+      canvas.restore();
     }
 
     final element = elementRect;
@@ -762,7 +851,9 @@ class _EditingPreviewPainter extends CustomPainter {
       oldDelegate.ghost != ghost ||
       oldDelegate.ghostFrom != ghostFrom ||
       oldDelegate.dragging != dragging ||
+      oldDelegate.rotation != rotation ||
       oldDelegate.showHandles != showHandles ||
+      oldDelegate.showRotateHandle != showRotateHandle ||
       oldDelegate.elementRect != elementRect ||
       oldDelegate.strokes.length != strokes.length ||
       (strokes.isNotEmpty &&
@@ -778,6 +869,9 @@ class _EditingPreviewPainter extends CustomPainter {
 ///
 /// Drawn at ~75% opacity: solid enough to judge the result, light
 /// enough to read as a preview over the still-rendered original.
+///
+/// [rotation] (view radians, clockwise positive) additionally spins the
+/// preview about [to]'s center — the rotate handle's live feedback.
 @visibleForTesting
 void paintAnnotationDragPreview(
   Canvas canvas, {
@@ -785,9 +879,20 @@ void paintAnnotationDragPreview(
   required Rect from,
   required Rect to,
   required double scale,
+  double rotation = 0,
 }) {
   if (from.width <= 0 || from.height <= 0) return;
-  canvas.saveLayer(to.inflate(4), Paint()..color = const Color(0xBFFFFFFF));
+  final bounds = rotation == 0
+      ? to.inflate(4)
+      : Rect.fromCircle(
+          center: to.center,
+          radius: Offset(to.width, to.height).distance / 2 + 4);
+  canvas.saveLayer(bounds, Paint()..color = const Color(0xBFFFFFFF));
+  if (rotation != 0) {
+    canvas.translate(to.center.dx, to.center.dy);
+    canvas.rotate(rotation);
+    canvas.translate(-to.center.dx, -to.center.dy);
+  }
   canvas.translate(to.left, to.top);
   canvas.scale(to.width / from.width, to.height / from.height);
   canvas.translate(-from.left, -from.top);

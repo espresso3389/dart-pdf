@@ -33,6 +33,200 @@ List<((double, double), (double, double))> pdfInkCurveControls(
   ];
 }
 
+/// Slices ink [strokes] with one stamp of a circular eraser swept from
+/// [from] to [to] (a capsule of [radius]): every part of a stroke's
+/// centerline within [radius] of that segment is removed, splitting
+/// strokes where the eraser crosses them. [pressures] (the [PdfEditor]
+/// addInk convention — one optional list per stroke) travel with their
+/// points, interpolated at the cut boundaries. Returns the surviving
+/// strokes, or null when the eraser touched nothing. Shared by
+/// [PdfAnnotationEditing.sliceInk] and the editing overlay's live
+/// preview so the preview matches the commit exactly.
+({List<List<(double, double)>> strokes, List<List<double>?>? pressures})?
+    pdfSliceInkStrokes(
+  List<List<(double, double)>> strokes,
+  List<List<double>?>? pressures,
+  (double, double) from,
+  (double, double) to,
+  double radius,
+) {
+  // ends of a cut shorter than this are invisible crumbs — drop them
+  const minFragment = 0.05;
+  const epsT = 1e-6;
+  final boundsLeft = math.min(from.$1, to.$1) - radius;
+  final boundsRight = math.max(from.$1, to.$1) + radius;
+  final boundsBottom = math.min(from.$2, to.$2) - radius;
+  final boundsTop = math.max(from.$2, to.$2) + radius;
+
+  var changed = false;
+  final outStrokes = <List<(double, double)>>[];
+  final outPressures = <List<double>?>[];
+  void emit(List<(double, double)> stroke, List<double>? pressure) {
+    outStrokes.add(stroke);
+    outPressures.add(pressure);
+  }
+
+  for (var s = 0; s < strokes.length; s++) {
+    final stroke = strokes[s];
+    final pressure = pressures?[s];
+    if (stroke.length == 1) {
+      // a bare dot: gone if the eraser reaches it
+      final (x, y) = stroke.single;
+      if (_distanceToSegment(x, y, from, to) <= radius) {
+        changed = true;
+      } else {
+        emit(stroke, pressure);
+      }
+      continue;
+    }
+    // at most one erased t-interval per segment (a capsule is convex)
+    List<(double, double)?>? intervals;
+    for (var i = 0; i + 1 < stroke.length; i++) {
+      final interval = _capsuleInterval(stroke[i], stroke[i + 1], from, to,
+          radius,
+          boundsLeft: boundsLeft,
+          boundsRight: boundsRight,
+          boundsBottom: boundsBottom,
+          boundsTop: boundsTop);
+      if (interval == null) continue;
+      (intervals ??= List.filled(stroke.length - 1, null))[i] = interval;
+    }
+    if (intervals == null) {
+      emit(stroke, pressure);
+      continue;
+    }
+    changed = true;
+    var run = <(double, double)>[];
+    var runP = pressure == null ? null : <double>[];
+    void endRun() {
+      if (run.length >= 2) {
+        var length = 0.0;
+        for (var i = 0; i + 1 < run.length; i++) {
+          final dx = run[i + 1].$1 - run[i].$1;
+          final dy = run[i + 1].$2 - run[i].$2;
+          length += math.sqrt(dx * dx + dy * dy);
+        }
+        if (length > minFragment) emit(run, runP);
+      }
+      run = [];
+      runP = pressure == null ? null : <double>[];
+    }
+
+    (double, double) pointAt(int i, double t) => (
+          stroke[i].$1 + (stroke[i + 1].$1 - stroke[i].$1) * t,
+          stroke[i].$2 + (stroke[i + 1].$2 - stroke[i].$2) * t,
+        );
+    double pressureAt(int i, double t) =>
+        pressure![i] + (pressure[i + 1] - pressure[i]) * t;
+
+    final first = intervals[0];
+    if (first == null || first.$1 > epsT) {
+      run.add(stroke[0]);
+      runP?.add(pressure![0]);
+    }
+    for (var i = 0; i + 1 < stroke.length; i++) {
+      final interval = intervals[i];
+      if (interval == null) {
+        run.add(stroke[i + 1]);
+        runP?.add(pressure![i + 1]);
+        continue;
+      }
+      var (a, b) = interval;
+      if (a < epsT) a = 0;
+      if (b > 1 - epsT) b = 1;
+      if (a > 0) {
+        run.add(pointAt(i, a));
+        runP?.add(pressureAt(i, a));
+      }
+      endRun();
+      if (b < 1) {
+        run.add(pointAt(i, b));
+        runP?.add(pressureAt(i, b));
+        run.add(stroke[i + 1]);
+        runP?.add(pressure![i + 1]);
+      }
+    }
+    endRun();
+  }
+  if (!changed) return null;
+  return (
+    strokes: outStrokes,
+    pressures: pressures == null ? null : outPressures,
+  );
+}
+
+/// The t-interval of the segment [a]–[b] that lies within [radius] of
+/// the spine [c]–[d], or null when they don't overlap (or only touch
+/// tangentially). The capsule is convex, so the inside parameters form
+/// one interval; the distance along the segment is convex in t, found
+/// by ternary search and refined by bisection.
+(double, double)? _capsuleInterval(
+  (double, double) a,
+  (double, double) b,
+  (double, double) c,
+  (double, double) d,
+  double radius, {
+  required double boundsLeft,
+  required double boundsRight,
+  required double boundsBottom,
+  required double boundsTop,
+}) {
+  if (math.max(a.$1, b.$1) < boundsLeft ||
+      math.min(a.$1, b.$1) > boundsRight ||
+      math.max(a.$2, b.$2) < boundsBottom ||
+      math.min(a.$2, b.$2) > boundsTop) {
+    return null;
+  }
+  double f(double t) => _distanceToSegment(
+      a.$1 + (b.$1 - a.$1) * t, a.$2 + (b.$2 - a.$2) * t, c, d);
+  final f0 = f(0), f1 = f(1);
+  var lo = 0.0, hi = 1.0;
+  for (var i = 0; i < 60; i++) {
+    final m1 = lo + (hi - lo) / 3;
+    final m2 = hi - (hi - lo) / 3;
+    if (f(m1) <= f(m2)) {
+      hi = m2;
+    } else {
+      lo = m1;
+    }
+  }
+  final tMin = (lo + hi) / 2;
+  if (math.min(f(tMin), math.min(f0, f1)) > radius) return null;
+  double crossing(double inside, double outside) {
+    for (var i = 0; i < 48; i++) {
+      final mid = (inside + outside) / 2;
+      if (f(mid) <= radius) {
+        inside = mid;
+      } else {
+        outside = mid;
+      }
+    }
+    return inside;
+  }
+
+  final t0 = f0 <= radius ? 0.0 : crossing(tMin, 0);
+  final t1 = f1 <= radius ? 1.0 : crossing(tMin, 1);
+  if (t1 - t0 < 1e-6) return null;
+  return (t0, t1);
+}
+
+/// Distance from ([x], [y]) to the segment [a]–[b].
+double _distanceToSegment(
+    double x, double y, (double, double) a, (double, double) b) {
+  final (ax, ay) = a;
+  final (bx, by) = b;
+  final dx = bx - ax, dy = by - ay;
+  final lengthSquared = dx * dx + dy * dy;
+  var px = ax, py = ay;
+  if (lengthSquared > 0) {
+    final t = (((x - ax) * dx + (y - ay) * dy) / lengthSquared).clamp(0.0, 1.0);
+    px = ax + t * dx;
+    py = ay + t * dy;
+  }
+  final ex = x - px, ey = y - py;
+  return math.sqrt(ex * ex + ey * ey);
+}
+
 /// Annotation authoring (§12.5): each method creates an annotation with a
 /// generated appearance stream (/AP → /N), so the result displays the same
 /// in this renderer and in other viewers.
@@ -156,6 +350,29 @@ extension PdfAnnotationEditing on PdfEditor {
       throw ArgumentError.value(
           pressures, 'pressures', 'must parallel strokes point for point');
     }
+    final (rect, w, gs) =
+        _inkAppearance(strokes, pressures, color, strokeWidth, opacity);
+
+    _addAnnotation(
+      pageIndex,
+      _markupDict('Ink', rect, color, contents, author)
+        ..['BS'] = _borderStyle(strokeWidth)
+        ..['InkList'] = _inkListArray(strokes),
+      _form(rect, w, resources: _resources(extGState: gs)),
+    );
+  }
+
+  /// The generated Ink appearance for [strokes]: the padded rect (the
+  /// Bézier control hull plus half the widest pen width), the content,
+  /// and the alpha ExtGState when [opacity] < 1. Shared by [addInk] and
+  /// [sliceInk] so sliced ink re-renders exactly as it was drawn.
+  (PdfRect, ContentWriter, CosDictionary?) _inkAppearance(
+    List<List<(double, double)>> strokes,
+    List<List<double>?>? pressures,
+    int color,
+    double strokeWidth,
+    double opacity,
+  ) {
     var maxWidth = strokeWidth;
     if (pressures != null) {
       for (final list in pressures) {
@@ -231,19 +448,149 @@ extension PdfAnnotationEditing on PdfEditor {
           ..stroke();
       }
     }
+    return (rect, w, gs);
+  }
 
-    _addAnnotation(
-      pageIndex,
-      _markupDict('Ink', rect, color, contents, author)
-        ..['BS'] = _borderStyle(strokeWidth)
-        ..['InkList'] = CosArray([
-          for (final stroke in strokes)
-            CosArray([
-              for (final (x, y) in stroke) ...[CosReal(x), CosReal(y)],
-            ]),
-        ]),
-      _form(rect, w, resources: _resources(extGState: gs)),
-    );
+  CosArray _inkListArray(List<List<(double, double)>> strokes) => CosArray([
+        for (final stroke in strokes)
+          CosArray([
+            for (final (x, y) in stroke) ...[CosReal(x), CosReal(y)],
+          ]),
+      ]);
+
+  /// Erases the parts of an Ink [annotation] within [radius] page units
+  /// of the eraser's swept [path] — the PSPDFKit-style circle eraser.
+  /// Strokes split where the circle crosses them; /InkList, /Rect, and
+  /// the appearance are rewritten in place (same object numbers), so
+  /// the annotation keeps its identity, author, and contents. When the
+  /// appearance is one we generated with pressure-variable widths, the
+  /// pressures are recovered from its per-segment `w` operators and
+  /// survive the cut. An annotation whose strokes are erased entirely
+  /// is removed.
+  ///
+  /// Returns whether anything changed; false for non-Ink annotations
+  /// and ones without a usable /InkList (those can only be deleted
+  /// whole).
+  bool sliceInk(int pageIndex, PdfAnnotation annotation,
+      List<(double, double)> path, double radius) {
+    if (annotation.subtype != 'Ink' || path.isEmpty || radius <= 0) {
+      return false;
+    }
+    var strokes = annotation.inkList;
+    if (strokes == null || strokes.isEmpty) return false;
+    final form = annotation.normalAppearance;
+    final strokeWidth = annotation.borderWidth ?? 1;
+    var pressures = form == null
+        ? null
+        : _recoverInkPressures(form, strokes, strokeWidth);
+    final capsules = path.length == 1
+        ? [(path[0], path[0])]
+        : [for (var i = 0; i + 1 < path.length; i++) (path[i], path[i + 1])];
+    var changed = false;
+    for (final (from, to) in capsules) {
+      final sliced = pdfSliceInkStrokes(strokes!, pressures, from, to, radius);
+      if (sliced == null) continue;
+      strokes = sliced.strokes;
+      pressures = sliced.pressures;
+      changed = true;
+      if (strokes.isEmpty) break;
+    }
+    if (!changed) return false;
+    if (strokes!.isEmpty) {
+      removeAnnotation(pageIndex, annotation);
+      return true;
+    }
+    final opacity = form == null ? 1.0 : _appearanceOpacity(form);
+    final color = annotation.color ?? 0x000000;
+    final (rect, w, gs) =
+        _inkAppearance(strokes, pressures, color, strokeWidth, opacity);
+    final dict = annotation.dict;
+    dict['Rect'] = _rectArray(rect);
+    dict['InkList'] = _inkListArray(strokes);
+    if (form != null) {
+      _replaceAppearance(dict, form, rect, w,
+          resources: _resources(extGState: gs));
+    } else {
+      dict['AP'] = CosDictionary({
+        'N': _updater
+            .addObject(_form(rect, w, resources: _resources(extGState: gs))),
+      });
+    }
+    _markAnnotationChanged(pageIndex, dict);
+    return true;
+  }
+
+  /// Per-point pressures recovered from an Ink appearance this editor
+  /// generated: pressured strokes carry one `w` per drawn segment (see
+  /// [_inkAppearance]), so inverting [pdfInkStrokeWidth] gives segment
+  /// pressures, averaged back onto the points. Returns null — uniform
+  /// width — whenever the stream doesn't match that exact shape
+  /// (foreign appearances, plain uniform ink).
+  List<List<double>?>? _recoverInkPressures(CosStream form,
+      List<List<(double, double)>> strokes, double strokeWidth) {
+    if (strokeWidth <= 0) return null;
+    final List<ContentOperation> ops;
+    try {
+      ops = ContentStreamParser.parse(document.cos.decodeStreamData(form));
+    } catch (_) {
+      return null;
+    }
+    // anything beyond stroked paths and line state means the appearance
+    // isn't one of ours — don't guess
+    const allowed = {
+      'q', 'Q', 'gs', 'cm', 'w', 'J', 'j', 'M', 'd', //
+      'RG', 'rg', 'S', 's', 'n', 'm', 'l', 'c', 'v', 'y',
+    };
+    var width = 1.0;
+    final widths = <double>[];
+    for (final op in ops) {
+      if (!allowed.contains(op.operator)) return null;
+      switch (op.operator) {
+        case 'w':
+          if (op.operands.length != 1) return null;
+          final value = op.operands.single;
+          width = switch (value) {
+            CosInteger(:final value) => value.toDouble(),
+            CosReal(:final value) => value,
+            _ => double.nan,
+          };
+          if (width.isNaN) return null;
+        case 'l' || 'c' || 'v' || 'y':
+          widths.add(width);
+      }
+    }
+    var total = 0;
+    for (final stroke in strokes) {
+      total += math.max(1, stroke.length - 1);
+    }
+    if (widths.length != total) return null;
+    var k = 0;
+    var anyPressure = false;
+    final result = <List<double>?>[];
+    for (final stroke in strokes) {
+      final segments = math.max(1, stroke.length - 1);
+      final ws = widths.sublist(k, k + segments);
+      k += segments;
+      if (ws.every((w) => (w - strokeWidth).abs() < 1e-3)) {
+        result.add(null);
+        continue;
+      }
+      anyPressure = true;
+      final perSegment = [
+        for (final w in ws) ((w / strokeWidth - 0.4) / 1.2).clamp(0.0, 1.0),
+      ];
+      if (stroke.length == 1) {
+        result.add([perSegment.single]);
+        continue;
+      }
+      result.add([
+        perSegment.first,
+        for (var i = 1; i + 1 < stroke.length; i++)
+          (perSegment[i - 1] + perSegment[i]) / 2,
+        perSegment.last,
+      ]);
+    }
+    return anyPressure ? result : null;
   }
 
   /// Adds a rectangle annotation. At least one of [strokeColor] and

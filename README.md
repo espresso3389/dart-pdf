@@ -135,10 +135,14 @@ second finger does cancel an accidental one. Ink strokes are
 smoothed: the sampled points become a Catmull-Rom spline written as
 Bézier curves in the appearance stream, so fast strokes stay rounded
 instead of showing polyline corners — in this viewer and any other.
-An eraser tool removes whole ink strokes with a swipe (precise: it
-demands proximity to the inked line, not just its bounding box; one
-swipe is one undo), and a flipped pencil erases while the ink tool is
-armed. Touch pinch zoom works everywhere — including with a tool
+The eraser is a PSPDFKit-style circle eraser that *slices* ink: it
+removes exactly the parts of strokes inside the swept circle, splitting
+a stroke into pieces where the eraser crosses it (pressure-variable
+widths survive the cut), and an annotation only disappears once every
+stroke is gone. A ring cursor shows the eraser's true size at any zoom,
+the live preview fades the original and paints the exact remainder, one
+swipe is one undo, the radius is adjustable from the style menu (and
+persists), and a flipped pencil erases while the ink tool is armed. Touch pinch zoom works everywhere — including with a tool
 armed — and touch or stylus selections get a floating action chip
 (delete, context menu, edit text) standing in for hover and
 right-click.

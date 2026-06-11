@@ -1060,3 +1060,51 @@ handle hit boxes overlap across the stem zone and the end handle
 (above the text line) in tests; touch chip taps need the usual
 pump(400ms); existing selection tests were already mouse-kind so the
 recognizer restriction broke none.
+Batch 3, session 9 (circle eraser, Ben: "PSPDFKit style circle eraser
+which slices annotations"): the eraser now slices ink instead of
+deleting whole annotations. pdf_document: `pdfSliceInkStrokes(strokes,
+pressures, from, to, radius)` (annotation_editor.dart, exported) —
+one capsule stamp; per stroke segment the erased t-interval is found
+by ternary search (distance to a convex capsule along a segment is
+convex) + bisection refinement, pressures interpolate at cut points,
+sub-0.05pt remnants drop, returns null when untouched (the unchanged
+signal). `PdfEditor.sliceInk(page, annot, path, radius)` applies the
+path capsule-by-capsule and rewrites /InkList + /Rect + the /AP IN
+PLACE (`_inkAppearance` factored out of addInk; `_replaceAppearance`
+keeps object numbers, so author/contents/identity survive); empty
+result → removeAnnotation. Pressures are RECOVERED from our own
+appearances (`_recoverInkPressures`): pressured strokes carry one `w`
+per segment, so parse ops (ContentStreamParser on decodeStreamData),
+reject any op outside the stroked-path set, invert pdfInkStrokeWidth
+per segment, average back onto points — any mismatch → uniform
+fallback, never guess on foreign appearances. Controller:
+`eraserRadius` (persisted pref `eraserRadius`, default 8pt),
+`sliceErase(page, path)` — resolves all ink annots up front (editor
+works by dict identity, slot shifts don't matter), slices each in ONE
+apply, inkless Ink annots fall back to whole-delete when the path
+reaches their rect, `_selected` cleared inside the apply callback
+only when something changed. Overlay: `_erasePath` accumulates page
+points; each move slices the tracked remainders INCREMENTALLY by just
+the newest capsule (slicing by capsule A then B == slicing by A∪B —
+removal is pointwise), so the live preview is exact: fade wash over
+the touched annots' rects + `_eraseSliced` remainders riding extraInk
+(painter now paints fadeRects BEFORE ink so remainders read at full
+strength). Ring cursor: painter `eraserCursor`/`eraserRadius` (view
+px = radius × geometry.scale — page-space size, NOT chrome-scaled;
+the line weights are), shown while dragging any pointer and on mouse
+hover (`SystemMouseCursors.none` — the ring is the cursor; onExit
+clears it unless mid-swipe). Commit on lift → `sliceErase`, afterimage
+= `_afterEraseRects` + `_afterEraseInk` until rasterCurrent. Toolbar:
+'Eraser size' slider (key 'pdf-eraser-size', 2–40pt) joins the style
+menu only while the eraser is armed — the legacy 3-slider count test
+still holds. Tests: pdf_document/test/ink_slice_test.dart (geometry
+KATs — the vertical-spine cut of a horizontal line lands exactly at
+|x−cx| = r; pressure recovery round-trip 3.28/4.72 w), pdf_flutter
+editing_eraser_test.dart (live preview via the dynamic painter cast —
+record fields ARE dynamically accessible; afterimage; hover ring;
+slider; pref round-trip) and editing_ipad_test.dart eraser group
+updated to slicing semantics (annotations survive, inkList splits,
+cut bounds ±0.5pt through the full pointer→commit chain). Gotcha: an
+eraser tap is a single-point path — sliceInk/pdfSliceInkStrokes treat
+path.length == 1 as a degenerate capsule (a circle stamp), don't skip
+it.

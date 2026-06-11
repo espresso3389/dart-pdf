@@ -45,6 +45,7 @@ class PdfEditingPreferences extends ChangeNotifier {
 
   Color _color = const Color(0xFFE53935);
   double _strokeWidth = 2;
+  double _eraserRadius = 8;
   double _fontSize = 14;
   PdfStandardFont _fontFamily = PdfStandardFont.helvetica;
   double _opacity = 1;
@@ -74,6 +75,8 @@ class PdfEditingPreferences extends ChangeNotifier {
       final color = store.getInt('${_prefix}color');
       if (color != null) _color = Color(color);
       _strokeWidth = store.getDouble('${_prefix}strokeWidth') ?? _strokeWidth;
+      _eraserRadius =
+          store.getDouble('${_prefix}eraserRadius') ?? _eraserRadius;
       _fontSize = store.getDouble('${_prefix}fontSize') ?? _fontSize;
       final fontFamily = store.getString('${_prefix}fontFamily');
       if (fontFamily != null) {
@@ -147,6 +150,17 @@ class PdfEditingPreferences extends ChangeNotifier {
     if (value == _strokeWidth) return;
     _strokeWidth = value;
     _write((s) => s.setDouble('${_prefix}strokeWidth', value));
+    notifyListeners();
+  }
+
+  /// The circle eraser's radius, in PDF points (see
+  /// [PdfEditingController.eraserRadius]).
+  double get eraserRadius => _eraserRadius;
+
+  set eraserRadius(double value) {
+    if (value == _eraserRadius) return;
+    _eraserRadius = value;
+    _write((s) => s.setDouble('${_prefix}eraserRadius', value));
     notifyListeners();
   }
 

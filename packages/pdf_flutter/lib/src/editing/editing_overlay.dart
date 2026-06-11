@@ -156,15 +156,23 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   /// selection action chip only shows for touch and stylus input.
   PointerDeviceKind? _lastPointerKind;
 
-  // eraser: /Annots slots crossed during the swipe (deleted in one apply
-  // on lift) and their view rects, faded while pending
-  final Set<int> _eraseSlots = {};
-  final List<Rect> _eraseRects = [];
+  // circle eraser: the swipe's swept path (page space), the live-sliced
+  // remainder per touched /Annots slot (painted over the faded
+  // original, so the preview shows exactly what the commit keeps),
+  // touched annotations' view rects (washed while pending), inkless
+  // slots that can only be deleted whole, and the ring cursor's view
+  // position (drag for any pointer, hover for a mouse)
+  final List<(double, double)> _erasePath = [];
+  final Map<int, _InkPaint> _eraseSliced = {};
+  final Map<int, Rect> _eraseRects = {};
+  final Set<int> _eraseWholeSlots = {};
+  Offset? _eraserCursor;
   bool _panErasing = false; // a mouse drag is erasing (arena path)
 
-  /// Erased rects kept faded until the deletion's raster lands —
-  /// without it the strokes pop back at full strength for a frame.
+  /// Erase results kept painted until the new revision's raster lands —
+  /// without them the old strokes pop back at full strength for a frame.
   List<Rect>? _afterEraseRects;
+  List<_InkPaint>? _afterEraseInk;
 
   // in-place text editor: open after a free-text drag-out (new) or a
   // tap on the already-selected free text annotation (existing)
@@ -401,8 +409,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     setState(() {
       _activeStroke = null;
       _activeStrokePressures = null;
-      _eraseSlots.clear();
-      _eraseRects.clear();
+      _resetErase();
       _panErasing = false;
       _dragStart = null;
       _dragCurrent = null;
@@ -438,10 +445,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _rawErasing = false;
     if (erasing) {
       if (canceled) {
-        setState(() {
-          _eraseSlots.clear();
-          _eraseRects.clear();
-        });
+        setState(_resetErase);
       } else {
         _commitErase();
       }
@@ -467,38 +471,77 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         pressures: pressures);
   }
 
-  /// Marks the topmost Ink annotation under the view-space [position]
-  /// for erasure: collected into one swipe (one apply, one undo on
-  /// lift) and faded on screen meanwhile.
+  /// Sweeps the circle eraser to the view-space [position]: extends the
+  /// swipe's path by one capsule and re-slices every ink annotation it
+  /// touches, so the live preview (faded original + remainder strokes)
+  /// shows exactly what the commit will keep. Ink annotations without a
+  /// usable /InkList can't be sliced — they fade whole and the commit
+  /// deletes them.
   void _eraseAt(Offset position) {
-    final (x, y) = _geometry.toPagePoint(position);
-    // ~6 screen pixels of slack, beyond the half-pen-width the hit
-    // test already grants — constant feel at any zoom
-    final tolerance = 6 * _chromeScale / _geometry.scale;
-    final hit = _controller.inkAnnotationAt(widget.pageIndex, x, y,
-        tolerance: tolerance);
-    if (hit == null || _eraseSlots.contains(hit.$1)) return;
+    final point = _geometry.toPagePoint(position);
+    final radius = _controller.eraserRadius;
+    final from = _erasePath.isEmpty ? point : _erasePath.last;
     setState(() {
-      _eraseSlots.add(hit.$1);
-      _eraseRects.add(_geometry.toViewRect(hit.$2.rect));
+      _eraserCursor = position;
+      _erasePath.add(point);
+      final annotations = _controller.pageAt(widget.pageIndex).annotations;
+      for (var slot = 0; slot < annotations.length; slot++) {
+        final annotation = annotations[slot];
+        if (annotation.subtype != 'Ink' || annotation.isHidden) continue;
+        final tracked = _eraseSliced[slot];
+        final strokes = tracked?.strokes ?? annotation.inkList;
+        if (strokes == null) {
+          if (!_eraseWholeSlots.contains(slot) &&
+              _hitsRect(point, annotation.rect, radius)) {
+            _eraseWholeSlots.add(slot);
+            _eraseRects[slot] = _geometry.toViewRect(annotation.rect);
+          }
+          continue;
+        }
+        final sliced = pdfSliceInkStrokes(strokes, null, from, point, radius);
+        if (sliced == null) continue;
+        _eraseRects[slot] ??= _geometry.toViewRect(annotation.rect);
+        _eraseSliced[slot] = (
+          strokes: sliced.strokes,
+          pressures:
+              List<List<double>?>.filled(sliced.strokes.length, null),
+          color: Color(0xFF000000 | (annotation.color ?? 0xD02020)),
+          strokeWidth: (annotation.borderWidth ?? 1) * _geometry.scale,
+        );
+      }
     });
   }
 
-  /// Deletes the swipe's collected annotations in one apply and keeps
-  /// their rects faded until the new revision's raster lands.
+  static bool _hitsRect((double, double) p, PdfRect rect, double radius) =>
+      p.$1 >= rect.left - radius &&
+      p.$1 <= rect.right + radius &&
+      p.$2 >= rect.bottom - radius &&
+      p.$2 <= rect.top + radius;
+
+  void _resetErase() {
+    _erasePath.clear();
+    _eraseSliced.clear();
+    _eraseWholeSlots.clear();
+    _eraseRects.clear();
+    _eraserCursor = null;
+  }
+
+  /// Commits the swipe's slicing in one apply (one undo) and keeps the
+  /// washed rects plus the sliced remainders painted until the new
+  /// revision's raster lands.
   void _commitErase() {
-    if (_eraseSlots.isEmpty) return;
-    final slots = [for (final index in _eraseSlots) (widget.pageIndex, index)];
-    final rects = List.of(_eraseRects);
-    setState(() {
-      _eraseSlots.clear();
-      _eraseRects.clear();
-    });
+    final path = List.of(_erasePath);
+    final rects = List.of(_eraseRects.values);
+    final ink = List.of(_eraseSliced.values);
+    final touched = _eraseSliced.isNotEmpty || _eraseWholeSlots.isNotEmpty;
+    setState(_resetErase);
+    if (path.isEmpty || !touched) return;
     final before = _controller.document;
-    _controller.deleteAnnotations(slots);
+    _controller.sliceErase(widget.pageIndex, path);
     if (identical(before, _controller.document)) return;
     _clearAfterimage();
     _afterEraseRects = rects;
+    _afterEraseInk = ink;
     _afterDocument = _controller.document;
   }
 
@@ -581,6 +624,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterText = null;
     _afterSignature = null;
     _afterEraseRects = null;
+    _afterEraseInk = null;
     _afterDocument = null;
   }
 
@@ -1462,12 +1506,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     } else if (_tool == PdfEditTool.note) {
       cursor = SystemMouseCursors.click;
     } else if (_tool == PdfEditTool.eraser) {
-      final (x, y) = _geometry.toPagePoint(event.localPosition);
-      cursor = _controller.inkAnnotationAt(widget.pageIndex, x, y,
-                  tolerance: 6 * _chromeScale / _geometry.scale) !=
-              null
-          ? SystemMouseCursors.click
-          : SystemMouseCursors.precise;
+      // the painted ring is the cursor
+      if (_eraserCursor != event.localPosition) {
+        setState(() => _eraserCursor = event.localPosition);
+      }
+      cursor = SystemMouseCursors.none;
     } else if (_tool == PdfEditTool.signature) {
       // the live preview rides the mouse; a click commits it
       if (_controller.signature != null &&
@@ -1646,6 +1689,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         ),
       if (_afterSignature != null) _afterSignature!,
       if (signaturePreview != null) signaturePreview,
+      // the eraser's live remainders, then the committed slice held
+      // until its raster lands — painted over the fade wash
+      ..._eraseSliced.values,
+      ...?_afterEraseInk,
     ];
     // a fresh attention flash for this page starts its pulse
     final flash = _controller.pendingFlash;
@@ -1702,13 +1749,15 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           onHover: _onHover,
           onExit: (_) {
             if (_pickPosition == null &&
-                (_signaturePreview == null || _signatureDrag)) {
+                (_signaturePreview == null || _signatureDrag) &&
+                (_eraserCursor == null || _erasePath.isNotEmpty)) {
               return;
             }
             setState(() {
               _pickPosition = null;
               _pickPreview = null;
               if (!_signatureDrag) _signaturePreview = null;
+              if (_erasePath.isEmpty) _eraserCursor = null;
             });
           },
           child: Stack(children: [
@@ -1754,10 +1803,15 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                       _resizeHandle != null ? _resizeAngle : 0,
                   extraInk: extraInk,
                   fadeRects: [
-                    ..._eraseRects,
+                    ..._eraseRects.values,
                     ...?_afterEraseRects,
                   ],
                   fadeColor: widget.pageColor.withValues(alpha: 0.72),
+                  eraserCursor: _tool == PdfEditTool.eraser || _rawErasing
+                      ? _eraserCursor
+                      : null,
+                  eraserRadius:
+                      _controller.eraserRadius * _geometry.scale,
                   afterGhost: _afterGhost != null
                       ? (
                           picture: _afterGhost!,
@@ -1954,6 +2008,8 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.extraInk,
     this.fadeRects = const [],
     this.fadeColor = const Color(0x00000000),
+    this.eraserCursor,
+    this.eraserRadius = 0,
     required this.afterGhost,
     required this.afterShape,
     required this.showHandles,
@@ -2015,6 +2071,12 @@ class _EditingPreviewPainter extends CustomPainter {
   /// deletion's raster lands.
   final List<Rect> fadeRects;
   final Color fadeColor;
+
+  /// The circle eraser's ring cursor: view position and radius (the
+  /// page-space eraser radius scaled into view pixels, so the ring is
+  /// exactly the area the eraser removes at any zoom).
+  final Offset? eraserCursor;
+  final double eraserRadius;
 
   /// A just-committed move/resize/rotate, kept painted at full strength
   /// until the new revision's raster lands.
@@ -2148,17 +2210,20 @@ class _EditingPreviewPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    _paintInk(canvas, strokes, pressures, color, strokeWidth);
-    for (final ink in extraInk) {
-      _paintInk(canvas, ink.strokes, ink.pressures, ink.color,
-          ink.strokeWidth);
-    }
-
+    // the wash goes under every stroke preview: the eraser's sliced
+    // remainders (and any other pending ink) paint at full strength
+    // over their faded originals
     if (fadeRects.isNotEmpty) {
       final wash = Paint()..color = fadeColor;
       for (final rect in fadeRects) {
         canvas.drawRect(rect.inflate(2), wash);
       }
+    }
+
+    _paintInk(canvas, strokes, pressures, color, strokeWidth);
+    for (final ink in extraInk) {
+      _paintInk(canvas, ink.strokes, ink.pressures, ink.color,
+          ink.strokeWidth);
     }
 
     final after = afterShape;
@@ -2296,6 +2361,29 @@ class _EditingPreviewPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 3 * chromeScale);
     }
+
+    // the eraser's ring cursor, topmost: page-space radius (it shows
+    // exactly what a stamp removes), screen-constant line weight — a
+    // light ring over a dark halo so it reads on any page color
+    final cursor = eraserCursor;
+    if (cursor != null && eraserRadius > 0) {
+      canvas.drawCircle(
+          cursor, eraserRadius, Paint()..color = const Color(0x14000000));
+      canvas.drawCircle(
+          cursor,
+          eraserRadius,
+          Paint()
+            ..color = const Color(0x66000000)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3 * chromeScale);
+      canvas.drawCircle(
+          cursor,
+          eraserRadius,
+          Paint()
+            ..color = const Color(0xFFFFFFFF)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.5 * chromeScale);
+    }
   }
 
   /// Cheap inequality for the extra ink sets: counts plus each set's
@@ -2340,6 +2428,8 @@ class _EditingPreviewPainter extends CustomPainter {
       _inkChanged(oldDelegate.extraInk, extraInk) ||
       !listEquals(oldDelegate.fadeRects, fadeRects) ||
       oldDelegate.fadeColor != fadeColor ||
+      oldDelegate.eraserCursor != eraserCursor ||
+      oldDelegate.eraserRadius != eraserRadius ||
       oldDelegate.afterGhost != afterGhost ||
       oldDelegate.afterShape != afterShape ||
       oldDelegate.showHandles != showHandles ||

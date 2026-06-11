@@ -262,6 +262,13 @@ class PdfEditingController extends ChangeNotifier {
 
   set strokeWidth(double value) => preferences.strokeWidth = value;
 
+  /// The circle eraser's radius, in PDF points — the eraser removes
+  /// every part of an ink stroke within this distance of its swept
+  /// path, PSPDFKit-style. Persisted.
+  double get eraserRadius => preferences.eraserRadius;
+
+  set eraserRadius(double value) => preferences.eraserRadius = value;
+
   /// Font size for free-text annotations, in PDF points. Persisted.
   double get fontSize => preferences.fontSize;
 
@@ -1010,6 +1017,54 @@ class PdfEditingController extends ChangeNotifier {
         e.removeAnnotation(page, annotation);
       }
     }, pages: [for (final (page, _) in targets) page]);
+  }
+
+  /// Erases along [path] (page space) with the circle eraser: every
+  /// ink annotation on [pageIndex] is sliced where the swept circle of
+  /// [eraserRadius] crosses its strokes — strokes split, the rest
+  /// survives — in one revision, so a single undo restores the whole
+  /// swipe. Ink annotations without a usable /InkList can't be sliced
+  /// and are deleted whole when the path reaches their rect. Returns
+  /// whether anything changed.
+  bool sliceErase(int pageIndex, List<(double, double)> path) {
+    if (path.isEmpty) return false;
+    final radius = eraserRadius;
+    // resolve every target up front: removals shift /Annots slots, but
+    // the editor works by dictionary identity
+    final targets = [
+      for (final annotation in _page(pageIndex).annotations)
+        if (annotation.subtype == 'Ink' && !annotation.isHidden) annotation
+    ];
+    if (targets.isEmpty) return false;
+    return apply((editor) {
+      var changed = false;
+      for (final annotation in targets) {
+        if (annotation.inkList == null) {
+          // no centerline to slice — the rect is all we have
+          if (_pathTouchesRect(path, annotation.rect, radius)) {
+            editor.removeAnnotation(pageIndex, annotation);
+            changed = true;
+          }
+        } else if (editor.sliceInk(pageIndex, annotation, path, radius)) {
+          changed = true;
+        }
+      }
+      // slots may shift under the survivors
+      if (changed) _selected.clear();
+    }, pages: [pageIndex]);
+  }
+
+  static bool _pathTouchesRect(
+      List<(double, double)> path, PdfRect rect, double radius) {
+    for (final (x, y) in path) {
+      if (x >= rect.left - radius &&
+          x <= rect.right + radius &&
+          y >= rect.bottom - radius &&
+          y <= rect.top + radius) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Whether [bringSelectedToFront] would change anything: some selected

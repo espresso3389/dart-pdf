@@ -523,6 +523,18 @@ class _StyleMenuState extends State<_StyleMenu> {
                     display: '${controller.strokeWidth.toStringAsFixed(1)} pt',
                     onChanged: (v) => controller.strokeWidth = v,
                   ),
+                  if (controller.tool == PdfEditTool.eraser)
+                    _slider(
+                      key: const ValueKey('pdf-eraser-size'),
+                      label: 'Eraser size',
+                      value: controller.eraserRadius,
+                      min: 2,
+                      max: 40,
+                      display:
+                          '${controller.eraserRadius.round()} pt',
+                      onChanged: (v) =>
+                          controller.eraserRadius = v.roundToDouble(),
+                    ),
                   _slider(
                     label: 'Opacity',
                     value: controller.opacity,
@@ -616,6 +628,7 @@ class _StyleMenuState extends State<_StyleMenu> {
   }
 
   Widget _slider({
+    Key? key,
     required String label,
     required double value,
     required double min,
@@ -624,7 +637,7 @@ class _StyleMenuState extends State<_StyleMenu> {
     required ValueChanged<double> onChanged,
     ValueChanged<double>? onChangeEnd,
   }) {
-    return Row(children: [
+    return Row(key: key, children: [
       SizedBox(width: 86, child: Text(label)),
       Expanded(
         child: Slider(

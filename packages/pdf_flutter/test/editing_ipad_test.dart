@@ -266,7 +266,7 @@ void main() {
       editing.dispose();
     });
 
-    testWidgets('a mouse drag erases crossed strokes as one undo step',
+    testWidgets('a mouse drag slices crossed strokes as one undo step',
         (tester) async {
       final (editing, _) = await pumpViewer(tester);
       // two commits: strokes buffered together would aggregate into one
@@ -288,9 +288,17 @@ void main() {
       await g.up();
       await tester.pump();
 
-      expect(editing.document.page(0).annotations, isEmpty);
+      // the circle eraser slices, PSPDFKit-style: both annotations
+      // survive, each split where the swipe crossed them
+      final annotations = editing.document.page(0).annotations;
+      expect(annotations, hasLength(2));
+      for (final annotation in annotations) {
+        expect(annotation.inkList, hasLength(2));
+      }
       editing.undo();
-      expect(editing.document.page(0).annotations, hasLength(2));
+      for (final annotation in editing.document.page(0).annotations) {
+        expect(annotation.inkList, hasLength(1));
+      }
     });
 
     testWidgets('a stylus erases raw, from the pointer-down',
@@ -302,12 +310,17 @@ void main() {
       editing.tool = PdfEditTool.eraser;
       await tester.pump();
 
+      // a bare tap stamps one circle out of the stroke's middle
       final g = await tester.startGesture(view(200, 500),
           kind: PointerDeviceKind.stylus);
       await g.up();
       await tester.pump(const Duration(milliseconds: 400));
 
-      expect(editing.document.page(0).annotations, isEmpty);
+      final ink = editing.document.page(0).annotations.single;
+      expect(ink.inkList, hasLength(2));
+      // the cut hugs the eraser circle (default radius 8pt about x=200)
+      expect(ink.inkList![0].last.$1, closeTo(192, 0.5));
+      expect(ink.inkList![1].first.$1, closeTo(208, 0.5));
     });
 
     testWidgets('a flipped pencil erases while the ink tool is armed',
@@ -326,8 +339,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 900));
       await tester.pump(const Duration(milliseconds: 400));
 
-      // erased the stroke under it and drew nothing of its own
-      expect(editing.document.page(0).annotations, isEmpty);
+      // sliced the stroke under it and drew nothing of its own
+      final ink = editing.document.page(0).annotations.single;
+      expect(ink.subtype, 'Ink');
+      expect(ink.inkList, hasLength(2));
     });
   });
 

@@ -144,9 +144,56 @@ class PdfShading {
     ).parse();
   }
 
+  /// Samples a function-based shading (type 1) into a Gouraud triangle
+  /// grid in the space mapped by [transform]. The shading's own /Matrix
+  /// (domain space → target space) composes in. Null for other types.
+  PdfMesh? toFunctionMesh(PdfMatrix transform) {
+    final cos = _cos;
+    final dict = _dict;
+    final fn = function;
+    if (shadingType != 1 || cos == null || dict == null || fn == null) {
+      return null;
+    }
+    final d = domain.length >= 4 ? domain : const [0.0, 1.0, 0.0, 1.0];
+    final m = _numbers(cos, dict['Matrix']);
+    final matrix = m.length >= 6
+        ? PdfMatrix(m[0], m[1], m[2], m[3], m[4], m[5]).concat(transform)
+        : transform;
+    // 24×24 cells ≈ 1150 triangles: smooth enough for 2D color fields
+    // at print sizes, cheap enough to sample the function 625 times.
+    const cells = 24;
+    final vertices = <PdfMeshVertex>[];
+    final triangles = <int>[];
+    for (var j = 0; j <= cells; j++) {
+      final y = d[2] + (d[3] - d[2]) * j / cells;
+      for (var i = 0; i <= cells; i++) {
+        final x = d[0] + (d[1] - d[0]) * i / cells;
+        final color = colorFromComponents(fn.evaluateAt([x, y]), components);
+        vertices.add(PdfMeshVertex(
+            matrix.transformX(x, y), matrix.transformY(x, y), color));
+      }
+    }
+    for (var j = 0; j < cells; j++) {
+      for (var i = 0; i < cells; i++) {
+        final a = j * (cells + 1) + i;
+        final b = a + 1;
+        final c = a + cells + 1;
+        triangles
+          ..add(a)
+          ..add(b)
+          ..add(c)
+          ..add(b)
+          ..add(c + 1)
+          ..add(c);
+      }
+    }
+    return PdfMesh(vertices, triangles);
+  }
+
   /// Samples the shading into gradient stops. Returns null for shading
   /// types other than axial (2) and radial (3) — mesh shadings (4-7)
-  /// decode via [toMesh]; function-based (1) is unsupported.
+  /// decode via [toMesh]; function-based (1) decodes via
+  /// [toFunctionMesh].
   PdfGradient? toGradient(PdfMatrix transform) {
     final fn = function;
     if (fn == null) return null;

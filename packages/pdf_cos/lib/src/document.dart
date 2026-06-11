@@ -38,6 +38,14 @@ class CosDocument {
   /// derived from the owner's number and generation.
   final Map<CosStream, CosReference> _streamOwners = {};
 
+  /// Object numbers currently mid-parse, guarding against definitions
+  /// that reference their own object (fuzzed and corrupt files).
+  final Set<int> _loadingObjects = {};
+
+  /// `N G obj` headers found by scanning the file, built only when an
+  /// xref offset turns out to point at the wrong object.
+  Map<int, CosXrefEntry>? _scannedHeaders;
+
   /// The active security handler, or null for unencrypted documents.
   StandardSecurityHandler? get encryption => _encryption;
 
@@ -119,19 +127,7 @@ class CosDocument {
   /// object streams so compressed objects stay reachable, and — failing a
   /// recovered /Root — locates the catalog by its /Type.
   static CosDocument _recover(Uint8List bytes, int shift, String password) {
-    final entries = <int, CosXrefEntry>{};
-    for (var i = shift; i + 3 <= bytes.length; i++) {
-      if (bytes[i] != 0x6F /* o */ ||
-          bytes[i + 1] != 0x62 /* b */ ||
-          bytes[i + 2] != 0x6A /* j */) {
-        continue;
-      }
-      if (i + 3 < bytes.length && CosLexer.isRegular(bytes[i + 3])) continue;
-      final header = _objectHeaderBefore(bytes, i, shift);
-      if (header == null) continue;
-      final (start, objectNumber, generation) = header;
-      entries[objectNumber] = CosXrefEntry.inUse(start - shift, generation);
-    }
+    final entries = _scanObjectHeaders(bytes, shift);
     if (entries.isEmpty) {
       throw CosParseException(
           'cross-reference recovery found no objects in the file');
@@ -236,6 +232,25 @@ class CosDocument {
     }
     trailer.entries.putIfAbsent('Size', () => CosInteger(maxNumber + 1));
     return document;
+  }
+
+  /// Scans the whole file for `N G obj` headers; the last definition of
+  /// each object number wins, matching incremental-update semantics.
+  static Map<int, CosXrefEntry> _scanObjectHeaders(Uint8List bytes, int shift) {
+    final entries = <int, CosXrefEntry>{};
+    for (var i = shift; i + 3 <= bytes.length; i++) {
+      if (bytes[i] != 0x6F /* o */ ||
+          bytes[i + 1] != 0x62 /* b */ ||
+          bytes[i + 2] != 0x6A /* j */) {
+        continue;
+      }
+      if (i + 3 < bytes.length && CosLexer.isRegular(bytes[i + 3])) continue;
+      final header = _objectHeaderBefore(bytes, i, shift);
+      if (header == null) continue;
+      final (start, objectNumber, generation) = header;
+      entries[objectNumber] = CosXrefEntry.inUse(start - shift, generation);
+    }
+    return entries;
   }
 
   /// Walks backwards from an `obj` keyword over `N G `, returning the
@@ -359,37 +374,72 @@ class CosDocument {
     final entry = _xref[objectNumber];
     if (entry == null) return CosNull.instance;
 
+    // A re-entrant request means the object's own definition references
+    // itself (a stream whose /Length is `N 0 R` for object N). Answer
+    // null without caching: the parser treats the junk length leniently
+    // and scans for "endstream" instead.
+    if (!_loadingObjects.add(objectNumber)) return CosNull.instance;
     final CosObject result;
-    switch (entry.type) {
-      case CosXrefEntryType.free:
-        result = CosNull.instance;
-      case CosXrefEntryType.inUse:
-        final parser = CosParser(bytes,
-            offset: entry.offset + _offsetShift, resolver: _resolveRef);
-        final indirect = parser.parseIndirectObject();
-        if (indirect.objectNumber != objectNumber) {
-          throw CosParseException(
-              'cross-reference points at object ${indirect.objectNumber}, '
-              'expected $objectNumber',
-              entry.offset);
-        }
-        result = indirect.object;
-        // strings decrypt with the owning object's key the moment it
-        // loads; stream payloads wait for decodeStreamData
-        if (_encryption != null && objectNumber != _encryptObjectNumber) {
-          _decryptStringsDeep(result, objectNumber, indirect.generation);
-        }
-      case CosXrefEntryType.compressed:
-        // objects inside an object stream were decrypted wholesale with
-        // the stream itself — never again individually (§7.6.3)
-        result = _objectStream(entry.streamObjectNumber)
-            .objectByNumber(objectNumber, entry.indexInStream);
+    try {
+      switch (entry.type) {
+        case CosXrefEntryType.free:
+          result = CosNull.instance;
+        case CosXrefEntryType.inUse:
+          // A junk target or one holding a different object means the
+          // xref offsets are off (shifted, or regenerated wrong) — fall
+          // back to a one-time scan for `N G obj` headers, and failing
+          // that treat the reference as dangling.
+          final indirect = _parseIndirectAt(entry.offset, objectNumber) ??
+              _parseScannedHeader(objectNumber);
+          if (indirect == null) {
+            result = CosNull.instance;
+          } else {
+            result = indirect.object;
+            // strings decrypt with the owning object's key the moment it
+            // loads; stream payloads wait for decodeStreamData
+            if (_encryption != null && objectNumber != _encryptObjectNumber) {
+              _decryptStringsDeep(result, objectNumber, indirect.generation);
+            }
+          }
+        case CosXrefEntryType.compressed:
+          // objects inside an object stream were decrypted wholesale with
+          // the stream itself — never again individually (§7.6.3)
+          result = _objectStream(entry.streamObjectNumber)
+              .objectByNumber(objectNumber, entry.indexInStream);
+      }
+    } finally {
+      _loadingObjects.remove(objectNumber);
     }
     if (_encryption != null && result is CosStream) {
       _streamOwners[result] = ref;
     }
     _cache[ref] = result;
     return result;
+  }
+
+  /// Parses the indirect object at xref [offset], or null when the bytes
+  /// there are junk or define a different object number.
+  CosIndirectObject? _parseIndirectAt(int offset, int objectNumber) {
+    try {
+      final parser = CosParser(bytes,
+          offset: offset + _offsetShift, resolver: _resolveRef);
+      final indirect = parser.parseIndirectObject();
+      return indirect.objectNumber == objectNumber ? indirect : null;
+    } on Exception {
+      return null;
+    } on RangeError {
+      return null;
+    }
+  }
+
+  /// Looks [objectNumber] up in the lazily built header scan (the same
+  /// scan full recovery uses) — the rescue for xrefs whose offsets lie.
+  CosIndirectObject? _parseScannedHeader(int objectNumber) {
+    final headers =
+        _scannedHeaders ??= _scanObjectHeaders(bytes, _offsetShift);
+    final entry = headers[objectNumber];
+    if (entry == null || entry.type != CosXrefEntryType.inUse) return null;
+    return _parseIndirectAt(entry.offset, objectNumber);
   }
 
   /// Replaces every string in [object]'s graph with its decrypted form.

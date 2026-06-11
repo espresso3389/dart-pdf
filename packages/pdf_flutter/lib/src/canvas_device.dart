@@ -326,6 +326,7 @@ class CanvasPdfDevice implements PdfDevice {
 
   @override
   void drawText(PdfTextRun run) {
+    if (run.invisible) return; // OCR layers occupy geometry, paint nothing
     if (run.glyphs != null) {
       // embedded font: draw its real outlines, never substitute — blank
       // glyphs (invisible text layers, Type3 procs drawn by the

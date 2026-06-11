@@ -35,8 +35,13 @@ class RecordingDevice implements PdfDevice {
     gradients.add((path, gradient));
   }
 
+  final meshes = <PdfMesh>[];
+
   @override
-  void fillMesh(PdfMesh mesh, double a) {}
+  void fillMesh(PdfMesh mesh, double a) {
+    calls.add('mesh');
+    meshes.add(mesh);
+  }
 
   @override
   void strokePath(
@@ -228,7 +233,7 @@ void main() {
       expect(device.texts[1].transform.e, closeTo(11.67, 1e-9));
     });
 
-    test('invisible text (Tr 3) advances but does not draw', () {
+    test('invisible text (Tr 3) is emitted flagged, and advances', () {
       final doc = PdfDocument.open(buildClassicPdf());
       final device = RecordingDevice();
       final page = doc.page(0);
@@ -237,10 +242,76 @@ void main() {
             'BT /F1 10 Tf 3 Tr (ghost) Tj 0 Tr (real) Tj ET'.codeUnits)),
         page.resources,
       );
-      final run = device.texts.single;
+      // the ghost run still reaches the device — it is the text layer of
+      // OCR'd scans, so extraction/selection must see it — but flagged so
+      // painting devices skip it
+      expect(device.texts, hasLength(2));
+      expect(device.texts[0].text, 'ghost');
+      expect(device.texts[0].invisible, isTrue);
+      final run = device.texts[1];
       expect(run.text, 'real');
+      expect(run.invisible, isFalse);
       // advanced past the ghost glyphs at Helvetica AFM widths
       expect(run.transform.e, closeTo(24.46, 1e-9));
+    });
+  });
+
+  group('lenient real-world behavior (pdf.js corpus classes)', () {
+    test('an unresolvable font substitutes Helvetica instead of dropping '
+        'the text', () {
+      // pdf.js issue4461 class: a page with no /Resources still shows
+      // its text — and keeps it selectable
+      final doc = CosDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc, device: device).run(
+        ContentStreamParser.parse(Uint8List.fromList(
+            'BT /Nope 12 Tf 10 10 Td (still visible) Tj ET'.codeUnits)),
+        CosDictionary(),
+      );
+      final run = device.texts.single;
+      expect(run.text, 'still visible');
+      expect(run.fontName, 'Helvetica');
+      expect(run.width, greaterThan(0));
+    });
+
+    test('a function-based (type 1) shading paints through sh', () {
+      const program = '{ pop dup dup }';
+      final resources = CosDictionary({
+        'Shading': CosDictionary({
+          'S1': CosDictionary({
+            'ShadingType': const CosInteger(1),
+            'ColorSpace': const CosName('DeviceRGB'),
+            'Function': CosStream(
+              CosDictionary({
+                'FunctionType': const CosInteger(4),
+                'Domain': CosArray([
+                  const CosInteger(0),
+                  const CosInteger(1),
+                  const CosInteger(0),
+                  const CosInteger(1),
+                ]),
+                'Range': CosArray([
+                  for (var i = 0; i < 3; i++) ...[
+                    const CosInteger(0),
+                    const CosInteger(1),
+                  ],
+                ]),
+                'Length': CosInteger(program.length),
+              }),
+              Uint8List.fromList(program.codeUnits),
+            ),
+          }),
+        }),
+      });
+      final doc = CosDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc, device: device).run(
+        ContentStreamParser.parse(
+            Uint8List.fromList('/S1 sh'.codeUnits)),
+        resources,
+      );
+      expect(device.meshes, hasLength(1));
+      expect(device.meshes.single.vertices, isNotEmpty);
     });
   });
 

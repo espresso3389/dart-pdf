@@ -50,7 +50,13 @@ class PdfTextRun {
     this.fontName,
     this.fontSize = 0,
     this.glyphs,
+    this.invisible = false,
   });
+
+  /// Render mode 3 (§9.4.3): the run paints nothing but still occupies
+  /// its geometry — the OCR text layer of scanned documents. Painting
+  /// devices must skip it; text extraction wants it like any other run.
+  final bool invisible;
 
   /// Best-effort Unicode (via ToUnicode CMaps or the font's encoding).
   final String text;

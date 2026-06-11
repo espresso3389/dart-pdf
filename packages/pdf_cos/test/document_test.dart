@@ -145,4 +145,70 @@ void main() {
       expect(doc.catalog.typeName, 'Catalog');
     });
   });
+
+  group('corrupt files (pdf.js corpus classes)', () {
+    /// Assembles objects (1-based) into a classic-xref file, with an
+    /// optional corruption hook over the computed offsets.
+    Uint8List build(List<String> objects,
+        {void Function(List<int> offsets)? corrupt}) {
+      final buffer = StringBuffer('%PDF-1.4\n');
+      final offsets = <int>[];
+      for (var i = 0; i < objects.length; i++) {
+        offsets.add(buffer.length);
+        buffer.write('${i + 1} 0 obj\n${objects[i]}\nendobj\n');
+      }
+      corrupt?.call(offsets);
+      final xrefOffset = buffer.length;
+      buffer
+        ..write('xref\n0 ${objects.length + 1}\n')
+        ..write('0000000000 65535 f \n');
+      for (final offset in offsets) {
+        buffer.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+      }
+      buffer
+        ..write('trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n')
+        ..write('startxref\n$xrefOffset\n%%EOF\n');
+      return ascii(buffer.toString());
+    }
+
+    test('a stream whose /Length references its own object loads', () {
+      // poppler-91414: `4 0 obj << /Length 4 0 R >> stream` used to
+      // recurse forever (stack overflow); the re-entrant load now answers
+      // null and the parser scans for "endstream" instead
+      const content = 'BT (self) Tj ET';
+      final doc = CosDocument.open(build([
+        '<< /Type /Catalog /Pages 2 0 R >>',
+        '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] '
+            '/Contents 4 0 R >>',
+        '<< /Length 4 0 R >>\nstream\n$content\nendstream',
+      ]));
+      final stream = doc.getObject(4, 0) as CosStream;
+      expect(String.fromCharCodes(doc.decodeStreamData(stream)), content);
+    });
+
+    test(
+        'an xref offset pointing at the wrong object falls back to a '
+        'header scan', () {
+      // poppler-395: regenerated xrefs point entry N at some other
+      // object's bytes; the loader used to throw, now it rescans
+      final doc = CosDocument.open(build(
+        [
+          '<< /Type /Catalog /Pages 2 0 R >>',
+          '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+          '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>',
+          '<< /Marker (the real object 4) >>',
+        ],
+        // every entry in the table points at its neighbour's bytes
+        corrupt: (offsets) {
+          final last = offsets.removeLast();
+          offsets.insert(0, last);
+        },
+      ));
+      final four = doc.getObject(4, 0) as CosDictionary;
+      expect(
+          (doc.resolve(four['Marker']) as CosString).text, 'the real object 4');
+      expect(doc.catalog.typeName, 'Catalog');
+    });
+  });
 }

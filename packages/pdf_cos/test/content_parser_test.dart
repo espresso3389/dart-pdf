@@ -42,6 +42,27 @@ void main() {
     expect(array.length, 3);
   });
 
+  test('stray operators inside an array operand are dropped', () {
+    // pdf.js operator-in-TJ-array.pdf: real-world generators emit
+    // `[(a) 0.0 Tc -250.0 (b)] TJ`; a strict array parse aborted the page
+    final ops = ContentStreamParser.parse(
+        ascii('[(Grandes) 0.0 Tc -250.0 (Clienteles)] TJ 0.0 Tc'));
+    expect(ops.map((op) => op.operator), ['TJ', 'Tc']);
+    final array = ops[0].operands.single as CosArray;
+    // the numbers stay (harmless TJ adjustments), the operator is gone
+    expect(array.items, [
+      isA<CosString>(),
+      const CosReal(0),
+      const CosReal(-250),
+      isA<CosString>(),
+    ]);
+  });
+
+  test('an unterminated array operand keeps what parsed', () {
+    final ops = ContentStreamParser.parse(ascii('[(a) 1 2'));
+    expect(ops, isEmpty); // no operator ever arrived — nothing to run
+  });
+
   test('inline image becomes one BI operation', () {
     final ops = ContentStreamParser.parse(ascii(
         'q BI /W 2 /H 1 /CS /G /BPC 8 ID \x00\xff EI Q'));

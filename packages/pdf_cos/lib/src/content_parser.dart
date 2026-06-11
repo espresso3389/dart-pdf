@@ -29,6 +29,10 @@ class ContentStreamParser {
     while (true) {
       final t = parser.peekToken();
       if (t.type == CosTokenType.eof) break;
+      if (t.type == CosTokenType.arrayOpen) {
+        operands.add(_parseLenientArray(parser));
+        continue;
+      }
       if (t.type != CosTokenType.keyword) {
         operands.add(parser.parseObject());
         continue;
@@ -47,6 +51,36 @@ class ContentStreamParser {
       }
     }
     return operations;
+  }
+
+  /// Parses an array operand, dropping stray operators found inside it.
+  /// Real-world generators emit junk like `[(a) 0.0 Tc -250.0 (b)] TJ`;
+  /// a strict parse would abort the whole page on the `Tc`.
+  static CosArray _parseLenientArray(CosParser parser) {
+    parser.nextToken(); // [
+    final items = <CosObject>[];
+    while (true) {
+      final t = parser.peekToken();
+      switch (t.type) {
+        case CosTokenType.arrayClose:
+          parser.nextToken();
+          return CosArray(items);
+        case CosTokenType.eof:
+          return CosArray(items); // unterminated — keep what parsed
+        case CosTokenType.arrayOpen:
+          items.add(_parseLenientArray(parser));
+        case CosTokenType.keyword:
+          if (t.textValue == 'true' ||
+              t.textValue == 'false' ||
+              t.textValue == 'null') {
+            items.add(parser.parseObject());
+          } else {
+            parser.nextToken(); // stray operator — drop it
+          }
+        default:
+          items.add(parser.parseObject());
+      }
+    }
   }
 
   static ContentOperation _parseInlineImage(CosParser parser) {

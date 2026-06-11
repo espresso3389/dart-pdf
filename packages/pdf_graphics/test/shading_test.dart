@@ -364,5 +364,90 @@ void main() {
       )!;
       expect(shading.toMesh(PdfMatrix.identity), isNull);
     });
+
+    test('type 1 samples its 2-input function into a grid mesh', () {
+      // color = (x, x, x): pop y, duplicate x twice
+      const program = '{ pop dup dup }';
+      final shading = PdfShading.parse(
+        cos,
+        CosDictionary({
+          'ShadingType': const CosInteger(1),
+          'ColorSpace': const CosName('DeviceRGB'),
+          'Domain': CosArray([
+            const CosInteger(0),
+            const CosInteger(1),
+            const CosInteger(0),
+            const CosInteger(1),
+          ]),
+          // domain space → target space: scale 2, translate (5, 5)
+          'Matrix': CosArray([
+            const CosInteger(2),
+            const CosInteger(0),
+            const CosInteger(0),
+            const CosInteger(2),
+            const CosInteger(5),
+            const CosInteger(5),
+          ]),
+          'Function': CosStream(
+            CosDictionary({
+              'FunctionType': const CosInteger(4),
+              'Domain': CosArray([
+                const CosInteger(0),
+                const CosInteger(1),
+                const CosInteger(0),
+                const CosInteger(1),
+              ]),
+              'Range': CosArray([
+                for (var i = 0; i < 3; i++) ...[
+                  const CosInteger(0),
+                  const CosInteger(1),
+                ],
+              ]),
+              'Length': CosInteger(program.length),
+            }),
+            ascii(program),
+          ),
+        }),
+      )!;
+      final mesh = shading.toFunctionMesh(PdfMatrix.identity)!;
+      // 24×24 cells, 25×25 vertices, two triangles per cell
+      expect(mesh.vertices, hasLength(25 * 25));
+      expect(mesh.triangles, hasLength(24 * 24 * 2 * 3));
+      final first = mesh.vertices.first; // domain (0,0)
+      expect(first.x, 5);
+      expect(first.y, 5);
+      expect(first.color, const PdfColor(0, 0, 0));
+      final last = mesh.vertices.last; // domain (1,1)
+      expect(last.x, 7);
+      expect(last.y, 7);
+      expect(last.color, const PdfColor(1, 1, 1));
+      // other types stay on their own decode paths
+      expect(shading.toGradient(PdfMatrix.identity), isNull);
+      expect(shading.toMesh(PdfMatrix.identity), isNull);
+    });
+
+    test('calculator functions clamp each input to its own domain pair', () {
+      const program = '{ add 2 div }';
+      final fn = PdfFunction.parse(
+        cos,
+        CosStream(
+          CosDictionary({
+            'FunctionType': const CosInteger(4),
+            'Domain': CosArray([
+              const CosInteger(0),
+              const CosInteger(1),
+              const CosInteger(0),
+              const CosInteger(1),
+            ]),
+            'Range': CosArray([const CosInteger(0), const CosInteger(1)]),
+            'Length': CosInteger(program.length),
+          }),
+          ascii(program),
+        ),
+      )!;
+      expect(fn.evaluateAt([0.2, 0.6]).single, closeTo(0.4, 1e-9));
+      // out-of-domain inputs clamp per pair
+      expect(fn.evaluateAt([-1, 2]).single, closeTo(0.5, 1e-9));
+    });
   });
 }

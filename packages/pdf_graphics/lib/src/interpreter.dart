@@ -834,13 +834,25 @@ class PdfInterpreter {
   void _setFont(CosDictionary resources, List<CosObject> o) {
     _state.fontSize = _num(o, 1);
     final fonts = cos.resolve(resources['Font']);
-    if (o.isEmpty || o[0] is! CosName || fonts is! CosDictionary) return;
-    final dict = cos.resolve(fonts[(o[0] as CosName).value]);
-    if (dict is! CosDictionary) return;
+    CosDictionary? dict;
+    if (o.isNotEmpty && o[0] is CosName && fonts is CosDictionary) {
+      final resolved = cos.resolve(fonts[(o[0] as CosName).value]);
+      if (resolved is CosDictionary) dict = resolved;
+    }
+    // An unresolvable font (no /Resources at all, or a dangling entry)
+    // substitutes Helvetica so the text still paints — and stays
+    // selectable/searchable — instead of vanishing.
+    dict ??= _fallbackFontDict ??= (CosDictionary()
+      ..entries['Type'] = const CosName('Font')
+      ..entries['Subtype'] = const CosName('Type1')
+      ..entries['BaseFont'] = const CosName('Helvetica'));
     _state.fontDict = dict;
+    final loaded = dict;
     _state.font =
-        _fontCache.putIfAbsent(dict, () => PdfFontInfo.load(cos, dict));
+        _fontCache.putIfAbsent(loaded, () => PdfFontInfo.load(cos, loaded));
   }
+
+  CosDictionary? _fallbackFontDict;
 
   void _textLineMove(double tx, double ty) {
     _lineMatrix = PdfMatrix.translation(tx, ty).concat(_lineMatrix);
@@ -875,8 +887,11 @@ class PdfInterpreter {
       advance += tx * _state.horizontalScale;
     }
 
-    if (_state.renderMode != 3 && size != 0) {
-      // text rendering matrix: em space → page space (§9.4.4)
+    if (size != 0) {
+      // text rendering matrix: em space → page space (§9.4.4).
+      // Mode 3 (invisible) still emits the run — flagged, so painting
+      // devices skip it — because it IS the text of OCR'd scans, and
+      // selection/search/extraction must see it.
       final transform = PdfMatrix(
         size * _state.horizontalScale, 0, //
         0, size, //
@@ -894,6 +909,7 @@ class PdfInterpreter {
           fontName: font.baseFont,
           fontSize: size,
           glyphs: glyphs,
+          invisible: _state.renderMode == 3,
         ));
       }
     }
@@ -972,7 +988,8 @@ class PdfInterpreter {
     final shading = PdfShading.parse(cos, dict['Shading']);
     if (shading == null) return null;
     return shading.toGradient(PdfMatrix.identity)?.averageColor ??
-        shading.toMesh(PdfMatrix.identity)?.averageColor;
+        shading.toMesh(PdfMatrix.identity)?.averageColor ??
+        shading.toFunctionMesh(PdfMatrix.identity)?.averageColor;
   }
 
   void _fillWithPattern(PdfPath path, PdfFillRule rule, CosObject pattern) {
@@ -989,7 +1006,8 @@ class PdfInterpreter {
         device.fillPathGradient(path, rule, gradient, _state.fillAlpha);
         return;
       }
-      final mesh = shading?.toMesh(_patternMatrix(dict));
+      final mesh = shading?.toMesh(_patternMatrix(dict)) ??
+          shading?.toFunctionMesh(_patternMatrix(dict));
       if (mesh != null) {
         device.save();
         device.clipPath(path, rule);
@@ -1101,8 +1119,10 @@ class PdfInterpreter {
     // sh geometry lives in the current user space (§8.7.4.2)
     final gradient = shading?.toGradient(_state.ctm);
     if (gradient == null) {
-      // mesh shadings paint their own geometry; the clip bounds them
-      final mesh = shading?.toMesh(_state.ctm);
+      // mesh and function-based shadings paint their own geometry; the
+      // clip bounds them
+      final mesh =
+          shading?.toMesh(_state.ctm) ?? shading?.toFunctionMesh(_state.ctm);
       if (mesh != null) device.fillMesh(mesh, _state.fillAlpha);
       return;
     }

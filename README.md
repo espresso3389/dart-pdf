@@ -74,8 +74,11 @@ core runs on servers and in plain Dart tests.
 
 The roadmap is complete, and the former gap list has been closed too:
 encrypt-on-write, certificate chain validation against a trust store,
-mesh shadings (types 4–7), pure-Dart CCITT/JBIG2/JPEG 2000 decoders,
-deep-zoom detail rendering, and real ICC color management all landed.
+mesh shadings (types 4–7) and function-based shadings (type 1),
+pure-Dart CCITT/JBIG2/JPEG 2000 decoders, deep-zoom detail rendering,
+and real ICC color management all landed. Invisible text (the OCR
+layer of scanned documents) flows through extraction, so selection and
+search work on scans.
 
 The editing UI shipped with `pdf_flutter`: a `PdfEditingController`
 (edit session with zero-cost undo/redo — incremental updates make every
@@ -387,3 +390,16 @@ compression. Two layers run over it:
   compares it pixel-wise against checked-in baseline renders;
   regressions dump actual/diff images for inspection, and
   `GHENT_UPDATE=1` re-baselines after an intentional change.
+
+`test_corpora/pdfjs/` carries 171 real-world edge-case PDFs curated from
+the [mozilla/pdf.js](https://github.com/mozilla/pdf.js) test suite —
+fuzzed crashers (poppler, pdfbox, ghostscript cases), lying xrefs and
+page-tree /Counts, junk inside content streams, odd font programs,
+filter and encryption corner cases. Where Ghent pins print-production
+*features*, this corpus pins *robustness*: per-file expectations record
+which files open, which fail with a controlled exception, which need
+passwords, and which legitimately render blank (see the README in the
+corpus directory for provenance and per-file notes). Two layers again:
+`pdf_graphics/test/pdfjs_corpus_test.dart` (pure-Dart open + interpret)
+and `pdf_flutter/test/pdfjs_render_test.dart` (rasterization smoke over
+the real decode pipeline, no baselines).

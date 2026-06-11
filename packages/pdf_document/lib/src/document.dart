@@ -30,11 +30,12 @@ class PdfDocument {
     return pages;
   }
 
-  int get pageCount {
-    final count = cos.resolve(_pagesRoot['Count']);
-    if (count is CosInteger && count.value >= 0) return count.value;
-    return _countPages(_pagesRoot, <CosDictionary>{});
-  }
+  /// The number of reachable page leaves. Deliberately NOT the root
+  /// /Count: real-world files lie about it (and fuzzed ones make it a
+  /// reference to a stream), and an index below pageCount must never
+  /// make [page] throw. The walk caches in [_leafCache]; /Count is still
+  /// used as the subtree-skipping hint inside [page].
+  int get pageCount => _leaves.length;
 
   /// Document information dictionary (/Title, /Author, ...) as text.
   Map<String, String> get info {
@@ -74,6 +75,12 @@ class PdfDocument {
 
   List<CosDictionary>? _leafCache;
 
+  List<CosDictionary> get _leaves => _leafCache ??= () {
+        final out = <CosDictionary>[];
+        _collectLeaves(_pagesRoot, out, <CosDictionary>{});
+        return out;
+      }();
+
   /// Drops cached page-tree state. Editing code calls this after structural
   /// changes (reorder, removal, insertion) so lookups re-walk the tree.
   void invalidatePageCache() => _leafCache = null;
@@ -82,11 +89,7 @@ class PdfDocument {
   /// this document's page tree. Resolved objects are cached by reference,
   /// so identity comparison is sound. Used to resolve link destinations.
   int pageIndexOf(CosDictionary pageDict) {
-    final leaves = _leafCache ??= () {
-      final out = <CosDictionary>[];
-      _collectLeaves(_pagesRoot, out, <CosDictionary>{});
-      return out;
-    }();
+    final leaves = _leaves;
     for (var i = 0; i < leaves.length; i++) {
       if (identical(leaves[i], pageDict)) return i;
     }
@@ -110,19 +113,6 @@ class PdfDocument {
 
   bool _isLeaf(CosDictionary node) =>
       node.typeName == 'Page' || !node.containsKey('Kids');
-
-  int _countPages(CosDictionary node, Set<CosDictionary> visited) {
-    if (!visited.add(node)) return 0;
-    if (_isLeaf(node)) return 1;
-    final kids = cos.resolve(node['Kids']);
-    if (kids is! CosArray) return 0;
-    var total = 0;
-    for (final kid in kids.items) {
-      final child = cos.resolve(kid);
-      if (child is CosDictionary) total += _countPages(child, visited);
-    }
-    return total;
-  }
 
   PdfPage? _findPage(CosDictionary node, _Counter remaining,
       _Inherited inherited, Set<CosDictionary> visited,

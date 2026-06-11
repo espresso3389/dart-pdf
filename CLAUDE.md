@@ -1312,3 +1312,65 @@ asserts now use a Text-widget predicate) and find.byType(TextField)
 in tree order (the demo note field is keyed 'demo-note' now); the
 panel's page header and a 'Page N' snippet both render the same
 string — findsNWidgets(2). Remaining batch-4: PDF.js corpus.
+Batch 4, session 5 (PDF.js corpus — the last batch-4 item):
+`test_corpora/pdfjs/` (checked in, 3.4MB) — 171 edge-case PDFs curated
+from mozilla/pdf.js test/pdfs @ 2466a76 (only committed files, none of
+the .link ones; provenance + per-file notes in the corpus README; raw
+URL pattern in there too). Survey workflow that built it:
+`pdf_graphics/tool/pdfjs_survey.dart` opens + interprets everything and
+buckets ok/open-fail/page-fail/blank — kept for future corpus drops.
+Test layers mirror Ghent: pdfjs_corpus_test.dart (pdf_graphics, pure
+Dart; per-file pinned expectations — passwords {issue6010_1 abc,
+issue6010_2 æøå, issue15893_reduced test, bug1782186 Hello, issue3371
+ELXRTQWS, encrypted-attachment 000000}, print_protection must throw
+CosPasswordException (pdf.js shows its password dialog too — NOT a
+bug), 6 fuzz files pinned "controlled CosParseException or zero
+reachable pages", 14 mayBeBlank files annotated in-test) and
+pdfjs_render_test.dart (pdf_flutter, rasterizes ≤5 pages/file at
+ratio 1, no baselines — exercises the image decoders; skips the
+unopenable+password files).
+Bugs the corpus caught (all fixed, all with inline-fixture regression
+tests): (1) self-referential stream /Length (`4 0 obj <</Length 4 0 R>>`)
+recursed to StackOverflow — getObject now keeps a `_loadingObjects`
+re-entrancy set; a re-entrant load answers CosNull WITHOUT caching and
+the parser's endstream scan takes over (poppler-91414). (2) xref
+entries pointing at the wrong object threw — `_parseIndirectAt` returns
+null on junk/mismatch and `_parseScannedHeader` lazily runs the same
+`N G obj` scan recovery uses (factored to `_scanObjectHeaders`), then
+dangling-null (poppler-395). (3) stray operators inside array operands
+(`[(a) 0.0 Tc -250.0 (b)] TJ`) aborted the page — ContentStreamParser
+`_parseLenientArray` drops non-true/false/null keywords, keeps numbers,
+tolerates unterminated arrays (operator-in-TJ-array). (4) pageCount
+trusted a lying root /Count — it is now ALWAYS the cached leaf walk
+(`_leaves`, shared with pageIndexOf; /Count survives only as page()'s
+subtree-skip hint), so page(i) never RangeErrors below pageCount
+(Pages-tree-refs is an interior-node CYCLE 3→4→5→3 with /Count 2 and
+one real page — the visited-set is right, /Count lies). (5) a content
+stream whose filter rejects its data killed the page — contentBytes
+skips that stream, the rest of the /Contents array still draws
+(PDFBOX-4352). (6) unresolvable fonts dropped text — _setFont falls
+back to a synthesized Helvetica dict (`_fallbackFontDict`) so text
+paints and stays selectable. (7) function-based (type 1) shadings were
+blank — `PdfFunction.evaluateAt(List)` (type 4 pushes all inputs,
+clamped per /Domain pair; others use input[0]) +
+`PdfShading.toFunctionMesh` (24×24 grid sampled through the shading
+/Matrix into PdfMesh) wired into sh, pattern fills, and _patternColor.
+(8) Tr 3 invisible text never reached devices, so OCR scan text was
+unselectable/unsearchable — PdfTextRun.invisible; the interpreter
+emits mode-3 runs flagged, canvas_device early-returns on it, the
+corpus/Ghent counting devices don't count it as paint (interpreter_test
+"Tr 3" expectations updated — old test encoded the bug).
+Encryption non-bugs worth remembering: print_protection.pdf has
+NUL-padded 239-byte /O//U (the R6 sublist windows handle that fine) and
+NO empty password — verified against an independent python+openssl
+algorithm-2.B implementation before concluding our handler is correct.
+encrypted-attachment.pdf (/StmF /Identity /EFF /StdCF, unsigned /P
+4294967292) just needs password 000000 (pdf.js api_spec). pdf.js files
+absent from test_manifest.json are unit-test fixtures — check
+test/unit/*_spec.js (api_spec) and the adding commit before assuming a
+render expectation. Survey gotcha: PdfDocument.open is lazy — catalog
+and page-tree failures surface at pageCount, so harnesses must guard
+BOTH; the corpus test's unopenable branch pins "CosParseException or
+pageCount == 0". Known gaps the corpus documents but doesn't close:
+predefined CJK CMaps (noembed-sjis/eucjp, issue3521 render blank),
+JBIG2 Huffman/refinement (decode-fails gracefully, image skipped).

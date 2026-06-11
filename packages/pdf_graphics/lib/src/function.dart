@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:pdf_cos/pdf_cos.dart';
 
-/// A PDF function (§7.10) restricted to one input — what shadings need.
+/// A PDF function (§7.10), one input except where shadings need more.
 ///
 /// All four types are supported: 0 (sampled, with linear interpolation),
 /// 2 (exponential), 3 (stitching), and 4 (PostScript calculator).
@@ -11,6 +11,12 @@ abstract class PdfFunction {
   const PdfFunction();
 
   List<double> evaluate(double x);
+
+  /// Multi-input evaluation, for function-based (type 1) shadings whose
+  /// functions map (x, y). Only the calculator (type 4) genuinely
+  /// consumes more than one input; the others fall back to the first.
+  List<double> evaluateAt(List<double> inputs) =>
+      evaluate(inputs.isEmpty ? 0.0 : inputs[0]);
 
   static PdfFunction? parse(CosDocument cos, CosObject? object) {
     final resolved = cos.resolve(object);
@@ -104,7 +110,8 @@ abstract class PdfFunction {
         final program = _PostScriptFunction.parseProgram(
             String.fromCharCodes(source));
         if (program == null) return null;
-        return _PostScriptFunction(x0, x1, program, range);
+        return _PostScriptFunction(
+            x0, x1, program, range, domain.length >= 2 ? domain : [x0, x1]);
       default:
         return null;
     }
@@ -139,6 +146,10 @@ class _CombinedFunction extends PdfFunction {
   @override
   List<double> evaluate(double x) =>
       [for (final part in parts) ...part.evaluate(x)];
+
+  @override
+  List<double> evaluateAt(List<double> inputs) =>
+      [for (final part in parts) ...part.evaluateAt(inputs)];
 }
 
 class _ExponentialFunction extends PdfFunction {
@@ -246,7 +257,8 @@ class _SampledFunction extends PdfFunction {
 /// parsed once into a token list; numbers and booleans share one operand
 /// stack at evaluation time. Angles for sin/cos/atan are in degrees.
 class _PostScriptFunction extends PdfFunction {
-  const _PostScriptFunction(this.x0, this.x1, this.program, this.range);
+  const _PostScriptFunction(
+      this.x0, this.x1, this.program, this.range, this.domain);
 
   final double x0, x1;
 
@@ -254,6 +266,10 @@ class _PostScriptFunction extends PdfFunction {
   /// `List<Object>` procedure bodies for if/ifelse.
   final List<Object> program;
   final List<double> range;
+
+  /// The full /Domain, pairs per input — multi-input shading functions
+  /// clamp each input against its own pair.
+  final List<double> domain;
 
   /// Parses the outermost `{ ... }` block. Returns null on malformed
   /// programs (unbalanced braces, missing body).
@@ -292,9 +308,17 @@ class _PostScriptFunction extends PdfFunction {
   }
 
   @override
-  List<double> evaluate(double x) {
+  List<double> evaluate(double x) => evaluateAt([x]);
+
+  @override
+  List<double> evaluateAt(List<double> inputs) {
     final outputs = range.length ~/ 2;
-    final stack = <Object>[x.clamp(x0, x1)];
+    final stack = <Object>[
+      for (var i = 0; i < inputs.length; i++)
+        domain.length >= (i + 1) * 2
+            ? inputs[i].clamp(domain[i * 2], domain[i * 2 + 1])
+            : inputs[i],
+    ];
     try {
       _run(program, stack, 0);
     } catch (_) {

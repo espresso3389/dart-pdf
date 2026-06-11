@@ -73,8 +73,17 @@ class PdfPage {
     for (final stream in streams) {
       // streams in a /Contents array form one logical stream; the separator
       // keeps tokens from adjacent streams apart
+      final Uint8List data;
+      try {
+        data = document.cos.decodeStreamData(stream);
+      } on Exception {
+        // a content stream whose filters reject the payload renders as
+        // empty rather than failing the whole page (corrupt real-world
+        // files; the rest of the /Contents array still draws)
+        continue;
+      }
       if (out.isNotEmpty) out.addByte(0x0A);
-      out.add(document.cos.decodeStreamData(stream));
+      out.add(data);
     }
     return out.takeBytes();
   }

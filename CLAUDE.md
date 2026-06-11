@@ -156,3 +156,18 @@ down/move (touch/pencil) via a floating swatch+hex chip
 raw pointer-up (so tap and press-drag-release both pick; the tap
 handler no-ops while picking). dart:typed_data must be imported
 explicitly for ByteData (flutter/painting doesn't re-export it).
+Persisted UI preferences (Ben: save them locally, default behavior):
+`PdfEditingPreferences` (editing_preferences.dart, backed by
+shared_preferences, keys `pdf_flutter.editing.*`) — color/strokeWidth/
+fontSize/opacity/fingerDrawsInk plus host-chrome flags
+showThumbnailSidebar/showAnnotationSidebar. The controller's style
+state proxies to it (no duplicate fields; `preferences.addListener(
+notifyListeners)` in the ctor, removed in dispose); each controller
+creates its own instance by default, the example app shares one
+(`preferences:` param) so panels persist too. Loading is async
+(`ready`); when storage is missing (widget tests) getInstance throws,
+it's swallowed, defaults stand, writes no-op — so plain tests stay
+deterministic with zero mocking. A setter call during the in-flight
+load wins over stored data (`_modified` guard). Persistence tests use
+`SharedPreferences.setMockInitialValues` + `pumpEventQueue()` before
+reading back (writes are unawaited).

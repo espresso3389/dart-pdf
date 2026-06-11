@@ -16,6 +16,7 @@ dependencies:
   pdf_cos: ^0.1.0
   pdf_document: ^0.1.0
   pdf_graphics: ^0.1.0
+  shared_preferences: ^2.3.0
 
 dev_dependencies:
   pdf_test_fixtures: ^0.1.0

@@ -84,6 +84,10 @@ with a live viewport indicator), a full-spectrum color picker with an
 eyedropper that samples colors from the rendered page — with a live
 swatch-and-hex preview riding beside the pointer
 (`PdfColorPicker`), and a ready-made `PdfEditingToolbar`.
+UI preferences persist on the device by default
+(`PdfEditingPreferences`, backed by `shared_preferences`): color,
+stroke width, opacity, font size, the stylus/finger mode, and panel
+visibility all come back the way the user left them.
 Apple Pencil (and any stylus) is first-class for ink: strokes record
 pressure and render with variable width, and the first pen contact
 turns on palm rejection — fingers scroll while the pen draws.

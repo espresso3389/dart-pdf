@@ -35,13 +35,16 @@ class _ViewerScreenState extends State<ViewerScreen> {
   final _controller = PdfViewerController();
   final _searchField = TextEditingController();
 
+  /// UI preferences saved on this device — tool styles and which panels
+  /// are open. Shared with every editing session so they persist across
+  /// documents and app restarts.
+  final _prefs = PdfEditingPreferences();
+
   /// The open document's editing session: owns the bytes, the document
   /// revisions, undo/redo, and the editing tool state.
   PdfEditingController? _editing;
   String _title = '';
   String? _error;
-  bool _showAnnotations = false;
-  bool _showPages = false;
 
   // app state the interactive demo's PDF links and overlays manipulate
   bool _isDemo = false;
@@ -89,7 +92,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
   void _openBytes(Uint8List bytes, String title, {bool isDemo = false}) {
     final previous = _editing;
     setState(() {
-      _editing = PdfEditingController(bytes);
+      _editing = PdfEditingController(bytes, preferences: _prefs);
       _title = title;
       _error = null;
       _isDemo = isDemo;
@@ -163,6 +166,8 @@ class _ViewerScreenState extends State<ViewerScreen> {
   @override
   void initState() {
     super.initState();
+    // repaint the chrome when a preference (panel visibility) changes
+    _prefs.addListener(_onPrefsChanged);
     // open a file straight away with:
     //   flutter run -d macos --dart-define=PDF=/path/to/file.pdf
     const preset = String.fromEnvironment('PDF');
@@ -173,8 +178,11 @@ class _ViewerScreenState extends State<ViewerScreen> {
     }
   }
 
+  void _onPrefsChanged() => setState(() {});
+
   @override
   void dispose() {
+    _prefs.removeListener(_onPrefsChanged);
     _controller.dispose();
     _searchField.dispose();
     _noteField.dispose();
@@ -260,15 +268,16 @@ class _ViewerScreenState extends State<ViewerScreen> {
             IconButton(
               icon: const Icon(Icons.grid_view),
               tooltip: 'Pages',
-              isSelected: _showPages,
-              onPressed: () => setState(() => _showPages = !_showPages),
+              isSelected: _prefs.showThumbnailSidebar,
+              onPressed: () =>
+                  _prefs.showThumbnailSidebar = !_prefs.showThumbnailSidebar,
             ),
             IconButton(
               icon: const Icon(Icons.list_alt),
               tooltip: 'Annotations',
-              isSelected: _showAnnotations,
+              isSelected: _prefs.showAnnotationSidebar,
               onPressed: () =>
-                  setState(() => _showAnnotations = !_showAnnotations),
+                  _prefs.showAnnotationSidebar = !_prefs.showAnnotationSidebar,
             ),
           ],
           IconButton(
@@ -315,7 +324,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
         // the editing controller owns the document revisions: rebuild the
         // viewer with the current one whenever the controller notifies
         (final PdfEditingController session, _) => Row(children: [
-            if (_showPages)
+            if (_prefs.showThumbnailSidebar)
               PdfThumbnailSidebar(
                 controller: session,
                 viewerController: _controller,
@@ -332,7 +341,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 ),
               ),
             ),
-            if (_showAnnotations)
+            if (_prefs.showAnnotationSidebar)
               PdfAnnotationSidebar(
                 controller: session,
                 viewerController: _controller,

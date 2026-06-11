@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:pdf_document/pdf_document.dart';
 
+import 'editing_preferences.dart';
+
 /// The annotation tools a [PdfEditingController] can arm.
 ///
 /// Text markups (highlight, underline, strike-out, squiggly) are not
@@ -66,11 +68,28 @@ enum PdfMarkupKind { highlight, underline, strikeOut, squiggly }
 /// )
 /// ```
 class PdfEditingController extends ChangeNotifier {
-  PdfEditingController(Uint8List bytes, {String password = ''})
+  PdfEditingController(Uint8List bytes,
+      {String password = '', PdfEditingPreferences? preferences})
       : _bytes = bytes,
         _password = password,
         _revisions = [bytes.length],
-        _document = PdfDocument.open(bytes, password: password);
+        _document = PdfDocument.open(bytes, password: password),
+        preferences = preferences ?? PdfEditingPreferences() {
+    this.preferences.addListener(notifyListeners);
+  }
+
+  /// The persisted UI preferences backing [color], [strokeWidth],
+  /// [fontSize], [opacity], and [fingerDrawsInk] — every change is saved
+  /// to the local device and restored on the next session. Pass one in
+  /// to share it with the host's chrome (the sidebar-visibility flags
+  /// live there too).
+  final PdfEditingPreferences preferences;
+
+  @override
+  void dispose() {
+    preferences.removeListener(notifyListeners);
+    super.dispose();
+  }
 
   final String _password;
 
@@ -145,10 +164,6 @@ class PdfEditingController extends ChangeNotifier {
   // tool state
 
   PdfEditTool? _tool;
-  Color _color = const Color(0xFFE53935);
-  double _strokeWidth = 2;
-  double _fontSize = 14;
-  double _opacity = 1;
 
   /// The armed tool, or null when the viewer behaves as a plain reader.
   PdfEditTool? get tool => _tool;
@@ -163,44 +178,29 @@ class PdfEditingController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The color new annotations are created with.
-  Color get color => _color;
+  /// The color new annotations are created with. Persisted (these four
+  /// style properties live in [preferences]).
+  Color get color => preferences.color;
 
-  set color(Color value) {
-    if (value == _color) return;
-    _color = value;
-    notifyListeners();
-  }
+  set color(Color value) => preferences.color = value;
 
-  /// Stroke width for ink and shape annotations, in PDF points.
-  double get strokeWidth => _strokeWidth;
+  /// Stroke width for ink and shape annotations, in PDF points. Persisted.
+  double get strokeWidth => preferences.strokeWidth;
 
-  set strokeWidth(double value) {
-    if (value == _strokeWidth) return;
-    _strokeWidth = value;
-    notifyListeners();
-  }
+  set strokeWidth(double value) => preferences.strokeWidth = value;
 
-  /// Font size for free-text annotations, in PDF points.
-  double get fontSize => _fontSize;
+  /// Font size for free-text annotations, in PDF points. Persisted.
+  double get fontSize => preferences.fontSize;
 
-  set fontSize(double value) {
-    if (value == _fontSize) return;
-    _fontSize = value;
-    notifyListeners();
-  }
+  set fontSize(double value) => preferences.fontSize = value;
 
   /// Opacity (0–1] new ink, shape, markup, and stamp annotations are
-  /// created with. Free text and notes are always opaque.
-  double get opacity => _opacity;
+  /// created with. Free text and notes are always opaque. Persisted.
+  double get opacity => preferences.opacity;
 
-  set opacity(double value) {
-    if (value == _opacity) return;
-    _opacity = value;
-    notifyListeners();
-  }
+  set opacity(double value) => preferences.opacity = value;
 
-  int get _colorValue => _color.toARGB32() & 0xFFFFFF;
+  int get _colorValue => preferences.color.toARGB32() & 0xFFFFFF;
 
   // ---------------------------------------------------------------------
   // eyedropper
@@ -228,7 +228,7 @@ class PdfEditingController extends ChangeNotifier {
   /// [opacity]'s job) as the annotation [color].
   void finishColorPick(Color picked) {
     _pickingColor = false;
-    _color = Color(0xFF000000 | (picked.toARGB32() & 0xFFFFFF));
+    preferences.color = Color(0xFF000000 | (picked.toARGB32() & 0xFFFFFF));
     notifyListeners();
   }
 
@@ -238,19 +238,14 @@ class PdfEditingController extends ChangeNotifier {
   final Map<int, List<List<(double, double)>>> _ink = {};
   final Map<int, List<List<double>?>> _inkPressures = {};
 
-  bool _fingerDrawsInk = true;
-
   /// Whether touch pointers draw with the ink tool. When false they
   /// scroll and zoom as usual and only stylus (and mouse) input draws —
   /// palm rejection. The viewer turns this off automatically the first
-  /// time a stylus (Apple Pencil) touches a page with the ink tool armed.
-  bool get fingerDrawsInk => _fingerDrawsInk;
+  /// time a stylus (Apple Pencil) touches a page with the ink tool armed,
+  /// and the choice is persisted with the other [preferences].
+  bool get fingerDrawsInk => preferences.fingerDrawsInk;
 
-  set fingerDrawsInk(bool value) {
-    if (value == _fingerDrawsInk) return;
-    _fingerDrawsInk = value;
-    notifyListeners();
-  }
+  set fingerDrawsInk(bool value) => preferences.fingerDrawsInk = value;
 
   /// Drawn-but-uncommitted ink strokes on [pageIndex], in page space.
   List<List<(double, double)>> strokesOn(int pageIndex) =>
@@ -288,8 +283,8 @@ class PdfEditingController extends ChangeNotifier {
         if (pageStrokes.isNotEmpty) {
           editor.addInk(page, pageStrokes,
               color: _colorValue,
-              strokeWidth: _strokeWidth,
-              opacity: _opacity,
+              strokeWidth: preferences.strokeWidth,
+              opacity: preferences.opacity,
               pressures: pressures[page]);
         }
       });
@@ -317,16 +312,16 @@ class PdfEditingController extends ChangeNotifier {
         switch (kind) {
           case PdfMarkupKind.highlight:
             editor.addHighlight(page, quads,
-                color: _colorValue, opacity: _opacity);
+                color: _colorValue, opacity: preferences.opacity);
           case PdfMarkupKind.underline:
             editor.addUnderline(page, quads,
-                color: _colorValue, opacity: _opacity);
+                color: _colorValue, opacity: preferences.opacity);
           case PdfMarkupKind.strikeOut:
             editor.addStrikeOut(page, quads,
-                color: _colorValue, opacity: _opacity);
+                color: _colorValue, opacity: preferences.opacity);
           case PdfMarkupKind.squiggly:
             editor.addSquiggly(page, quads,
-                color: _colorValue, opacity: _opacity);
+                color: _colorValue, opacity: preferences.opacity);
         }
       });
     });
@@ -335,21 +330,21 @@ class PdfEditingController extends ChangeNotifier {
   void addRectangle(int pageIndex, PdfRect rect) =>
       apply((e) => e.addSquare(pageIndex, rect,
           strokeColor: _colorValue,
-          strokeWidth: _strokeWidth,
-          opacity: _opacity));
+          strokeWidth: preferences.strokeWidth,
+          opacity: preferences.opacity));
 
   void addEllipse(int pageIndex, PdfRect rect) =>
       apply((e) => e.addCircle(pageIndex, rect,
           strokeColor: _colorValue,
-          strokeWidth: _strokeWidth,
-          opacity: _opacity));
+          strokeWidth: preferences.strokeWidth,
+          opacity: preferences.opacity));
 
   void addFreeText(int pageIndex, PdfRect rect, String text) =>
       apply((e) => e.addFreeText(pageIndex, rect, text,
-          fontSize: _fontSize, color: _colorValue));
+          fontSize: preferences.fontSize, color: _colorValue));
 
   void addStamp(int pageIndex, PdfRect rect, String text) => apply((e) =>
-      e.addStamp(pageIndex, rect, text, color: _colorValue, opacity: _opacity));
+      e.addStamp(pageIndex, rect, text, color: _colorValue, opacity: preferences.opacity));
 
   /// Adds a sticky note with its top-left corner at ([x], [y]).
   void addNote(int pageIndex, double x, double y, String text) =>
@@ -535,7 +530,7 @@ class PdfEditingController extends ChangeNotifier {
           final tf = RegExp(r'(\d+(?:\.\d+)?)\s+Tf')
               .firstMatch(annotation.defaultAppearance ?? '');
           e.addFreeText(page, rect, text,
-              fontSize: double.tryParse(tf?.group(1) ?? '') ?? _fontSize,
+              fontSize: double.tryParse(tf?.group(1) ?? '') ?? preferences.fontSize,
               color: color ?? 0x000000);
         case 'Stamp':
           e.addStamp(page, rect, text, color: color ?? 0xC03030);

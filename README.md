@@ -221,6 +221,18 @@ platform-native file handling: the system picker to open, and a save
 dialog, browser download, or share sheet to save, whichever the platform
 has.
 
+It opens onto a generated six-page feature showcase: PDF link/JavaScript
+actions driving the Flutter app and live widgets pinned onto the page
+(both directions of interactivity), then a vector-graphics page (dashes,
+joins, Bézier fills, stitched axial and radial shadings, blend modes,
+constant alpha, CMYK/gray swatches), a typography page (the standard
+fonts, rendering modes, spacing/scaling operators, text transforms), an
+images page (RGB XObjects, color-key masks, 1-bit stencils, inline
+images), and an annotations & forms page whose markup, shapes, stamp,
+note, and filled form fields are authored through the editor API while
+the document is generated — the demo doubles as a smoke test of the
+authoring pipeline.
+
 ### Rendering test suite
 
 `test_corpora/ghent/` carries the [Ghent PDF Output Suite

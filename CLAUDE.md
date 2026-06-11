@@ -640,3 +640,39 @@ the enum from the picker, never the reverse. Tests: editing_test.dart
 (per-format round-trips incl. CMYK 100/0/0/0→cyan, drag rewrites the
 fields, empty-field no-op) and the preferences round-trip; verified
 live on macOS incl. format persistence across an app restart.
+Session 7 (saving + showcase): macOS saving was ALREADY fixed —
+a913df0 flipped user-selected.read-only → read-write in both
+entitlement profiles; this session verified the whole flow live
+(save panel → /tmp write, Replace-overwrite, toast, output parses).
+The demo (example/lib/demo_document.dart) is now a 6-page feature
+showcase: pages 1-2 unchanged (demo_test.dart taps page-1 buttons at
+fixed PDF coords and the GoTo lands on page 2 — don't move them);
+page 1 gained a TOC of /Fit GoTo links (placeholders @PGn@ patched
+after object numbering). Page 3 graphics (dash/join rows, even-odd
+star, Bézier heart, /ShAx stitched type-3-function axial + /ShRad
+radial via `sh`, Multiply circles, ca alpha row, CMYK `k` + gray `g`
+swatches), page 4 typography (7 standard fonts, Tr 0/1/2 — Tr 7 text
+clip is NOT implemented, don't demo it; Tc/Tw/Tz/Ts each reset inline
+since text state persists across BT/ET), page 5 images (hue-wheel RGB
+XObject as ASCIIHex, color-key /Mask over stripes, 1-bit /ImageMask
+smiley ×2, 4×4 inline image), page 6 annotations & forms: the base
+file hand-writes field skeletons (text/checkbox with /MK but no /AP —
+appearances generate on fill; radio kids NEED hand-written /AP /N
+state forms or onStates is empty and setRadioValue throws; combo
+needs /Opt + comboFlag 131072) plus /AcroForm /DR /Helv, then
+_authorShowcase reopens the bytes and authors 10 annotations + fills
+all 4 fields through PdfEditor — the demo is a build-time smoke test
+of the authoring pipeline (asserted in demo_document_test.dart).
+Inline-image bug found by the showcase: BI..ID..EI synthesizes a
+fresh CosStream every interpretation pass, but renderPicture decodes
+in a collector pass and paints in a second pass — the identity-keyed
+image map never hit, so inline images NEVER rendered. Fix:
+PdfImageRequest.isInline (set by _drawInlineImage), pdfImageKey()
+in image_decoder.dart returns a value key (PdfInlineImageKey: dict
+toString + data bytes) for inline requests, stream identity for
+XObjects (the xref cache makes those stable); ImageCollector now
+collects requests, decodeImages takes requests and keys by
+pdfImageKey, CanvasPdfDevice.images is Map<Object, ui.Image>.
+Regression test: pdf_flutter/test/inline_image_test.dart. Two Ghent
+baselines moved because GWG090's Type 3 bitmap-font row (CharProcs
+painting inline images) now renders — re-baselined as an improvement.

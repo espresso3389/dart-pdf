@@ -1266,6 +1266,7 @@ class PdfInterpreter {
       alpha: _state.fillAlpha,
       isStencil: dict['ImageMask'] == const CosBoolean(true),
       stencilColor: _state.fillColor,
+      isInline: true,
     ));
   }
 

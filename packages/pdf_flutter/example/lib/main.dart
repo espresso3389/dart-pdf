@@ -140,7 +140,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
   }
 
   void _openDemo() =>
-      _openBytes(buildDemoPdf(), 'Interactive demo', isDemo: true);
+      _openBytes(buildDemoPdf(), 'Feature showcase', isDemo: true);
 
   /// Pins [child] into a page slot at its design size in PDF points and
   /// lets it scale with the page, so the overlays hold together at any

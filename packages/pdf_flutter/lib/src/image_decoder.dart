@@ -6,12 +6,46 @@ import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
-/// Collects every image a page references, without painting anything.
-class ImageCollector implements PdfDevice {
-  final List<CosStream> streams = [];
+/// Map key for a decoded image. Image XObjects key by stream identity —
+/// the xref cache hands back the same [CosStream] on every interpretation
+/// pass. Inline images are re-synthesized each pass, so they key by value
+/// ([PdfInlineImageKey]) or the paint-time lookup could never hit.
+Object pdfImageKey(PdfImageRequest request) =>
+    request.isInline ? PdfInlineImageKey(request.stream) : request.stream;
+
+/// Value identity for an inline image: its parameter dictionary plus the
+/// raw data bytes.
+class PdfInlineImageKey {
+  PdfInlineImageKey(CosStream stream)
+      : _dict = stream.dictionary.toString(),
+        _data = stream.rawBytes;
+
+  final String _dict;
+  final Uint8List _data;
 
   @override
-  void drawImage(PdfImageRequest request) => streams.add(request.stream);
+  bool operator ==(Object other) {
+    if (other is! PdfInlineImageKey) return false;
+    if (other._dict != _dict || other._data.length != _data.length) {
+      return false;
+    }
+    for (var i = 0; i < _data.length; i++) {
+      if (other._data[i] != _data[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hash(_dict, _data.length,
+      _data.isEmpty ? 0 : _data.first, _data.isEmpty ? 0 : _data.last);
+}
+
+/// Collects every image a page references, without painting anything.
+class ImageCollector implements PdfDevice {
+  final List<PdfImageRequest> streams = [];
+
+  @override
+  void drawImage(PdfImageRequest request) => streams.add(request);
 
   @override
   void save() {}
@@ -58,14 +92,15 @@ class ImageCollector implements PdfDevice {
 /// arrays (on raw samples and on platform-decoded JPEGs); /ImageMask
 /// stencils (decoded as alpha, tinted by the device); JPXDecode via the
 /// pure-Dart JPEG 2000 decoder (gray/RGB/CMYK by component count).
-Future<Map<CosStream, ui.Image>> decodeImages(
-    CosDocument cos, Iterable<CosStream> streams) async {
-  final out = <CosStream, ui.Image>{};
-  for (final stream in streams) {
-    if (out.containsKey(stream)) continue;
+Future<Map<Object, ui.Image>> decodeImages(
+    CosDocument cos, Iterable<PdfImageRequest> requests) async {
+  final out = <Object, ui.Image>{};
+  for (final request in requests) {
+    final key = pdfImageKey(request);
+    if (out.containsKey(key)) continue;
     try {
-      final image = await _decodeOne(cos, stream);
-      if (image != null) out[stream] = image;
+      final image = await _decodeOne(cos, request.stream);
+      if (image != null) out[key] = image;
     } on Exception {
       // undecodable image: the device will skip it
     }

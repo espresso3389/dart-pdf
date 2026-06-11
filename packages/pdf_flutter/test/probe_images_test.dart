@@ -26,10 +26,10 @@ void main() {
       // ignore: avoid_print
       print('collected ${collector.streams.length} image draws');
       final images = await decodeImages(cos, collector.streams);
-      for (final stream in collector.streams.toSet()) {
-        final dict = stream.dictionary;
+      for (final request in collector.streams) {
+        final dict = request.stream.dictionary;
         // ignore: avoid_print
-        print('${images.containsKey(stream) ? 'OK  ' : 'FAIL'} '
+        print('${images.containsKey(pdfImageKey(request)) ? 'OK  ' : 'FAIL'} '
             '${cos.resolve(dict['Filter'])} '
             '${cos.resolve(dict['Width'])}x${cos.resolve(dict['Height'])} '
             'mask=${dict['ImageMask'] != null} '

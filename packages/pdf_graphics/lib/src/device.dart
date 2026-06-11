@@ -88,9 +88,15 @@ class PdfImageRequest {
     this.alpha = 1,
     this.isStencil = false,
     this.stencilColor = PdfColor.black,
+    this.isInline = false,
   });
 
   final CosStream stream;
+
+  /// True for inline images (`BI .. ID .. EI`). Their [stream] is
+  /// synthesized fresh on every interpretation pass, so consumers that
+  /// cache decoded pixels must key them by value, not stream identity.
+  final bool isInline;
 
   /// Maps the unit square (image space, y-up) to page space.
   final PdfMatrix transform;

@@ -4,12 +4,17 @@ import 'dart:ui' as ui;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_flutter/src/image_decoder.dart';
+import 'package:pdf_graphics/pdf_graphics.dart';
 import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 
 Future<Uint8List> pixelsOf(ui.Image image) async {
   final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
   return data!.buffer.asUint8List();
 }
+
+/// Wraps a stream the way the interpreter hands images to the decoder.
+PdfImageRequest req(CosStream stream) =>
+    PdfImageRequest(stream: stream, transform: PdfMatrix.identity);
 
 void main() {
   late CosDocument cos;
@@ -29,7 +34,7 @@ void main() {
         // bits: 0 (paint), 1 (skip)
         Uint8List.fromList([0x40]),
       );
-      final images = await decodeImages(cos, [stencil]);
+      final images = await decodeImages(cos, [req(stencil)]);
       final pixels = await pixelsOf(images[stencil]!);
       expect(pixels[3], 255); // first pixel painted
       expect(pixels[7], 0); // second pixel transparent
@@ -48,7 +53,7 @@ void main() {
         }),
         Uint8List.fromList([0x40]),
       );
-      final images = await decodeImages(cos, [stencil]);
+      final images = await decodeImages(cos, [req(stencil)]);
       final pixels = await pixelsOf(images[stencil]!);
       expect(pixels[3], 0);
       expect(pixels[7], 255);
@@ -76,7 +81,7 @@ void main() {
         }),
         Uint8List.fromList([255, 0, 0, 0, 255, 0]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       expect(pixels.sublist(0, 4), [255, 0, 0, 255]); // opaque red
       expect(pixels[7], 0); // green pixel fully masked out
@@ -103,7 +108,7 @@ void main() {
         }),
         Uint8List.fromList([10, 20, 30, 40]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       for (var i = 0; i < 4; i++) {
         expect(pixels[i * 4 + 3], 128);
@@ -123,7 +128,7 @@ void main() {
         }),
         Uint8List.fromList([0, 200]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       expect(pixels[0], 255); // 0 inverted
       expect(pixels[4], 55); // 200 inverted
@@ -142,7 +147,7 @@ void main() {
         }),
         Uint8List.fromList([0x40]), // bits: 0, 1
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       expect(pixels[0], 255); // bit 0 → decode min 1 → white
       expect(pixels[4], 0); // bit 1 → decode max 0 → black
@@ -167,7 +172,7 @@ void main() {
         }),
         Uint8List.fromList([0, 255, 0, 200, 30, 40]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       expect(pixels[3], 0); // green pixel keyed out
       expect(pixels[7], 255); // other pixel opaque
@@ -197,7 +202,7 @@ void main() {
         }),
         Uint8List.fromList([100, 100]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       expect(pixels[3], 0);
       expect(pixels[7], 255);
@@ -228,7 +233,7 @@ void main() {
         }),
         Uint8List.fromList([255, 255, 255, 255, 255, 255]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       expect(pixels.sublist(0, 4), [0, 0, 0, 0]);
       expect(pixels.sublist(4, 8), [255, 255, 255, 255]);
@@ -256,7 +261,7 @@ void main() {
         }),
         Uint8List.fromList([0, 1]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       expect(pixels.sublist(0, 4), [255, 0, 0, 255]); // red
       expect(pixels.sublist(4, 8), [0, 255, 0, 255]); // green
@@ -280,7 +285,7 @@ void main() {
         }),
         Uint8List.fromList([0, 1]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       // pure cyan converts as process ink, not monitor cyan
       expect(pixels.sublist(0, 4), [0, 158, 224, 255]);
@@ -307,7 +312,7 @@ void main() {
         }),
         buildTestJpeg(),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       for (var i = 0; i < pixels.length; i += 4) {
         expect(pixels[i + 3], 0, reason: 'pixel $i should be keyed out');
@@ -333,7 +338,7 @@ void main() {
         }),
         buildTestJpeg(),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       // solid red inverts to cyan (chroma subsampling costs ~40 levels)
       expect(pixels[0], lessThan(60));
@@ -358,7 +363,7 @@ void main() {
         }),
         Uint8List.fromList([128, 64, 200]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       // AdobeRGB (128,64,200) in sRGB per littleCMS: (146,62,205)
       expect(pixels[0], closeTo(146, 3));
@@ -381,7 +386,7 @@ void main() {
         }),
         Uint8List.fromList([255, 0, 0, 0]), // pure cyan
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       // littleCMS: (0,164,219) — the naive cmyk() heuristic gives
       // (0,158,224), so this proves the profile path ran... barely;
@@ -416,7 +421,7 @@ void main() {
           1, 0, 16,
         ]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       int grayAt(int x, int y) => pixels[(y * 64 + x) * 4];
       expect(grayAt(0, 0), 255); // background white
@@ -456,7 +461,7 @@ void main() {
           32, 28, 127, 255, 172,
         ]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       int grayAt(int x, int y) => pixels[(y * 64 + x) * 4];
       expect(grayAt(0, 0), 255); // background white
@@ -484,7 +489,7 @@ void main() {
         // rows are byte-aligned: 0,1,2 then 2,1,0
         Uint8List.fromList([0x01, 0x20, 0x21, 0x00]),
       );
-      final images = await decodeImages(cos, [image]);
+      final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
       List<int> at(int x, int y) =>
           pixels.sublist((y * 3 + x) * 4, (y * 3 + x) * 4 + 3);

@@ -2,9 +2,10 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
-import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
+
+import 'image_decoder.dart';
 
 /// Paints interpreter callbacks onto a Flutter [Canvas].
 ///
@@ -17,7 +18,10 @@ class CanvasPdfDevice implements PdfDevice {
   CanvasPdfDevice(this.canvas, {this.images = const {}});
 
   final Canvas canvas;
-  final Map<CosStream, ui.Image> images;
+
+  /// Decoded images keyed by [pdfImageKey] — stream identity for XObjects,
+  /// value identity for inline images.
+  final Map<Object, ui.Image> images;
 
   BlendMode _blend = BlendMode.srcOver;
 
@@ -372,7 +376,7 @@ class CanvasPdfDevice implements PdfDevice {
 
   @override
   void drawImage(PdfImageRequest request) {
-    final image = images[request.stream];
+    final image = images[pdfImageKey(request)];
     if (image == null) return; // not decodable (yet): skip silently
     // antialiased edges leave hairline seams between abutting image slices
     // (PowerPoint and scanners split large images into strips)

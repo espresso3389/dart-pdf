@@ -24,14 +24,19 @@ class PdfPageRenderer {
   /// PDF pages have no background of their own — white is only the
   /// convention — so any opaque color works (a viewer-level setting; the
   /// document is untouched).
+  ///
+  /// [annotations] false leaves the page's annotations (highlights, ink,
+  /// stamps, form fields...) out of the render — the clean underlying
+  /// page. Display-only, like [pageColor]; the document is untouched.
   static Future<ui.Picture> renderPicture(PdfPage page,
-      {Color pageColor = const Color(0xFFFFFFFF)}) async {
+      {Color pageColor = const Color(0xFFFFFFFF),
+      bool annotations = true}) async {
     final cos = page.document.cos;
 
     final collector = ImageCollector();
-    PdfInterpreter(cos: cos, device: collector)
-      ..drawPage(page)
-      ..drawAnnotations(page);
+    final collecting = PdfInterpreter(cos: cos, device: collector)
+      ..drawPage(page);
+    if (annotations) collecting.drawAnnotations(page);
     final images = await decodeImages(cos, collector.streams);
 
     final box = page.cropBox;
@@ -59,9 +64,10 @@ class PdfPageRenderer {
     canvas.scale(1, -1);
     canvas.translate(-box.left, -box.bottom);
 
-    PdfInterpreter(cos: cos, device: CanvasPdfDevice(canvas, images: images))
-      ..drawPage(page)
-      ..drawAnnotations(page);
+    final painting =
+        PdfInterpreter(cos: cos, device: CanvasPdfDevice(canvas, images: images))
+          ..drawPage(page);
+    if (annotations) painting.drawAnnotations(page);
     return recorder.endRecording();
   }
 
@@ -106,8 +112,10 @@ class PdfPageRenderer {
   /// Renders [page] to a bitmap. [pixelRatio] of 2 doubles the resolution.
   static Future<ui.Image> renderImage(PdfPage page,
       {double pixelRatio = 1,
-      Color pageColor = const Color(0xFFFFFFFF)}) async {
-    final picture = await renderPicture(page, pageColor: pageColor);
+      Color pageColor = const Color(0xFFFFFFFF),
+      bool annotations = true}) async {
+    final picture = await renderPicture(page,
+        pageColor: pageColor, annotations: annotations);
     try {
       return await rasterize(picture, pageSize(page), pixelRatio);
     } finally {
@@ -160,8 +168,11 @@ class PdfPageRenderer {
   /// the view scale). One-shot; for repeated samples (an eyedropper's
   /// live preview) build a [PdfPageColorSampler] once instead.
   static Future<ui.Color?> sampleColor(PdfPage page, ui.Offset point,
-          {Color pageColor = const Color(0xFFFFFFFF)}) async =>
-      (await PdfPageColorSampler.of(page, pageColor: pageColor)).colorAt(point);
+          {Color pageColor = const Color(0xFFFFFFFF),
+          bool annotations = true}) async =>
+      (await PdfPageColorSampler.of(page,
+              pageColor: pageColor, annotations: annotations))
+          .colorAt(point);
 
   /// Page size in points after applying /Rotate.
   static Size pageSize(PdfPage page) {
@@ -184,13 +195,14 @@ class PdfPageColorSampler {
   final int _width;
   final int _height;
 
-  /// Renders and rasterizes [page] at 1 px per point. [pageColor] must
-  /// match the paper color the page is displayed with, so samples off
-  /// the content read the color the user actually sees.
+  /// Renders and rasterizes [page] at 1 px per point. [pageColor] and
+  /// [annotations] must match how the page is displayed, so samples
+  /// read the color the user actually sees.
   static Future<PdfPageColorSampler> of(PdfPage page,
-      {Color pageColor = const Color(0xFFFFFFFF)}) async {
-    final picture =
-        await PdfPageRenderer.renderPicture(page, pageColor: pageColor);
+      {Color pageColor = const Color(0xFFFFFFFF),
+      bool annotations = true}) async {
+    final picture = await PdfPageRenderer.renderPicture(page,
+        pageColor: pageColor, annotations: annotations);
     try {
       final image = await PdfPageRenderer.rasterize(
           picture, PdfPageRenderer.pageSize(page), 1);

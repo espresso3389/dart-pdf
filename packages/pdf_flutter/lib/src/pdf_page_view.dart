@@ -22,6 +22,7 @@ class PdfPageView extends StatefulWidget {
     this.scale = 1,
     this.settleGeneration = 0,
     this.pageColor = const Color(0xFFFFFFFF),
+    this.showAnnotations = true,
     this.onRasterReady,
     this.renderHold,
   });
@@ -44,6 +45,10 @@ class PdfPageView extends StatefulWidget {
   /// The paper color the page renders on (see
   /// [PdfPageRenderer.renderPicture]). Changing it re-renders the page.
   final Color pageColor;
+
+  /// Whether the page's annotations render (see
+  /// [PdfPageRenderer.renderPicture]). Changing it re-renders the page.
+  final bool showAnnotations;
 
   /// Resolution multiplier on top of the device pixel ratio. The viewer
   /// raises it to the settled zoom level so pages stay sharp.
@@ -126,7 +131,8 @@ class _PdfPageViewState extends State<PdfPageView> {
       _onRenderHoldChanged();
     }
     if (!identical(oldWidget.page, widget.page) ||
-        oldWidget.pageColor != widget.pageColor) {
+        oldWidget.pageColor != widget.pageColor ||
+        oldWidget.showAnnotations != widget.showAnnotations) {
       _dropPicture();
       _dropDetail();
       _render();
@@ -197,7 +203,8 @@ class _PdfPageViewState extends State<PdfPageView> {
     final generation = ++_renderGeneration;
     final picture = await (_picture ??= PdfPageRenderer.renderPicture(
         widget.page,
-        pageColor: widget.pageColor));
+        pageColor: widget.pageColor,
+        annotations: widget.showAnnotations));
     if (!mounted || generation != _renderGeneration) return;
     final image = await PdfPageRenderer.rasterize(
         picture, PdfPageRenderer.pageSize(widget.page), _effectiveRatio());
@@ -272,7 +279,8 @@ class _PdfPageViewState extends State<PdfPageView> {
     if (_picture == null && (widget.renderHold?.value ?? false)) return;
     final picture = await (_picture ??= PdfPageRenderer.renderPicture(
         widget.page,
-        pageColor: widget.pageColor));
+        pageColor: widget.pageColor,
+        annotations: widget.showAnnotations));
     if (!mounted || generation != _detailGeneration) return;
     final image = await PdfPageRenderer.rasterizeRegion(picture, region, ratio);
     if (!mounted || generation != _detailGeneration) {

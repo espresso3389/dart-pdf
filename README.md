@@ -311,6 +311,19 @@ annotation and handing back the full state as created-changes to seed
 the store. Two controllers piped together converge; the host's sync
 glue is a Firestore listener and a stream subscription, not a
 suppression-flag state machine.
+Multi-user editing has guard rails: the controller's
+`canEditAnnotation` predicate lets the host decide per annotation what
+this user may touch (`(a) => a.author == currentUser` is the whole
+policy for "edit only your own"), and the document's own /F ReadOnly,
+Locked, and LockedContents flags (§12.5.3) are honored regardless —
+gated annotations still render, list, and zoom-to, but can't be
+selected, moved, deleted, or erased. `setAnnotationFlags` writes the
+same locks into the file for other viewers to honor. And the whole
+annotation layer can be hidden for distraction-free reading:
+`PdfViewer.showAnnotations` (with matching thumbnail and eyedropper
+behavior, a persisted preference, and a toolbar toggle in the example)
+renders the clean underlying pages — display-only, links go inert
+while invisible, and the document is untouched.
 Fast scrolling stays smooth on heavy documents: pages flying past
 during a fling defer their first interpretation — the expensive part
 of rendering — until the scroll settles, showing the paper color

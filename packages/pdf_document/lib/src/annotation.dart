@@ -69,6 +69,19 @@ class PdfAnnotation {
   bool get isHidden => flags & 2 != 0;
   bool get isNoView => flags & 32 != 0;
 
+  /// The ReadOnly flag (§12.5.3 bit 7): no interaction with the
+  /// annotation at all.
+  bool get isReadOnly => flags & 64 != 0;
+
+  /// The Locked flag (§12.5.3 bit 8): the annotation may not be deleted
+  /// and its properties (position, size) may not change — but its
+  /// contents may, see [isLockedContents].
+  bool get isLocked => flags & 128 != 0;
+
+  /// The LockedContents flag (§12.5.3 bit 10): the annotation's contents
+  /// may not change, though it can still move and resize.
+  bool get isLockedContents => flags & 512 != 0;
+
   /// The /Contents text (note body, free-text body, tooltip), if any.
   String? get contents {
     final c = document.cos.resolve(dict['Contents']);

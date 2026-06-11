@@ -47,6 +47,7 @@ class PdfThumbnailSidebar extends StatefulWidget {
     required this.viewerController,
     this.width = 160,
     this.pageColor = const Color(0xFFFFFFFF),
+    this.showAnnotations = true,
     this.side = PdfSidebarSide.left,
     this.resizable = true,
     this.minWidth = 100,
@@ -66,6 +67,10 @@ class PdfThumbnailSidebar extends StatefulWidget {
   /// The paper color thumbnails render on — pass the viewer's
   /// [PdfViewer.pageColor] so they match the pages.
   final Color pageColor;
+
+  /// Whether thumbnails render their annotations — pass the viewer's
+  /// [PdfViewer.showAnnotations] so they match the pages.
+  final bool showAnnotations;
 
   /// Which side of the viewer the panel sits on; the resize grip rides
   /// the opposite (inner) edge.
@@ -259,6 +264,7 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
                       viewerController: widget.viewerController,
                       pageIndex: index,
                       pageColor: widget.pageColor,
+                      showAnnotations: widget.showAnnotations,
                       cache: _cache,
                       tileWidth: _tileWidth,
                     ),
@@ -338,6 +344,7 @@ class _PageTile extends StatelessWidget {
     required this.viewerController,
     required this.pageIndex,
     required this.pageColor,
+    required this.showAnnotations,
     required this.cache,
     required this.tileWidth,
   });
@@ -346,6 +353,7 @@ class _PageTile extends StatelessWidget {
   final PdfViewerController viewerController;
   final int pageIndex;
   final Color pageColor;
+  final bool showAnnotations;
   final _ThumbnailCache cache;
   final double tileWidth;
 
@@ -404,6 +412,7 @@ class _PageTile extends StatelessWidget {
                         controller: controller,
                         pageIndex: pageIndex,
                         pageColor: pageColor,
+                        showAnnotations: showAnnotations,
                         cache: cache,
                         tileWidth: tileWidth,
                       ),
@@ -453,6 +462,7 @@ class _PageThumbnail extends StatefulWidget {
     required this.controller,
     required this.pageIndex,
     required this.pageColor,
+    required this.showAnnotations,
     required this.cache,
     required this.tileWidth,
   });
@@ -460,6 +470,7 @@ class _PageThumbnail extends StatefulWidget {
   final PdfEditingController controller;
   final int pageIndex;
   final Color pageColor;
+  final bool showAnnotations;
   final _ThumbnailCache cache;
   final double tileWidth;
 
@@ -502,6 +513,7 @@ class _PageThumbnailState extends State<_PageThumbnail> {
     final controller = widget.controller;
     final pageIndex = widget.pageIndex;
     final pageColor = widget.pageColor;
+    final annotations = widget.showAnnotations;
     final cache = widget.cache;
     cache.enqueue(() async {
       // superseded (newer revision, resize) or already landed — skip
@@ -514,7 +526,9 @@ class _PageThumbnailState extends State<_PageThumbnail> {
         final size = PdfPageRenderer.pageSize(page);
         if (size.width <= 0 || size.height <= 0) return;
         final image = await PdfPageRenderer.renderImage(page,
-            pixelRatio: pixelWidth / size.width, pageColor: pageColor);
+            pixelRatio: pixelWidth / size.width,
+            pageColor: pageColor,
+            annotations: annotations);
         PdfThumbnailSidebar.debugRasterizations++;
         cache.put(key, image);
         if (!mounted || _pendingKey != key) return;
@@ -538,7 +552,8 @@ class _PageThumbnailState extends State<_PageThumbnail> {
         _bucket(widget.tileWidth * MediaQuery.devicePixelRatioOf(context));
     final stamp = widget.controller.pageRenderStamp(widget.pageIndex);
     final key = '${widget.pageIndex}|$stamp'
-        '|${widget.pageColor.toARGB32()}|$pixelWidth';
+        '|${widget.pageColor.toARGB32()}|$pixelWidth'
+        '${widget.showAnnotations ? '' : '|noannots'}';
     if (_imageKey != key) {
       final cached = widget.cache.claim(key);
       if (cached != null) {

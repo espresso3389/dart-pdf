@@ -58,6 +58,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
   PdfColorFormat _colorPickerFormat = PdfColorFormat.hex;
   Color _pageColor = const Color(0xFFFFFFFF);
+  bool _showAnnotations = true;
   bool _showPropertiesPanel = false;
   bool _showSearchResultsPanel = false;
   double? _thumbnailSidebarWidth;
@@ -109,6 +110,8 @@ class PdfEditingPreferences extends ChangeNotifier {
       }
       final pageColor = store.getInt('${_prefix}pageColor');
       if (pageColor != null) _pageColor = Color(pageColor);
+      _showAnnotations =
+          store.getBool('${_prefix}showAnnotations') ?? _showAnnotations;
       _thumbnailSidebarWidth =
           store.getDouble('${_prefix}thumbnailSidebarWidth') ??
               _thumbnailSidebarWidth;
@@ -301,6 +304,18 @@ class PdfEditingPreferences extends ChangeNotifier {
     if (value == _pageColor) return;
     _pageColor = value;
     _write((s) => s.setInt('${_prefix}pageColor', value.toARGB32()));
+    notifyListeners();
+  }
+
+  /// Whether pages are displayed with their annotations (see
+  /// [PdfViewer.showAnnotations]). A display setting only — hiding
+  /// changes nothing in the document.
+  bool get showAnnotations => _showAnnotations;
+
+  set showAnnotations(bool value) {
+    if (value == _showAnnotations) return;
+    _showAnnotations = value;
+    _write((s) => s.setBool('${_prefix}showAnnotations', value));
     notifyListeners();
   }
 

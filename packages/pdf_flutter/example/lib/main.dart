@@ -426,6 +426,19 @@ class _ViewerScreenState extends State<ViewerScreen> {
               ),
             ],
             IconButton(
+              // compact: the actions row brushes its width limit on
+              // 800px windows (the widget-test viewport included)
+              visualDensity: VisualDensity.compact,
+              icon: Icon(_prefs.showAnnotations
+                  ? Icons.visibility
+                  : Icons.visibility_off),
+              tooltip: _prefs.showAnnotations
+                  ? 'Hide annotations'
+                  : 'Show annotations',
+              onPressed: () =>
+                  _prefs.showAnnotations = !_prefs.showAnnotations,
+            ),
+            IconButton(
               icon: const Icon(Icons.format_color_fill),
               tooltip: 'Page color',
               onPressed: () async {
@@ -523,6 +536,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                   controller: session,
                   viewerController: _controller,
                   pageColor: _prefs.pageColor,
+                  showAnnotations: _prefs.showAnnotations,
                 ),
               if (_prefs.showSearchResultsPanel)
                 PdfSearchResultsPanel(
@@ -543,6 +557,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     annotationMenuBuilder: _annotationMenuActions,
                     formImagePicker: _pickFormImage,
                     pageColor: _prefs.pageColor,
+                    showAnnotations: _prefs.showAnnotations,
                   ),
                 ),
               ),

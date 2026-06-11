@@ -29,6 +29,7 @@ class EditingPageOverlay extends StatefulWidget {
     required this.geometry,
     required this.textPrompt,
     this.pageColor = const Color(0xFFFFFFFF),
+    this.showAnnotations = true,
     this.onPanViewport,
     this.rasterCurrent = true,
     this.zoom = 1,
@@ -48,6 +49,10 @@ class EditingPageOverlay extends StatefulWidget {
   /// The paper color the page is displayed with — the eyedropper's
   /// raster must match what's on screen.
   final Color pageColor;
+
+  /// Whether the page is displayed with its annotations — same
+  /// requirement as [pageColor]: the eyedropper samples what's visible.
+  final bool showAnnotations;
 
   /// Pans the viewer by a pointer delta (this overlay's local space).
   /// Lets a drag on empty page area scroll the document even though the
@@ -123,6 +128,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   PdfPageColorSampler? _sampler;
   PdfDocument? _samplerDocument;
   Color? _samplerPageColor;
+  bool? _samplerAnnotations;
   Future<PdfPageColorSampler>? _samplerFuture;
   Offset? _pickPosition;
   Color? _pickPreview;
@@ -1412,18 +1418,22 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   Future<PdfPageColorSampler> _ensureSampler() {
     final document = _controller.document;
     final pageColor = widget.pageColor;
+    final annotations = widget.showAnnotations;
     if (!identical(document, _samplerDocument) ||
-        pageColor != _samplerPageColor) {
+        pageColor != _samplerPageColor ||
+        annotations != _samplerAnnotations) {
       _samplerDocument = document;
       _samplerPageColor = pageColor;
+      _samplerAnnotations = annotations;
       _sampler = null;
       _samplerFuture = PdfPageColorSampler.of(document.page(widget.pageIndex),
-              pageColor: pageColor)
+              pageColor: pageColor, annotations: annotations)
           .then((s) {
         // resolve the preview that was waiting on the raster
         if (mounted &&
             identical(_samplerDocument, document) &&
-            _samplerPageColor == pageColor) {
+            _samplerPageColor == pageColor &&
+            _samplerAnnotations == annotations) {
           setState(() {
             _sampler = s;
             final position = _pickPosition;

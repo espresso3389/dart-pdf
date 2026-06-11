@@ -55,6 +55,28 @@ void main() {
     expect(after.dict['T'], isNull);
   });
 
+  test('setAnnotationFlags round-trips and the lock getters read §12.5.3',
+      () {
+    final doc = edited(
+        PdfDocument.open(buildMultiPagePdf(1)),
+        (e) =>
+            e.addSquare(0, const PdfRect(100, 600, 200, 660), strokeWidth: 2));
+    final annotation = doc.page(0).annotations.single;
+    expect(annotation.isReadOnly, isFalse);
+    expect(annotation.isLocked, isFalse);
+    expect(annotation.isLockedContents, isFalse);
+
+    // print(4) + readOnly(64) + locked(128) + lockedContents(512)
+    final out =
+        edited(doc, (e) => e.setAnnotationFlags(0, annotation, 4 | 64 | 128 | 512));
+    final flagged = out.page(0).annotations.single;
+    expect(flagged.flags, 4 | 64 | 128 | 512);
+    expect(flagged.isReadOnly, isTrue);
+    expect(flagged.isLocked, isTrue);
+    expect(flagged.isLockedContents, isTrue);
+    expect(flagged.isHidden, isFalse);
+  });
+
   test('authoring a widget refuses — /T is the field name there', () {
     final doc = PdfDocument.open(buildAcroFormPdf());
     final widget = doc

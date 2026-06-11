@@ -1423,3 +1423,37 @@ pdf_flutter/test/editing_sync_test.dart (9 — incl. two piped
 controllers converging both ways). Remaining trax gaps: per-annotation
 read-only enforcement (host predicate + /F readOnly), hide-all
 annotations viewer toggle.
+Batch 5, session 2 (read-only enforcement + hide-all annotations — the
+last trax gaps): two features. (1) Read-only: `PdfAnnotation.isReadOnly/
+isLocked/isLockedContents` (/F bits 7/8/10) + `PdfEditor.
+setAnnotationFlags` (in-place, like setAnnotationName). Controller:
+`canEditAnnotation` (typedef PdfAnnotationEditPredicate; setter drops
+newly ineligible slots from `_selected` and notifies) +
+`isAnnotationEditable(annotation)` = !readOnly && !locked && predicate.
+Gated paths: selectableAnnotationAt, selectAnnotationsIn (covers
+marquee + ⌘A), selectAnnotation (sidebar), deleteAnnotation,
+deleteAnnotations (filters targets — a sweep delete silently skips
+locked), inkAnnotationAt + sliceErase (eraser); LockedContents only
+gates canEditSelectedText + setSelectedContents (still selectable,
+movable). Everything else (move/resize/restyle/clipboard cut) acts on
+the selection, so gating selection entry is sufficient — that's the
+design: locked annotations still render, list, zoom-to, and flash;
+they just can't ENTER the selection. applyRemoteChange bypasses by
+construction (editor-level, no selection) — the predicate governs this
+user's UI, not document convergence (tested). (2) Hide-all:
+`PdfPageRenderer.renderPicture/renderImage/sampleColor/
+PdfPageColorSampler.of` take `annotations:` (default true; skips
+drawAnnotations in BOTH interpreter passes — collector and paint).
+Threaded: `PdfViewer.showAnnotations` → _PdfViewerPage → PdfPageView
+(`showAnnotations`; didUpdateWidget drops the cached picture on
+change, same as pageColor) and → EditingPageOverlay (sampler keyed on
+document AND pageColor AND annotations); viewer `_annotationAt`
+returns null while hidden, so invisible links/buttons take no taps
+(test has a shown-mode control tap so the coordinates can't go stale
+vacuously); `PdfThumbnailSidebar.showAnnotations` (cache key gains
+'|noannots'; the enqueue closure captures it like pageColor).
+Preference `showAnnotations` (bool, default true); example: AppBar
+visibility/visibility_off toggle wired into viewer + thumbnails.
+Tests: annotation_metadata_test +1 (flags round-trip),
+editing_readonly_test.dart (7), annotations_visibility_test.dart (6).
+The trax-replacement gap list is now empty.

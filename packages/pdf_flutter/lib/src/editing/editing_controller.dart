@@ -65,6 +65,10 @@ enum PdfEditTool {
 /// Text-markup kinds for [PdfEditingController.addMarkup].
 enum PdfMarkupKind { highlight, underline, strikeOut, squiggly }
 
+/// Host veto over which annotations the editing UI may change — see
+/// [PdfEditingController.canEditAnnotation].
+typedef PdfAnnotationEditPredicate = bool Function(PdfAnnotation annotation);
+
 /// The field kinds the form tool can create (and convert fields to) —
 /// the subset of [PdfFieldType] with creation support in [PdfEditor].
 enum PdfFormFieldKind { text, checkBox, pushButton }
@@ -896,6 +900,45 @@ class PdfEditingController extends ChangeNotifier {
   /// Subtypes whose text the controller can rewrite in place.
   static const _textEditable = {'FreeText', 'Stamp', 'Text'};
 
+  PdfAnnotationEditPredicate? _canEditAnnotation;
+
+  /// Host veto over which annotations the editing UI may change.
+  ///
+  /// Consulted (alongside the document's own /F ReadOnly and Locked
+  /// flags) by every mutating path: hit-test selection, the marquee,
+  /// ⌘A, the sidebar's select, delete, and the eraser. An annotation
+  /// the predicate rejects still renders, lists, zooms-to, and flashes —
+  /// it just can't be selected for editing or destroyed.
+  ///
+  /// The typical multi-user host allows only the current user's own
+  /// annotations:
+  ///
+  /// ```dart
+  /// editing.canEditAnnotation = (a) => a.author == currentUserName;
+  /// ```
+  ///
+  /// Null (the default) allows everything the flags allow. Changing the
+  /// predicate drops newly ineligible annotations from the selection.
+  PdfAnnotationEditPredicate? get canEditAnnotation => _canEditAnnotation;
+
+  set canEditAnnotation(PdfAnnotationEditPredicate? value) {
+    if (identical(value, _canEditAnnotation)) return;
+    _canEditAnnotation = value;
+    _selected.removeWhere((slot) {
+      final annotation = _annotationAt(slot);
+      return annotation == null || !isAnnotationEditable(annotation);
+    });
+    notifyListeners();
+  }
+
+  /// Whether the editing UI may change [annotation]: the document's own
+  /// /F ReadOnly and Locked flags (§12.5.3) first, then the host's
+  /// [canEditAnnotation] predicate. Display is unaffected either way.
+  bool isAnnotationEditable(PdfAnnotation annotation) =>
+      !annotation.isReadOnly &&
+      !annotation.isLocked &&
+      (_canEditAnnotation?.call(annotation) ?? true);
+
   /// Selected (page, /Annots slot) pairs in selection order; the last
   /// one is the primary selection (the one handles and text edits act
   /// on when exactly one is selected).
@@ -965,7 +1008,8 @@ class PdfEditingController extends ChangeNotifier {
 
   bool get canEditSelectedText =>
       _selected.length == 1 &&
-      _textEditable.contains(selectedAnnotation?.subtype);
+      _textEditable.contains(selectedAnnotation?.subtype) &&
+      selectedAnnotation?.isLockedContents != true;
 
   /// The topmost selectable annotation under ([x], [y]) on [pageIndex],
   /// with its /Annots slot — the select tool's hit test (later entries
@@ -975,7 +1019,9 @@ class PdfEditingController extends ChangeNotifier {
     final annotations = _page(pageIndex).annotations;
     for (var i = annotations.length - 1; i >= 0; i--) {
       final annotation = annotations[i];
-      if (annotation.isHidden || _unselectable.contains(annotation.subtype)) {
+      if (annotation.isHidden ||
+          _unselectable.contains(annotation.subtype) ||
+          !isAnnotationEditable(annotation)) {
         continue;
       }
       if (annotation.rect.contains(x, y)) return (i, annotation);
@@ -995,7 +1041,11 @@ class PdfEditingController extends ChangeNotifier {
     final annotations = _page(pageIndex).annotations;
     for (var i = annotations.length - 1; i >= 0; i--) {
       final annotation = annotations[i];
-      if (annotation.subtype != 'Ink' || annotation.isHidden) continue;
+      if (annotation.subtype != 'Ink' ||
+          annotation.isHidden ||
+          !isAnnotationEditable(annotation)) {
+        continue;
+      }
       final rect = annotation.rect;
       final reach = tolerance + (annotation.borderWidth ?? 1) / 2;
       if (x < rect.left - reach ||
@@ -1077,7 +1127,9 @@ class PdfEditingController extends ChangeNotifier {
     final hits = <(int, int)>[];
     for (var i = 0; i < annotations.length; i++) {
       final annotation = annotations[i];
-      if (annotation.isHidden || _unselectable.contains(annotation.subtype)) {
+      if (annotation.isHidden ||
+          _unselectable.contains(annotation.subtype) ||
+          !isAnnotationEditable(annotation)) {
         continue;
       }
       final r = annotation.rect;
@@ -1115,10 +1167,13 @@ class PdfEditingController extends ChangeNotifier {
   /// Selects the annotation in slot [index] of [pageIndex]'s /Annots
   /// (the position in [PdfPage.annotations]), arming the select tool so
   /// the viewer shows the selection. Used by the annotation sidebar.
-  /// Returns false for invalid slots and unselectable subtypes.
+  /// Returns false for invalid slots, unselectable subtypes, and
+  /// annotations the host or /F flags lock ([isAnnotationEditable]).
   bool selectAnnotation(int pageIndex, int index) {
     final annotation = _annotationAt((pageIndex, index));
-    if (annotation == null || _unselectable.contains(annotation.subtype)) {
+    if (annotation == null ||
+        _unselectable.contains(annotation.subtype) ||
+        !isAnnotationEditable(annotation)) {
       return false;
     }
     tool = PdfEditTool.select;
@@ -1135,7 +1190,7 @@ class PdfEditingController extends ChangeNotifier {
   /// without going through the selection.
   void deleteAnnotation(int pageIndex, int index) {
     final annotation = _annotationAt((pageIndex, index));
-    if (annotation == null) return;
+    if (annotation == null || !isAnnotationEditable(annotation)) return;
     // removing one /Annots entry shifts the slots after it down by one
     _selected.remove((pageIndex, index));
     for (var i = 0; i < _selected.length; i++) {
@@ -1153,7 +1208,9 @@ class PdfEditingController extends ChangeNotifier {
     // resolve every slot before the first removal shifts the others
     final targets = <(int, PdfAnnotation)>[
       for (final slot in slots)
-        if (_annotationAt(slot) case final annotation?) (slot.$1, annotation)
+        if (_annotationAt(slot) case final annotation?
+            when isAnnotationEditable(annotation))
+          (slot.$1, annotation)
     ];
     if (targets.isEmpty) return;
     // surviving annotations may land in different slots
@@ -1179,7 +1236,10 @@ class PdfEditingController extends ChangeNotifier {
     // the editor works by dictionary identity
     final targets = [
       for (final annotation in _page(pageIndex).annotations)
-        if (annotation.subtype == 'Ink' && !annotation.isHidden) annotation
+        if (annotation.subtype == 'Ink' &&
+            !annotation.isHidden &&
+            isAnnotationEditable(annotation))
+          annotation
     ];
     if (targets.isEmpty) return false;
     return apply((editor) {
@@ -1643,6 +1703,7 @@ class PdfEditingController extends ChangeNotifier {
   bool setSelectedContents(String text) {
     final annotation = selectedAnnotation;
     if (annotation == null || _selected.length != 1) return false;
+    if (annotation.isLockedContents) return false;
     if ((annotation.contents ?? '') == text) return false;
     if (canEditSelectedText) {
       setSelectedText(text);

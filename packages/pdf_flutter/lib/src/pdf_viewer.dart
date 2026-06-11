@@ -290,6 +290,7 @@ class PdfViewer extends StatefulWidget {
     this.doubleTapZoom = 2.5,
     this.backgroundColor,
     this.pageColor = const Color(0xFFFFFFFF),
+    this.showAnnotations = true,
   });
 
   final PdfDocument document;
@@ -359,6 +360,15 @@ class PdfViewer extends StatefulWidget {
   /// this can be any color (sepia for reading, a tint to match the app).
   /// Purely a display setting; the document is untouched.
   final Color pageColor;
+
+  /// Whether pages render their annotations (highlights, ink, stamps,
+  /// form fields...). False shows the clean underlying pages —
+  /// a reading mode for heavily marked-up documents. Display-only: the
+  /// document is untouched and the annotations come right back. While
+  /// hidden, annotations don't respond to taps either (links included),
+  /// and editing tools still work but draw over an unannotated page —
+  /// hosts typically disarm editing while hiding.
+  final bool showAnnotations;
 
   @override
   State<PdfViewer> createState() => _PdfViewerState();
@@ -965,6 +975,9 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       ];
 
   PdfAnnotation? _annotationAt(Offset local) {
+    // hidden annotations don't render, so they don't take taps either —
+    // an invisible link navigating would be baffling
+    if (!widget.showAnnotations) return null;
     final point = _pagePointAt(local);
     if (point == null) return null;
     final (i, x, y) = point;
@@ -1868,6 +1881,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                 page: _pages[index],
                 index: index,
                 pageColor: widget.pageColor,
+                showAnnotations: widget.showAnnotations,
                 scale: _renderScale,
                 settleGeneration: _settleGeneration,
                 matches: _controller._matchesOn(index),
@@ -2137,6 +2151,7 @@ class _PdfViewerPage extends StatefulWidget {
     required this.page,
     required this.index,
     required this.pageColor,
+    required this.showAnnotations,
     required this.scale,
     required this.settleGeneration,
     required this.matches,
@@ -2156,6 +2171,7 @@ class _PdfViewerPage extends StatefulWidget {
   final PdfPage page;
   final int index;
   final Color pageColor;
+  final bool showAnnotations;
   final double scale;
   final int settleGeneration;
   final List<PdfTextMatch> matches;
@@ -2218,6 +2234,7 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
         scale: widget.scale,
         settleGeneration: widget.settleGeneration,
         pageColor: widget.pageColor,
+        showAnnotations: widget.showAnnotations,
         onRasterReady: _onRasterReady,
         renderHold: widget.renderHold,
       ),
@@ -2267,6 +2284,7 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
                               textPrompt: widget.editingTextPrompt,
                               formImagePicker: widget.formImagePicker,
                               pageColor: widget.pageColor,
+                              showAnnotations: widget.showAnnotations,
                               onPanViewport: widget.onPanViewport,
                               onShowAnnotationMenu:
                                   widget.onShowAnnotationMenu,

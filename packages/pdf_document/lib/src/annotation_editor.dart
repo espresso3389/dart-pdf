@@ -1107,6 +1107,19 @@ extension PdfAnnotationEditing on PdfEditor {
     _markAnnotationChanged(pageIndex, dict);
   }
 
+  /// Sets [annotation]'s /F flag word (§12.5.3) in place — the way to
+  /// lock an annotation in the saved file: bit 8 (`flags | 128`,
+  /// [PdfAnnotation.isLocked]) refuses move/resize/delete, bit 7
+  /// (`flags | 64`, [PdfAnnotation.isReadOnly]) refuses all interaction.
+  /// Conforming viewers honor the same bits. The appearance is
+  /// untouched; remember that bit 1 (hidden) and bit 3 (print) change
+  /// what renders.
+  void setAnnotationFlags(
+      int pageIndex, PdfAnnotation annotation, int flags) {
+    annotation.dict['F'] = CosInteger(flags);
+    _markAnnotationChanged(pageIndex, annotation.dict);
+  }
+
   /// Stamps a generated /NM on every annotation in the document that
   /// lacks one, so a pre-existing (or foreign) file can join name-keyed
   /// sync — call once before listening to a change feed. Popups, links,

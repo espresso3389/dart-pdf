@@ -104,6 +104,12 @@ class PdfAnnotation {
     return w is CosReal ? w.value : null;
   }
 
+  static double? _number(CosObject? value) => switch (value) {
+        CosInteger(:final value) => value.toDouble(),
+        CosReal(:final value) => value,
+        _ => null,
+      };
+
   int? _colorArray(CosObject? raw) {
     final c = document.cos.resolve(raw);
     if (c is! CosArray) return null;
@@ -191,6 +197,30 @@ class PdfAnnotation {
       borderColor: lastColor('RG') ?? (width > 0 ? text : null),
       borderWidth: width,
     );
+  }
+
+  /// The /InkList strokes of an Ink annotation, page space: one list of
+  /// (x, y) points per stroke. Null for other subtypes or without a
+  /// usable /InkList. Odd trailing numbers in a stroke are dropped.
+  List<List<(double, double)>>? get inkList {
+    if (subtype != 'Ink') return null;
+    final cos = document.cos;
+    final raw = cos.resolve(dict['InkList']);
+    if (raw is! CosArray) return null;
+    final strokes = <List<(double, double)>>[];
+    for (final item in raw.items) {
+      final stroke = cos.resolve(item);
+      if (stroke is! CosArray) return null;
+      final points = <(double, double)>[];
+      for (var i = 0; i + 1 < stroke.items.length; i += 2) {
+        final x = _number(cos.resolve(stroke.items[i]));
+        final y = _number(cos.resolve(stroke.items[i + 1]));
+        if (x == null || y == null) return null;
+        points.add((x, y));
+      }
+      strokes.add(points);
+    }
+    return strokes;
   }
 
   /// The action this annotation triggers when activated, if any.

@@ -964,6 +964,21 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     );
   }
 
+  /// The selection action chip's "more" button: the same context menu
+  /// right-clicking opens, for input that can't right-click.
+  Future<void> _showSelectionMenu(Offset globalPosition) async {
+    final editing = widget.editing;
+    final page = editing?.selectedPage;
+    if (editing == null || page == null) return;
+    await showPdfAnnotationMenu(
+      context: context,
+      position: globalPosition,
+      controller: editing,
+      pageIndex: page,
+      customActions: widget.annotationMenuBuilder,
+    );
+  }
+
   void _activate(PdfAnnotation annotation) {
     final action = annotation.action;
     if (action == null) return;
@@ -1128,7 +1143,28 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     _selectWordAt(event.localPosition);
   }
 
+  /// Whether a pointer of [kind] is drawing through the editing
+  /// overlay's raw event stream right now (ink or eraser armed, pen or
+  /// drawing finger) — the viewer's own gestures must stand aside.
+  bool _kindDrawsInk(PointerDeviceKind? kind) {
+    final editing = widget.editing;
+    if (editing == null ||
+        (editing.tool != PdfEditTool.ink &&
+            editing.tool != PdfEditTool.eraser)) {
+      return false;
+    }
+    return switch (kind) {
+      PointerDeviceKind.stylus || PointerDeviceKind.invertedStylus => true,
+      PointerDeviceKind.touch => editing.fingerDrawsInk,
+      _ => false,
+    };
+  }
+
   void _onSelectionStart(DragStartDetails details) {
+    // a raw-drawing pointer may still win this arena (the overlay's
+    // recognizers don't claim every kind) — it must not grab-pan the
+    // document out from under its own stroke
+    if (_kindDrawsInk(details.kind)) return;
     _focusNode.requestFocus();
     if (_wordDrag) {
       // double-click-and-drag: anchor on the word under the original
@@ -1314,6 +1350,9 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   void _onDoubleTap() {
     final details = _doubleTapDetails;
     if (details == null) return;
+    // two quick pen dots (dotting an i twice) are ink, not a zoom
+    // gesture — the strokes already committed through the raw path
+    if (_kindDrawsInk(details.kind)) return;
     final current = _currentZoom;
     final Matrix4 end;
     final bool zoomedAfter;
@@ -1337,6 +1376,64 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
         CurvedAnimation(parent: _zoomAnimator, curve: Curves.easeInOut));
     _zoomAnimator.forward(from: 0);
     setState(() => _zoomed = zoomedAfter);
+  }
+
+  // --- touch pinch zoom ---
+  //
+  // _EagerPinchRecognizer claims the gesture when a second finger lands;
+  // the viewer applies the scale ratio around the gesture's focal point
+  // (the same _zoomTo the wheel and trackpad use, so pinching out below
+  // fit-width crosses into layout zoom) and pans by the focal point's
+  // drift, spilling into the scroll position like grab panning.
+
+  /// Cumulative scale of the touch pinch in progress.
+  double _pinchScale = 1;
+
+  void _onPinchStart(ScaleStartDetails details) {
+    _panFlinger.stop();
+    _pinchScale = 1;
+  }
+
+  void _onPinchUpdate(ScaleUpdateDetails details) {
+    // a lone finger left over after a pinch shouldn't keep panning; the
+    // gesture stays claimed but goes quiet until lift-off
+    if (details.pointerCount < 2) return;
+    if (details.scale > 0 && details.scale != _pinchScale) {
+      _zoomTo(_currentZoom * details.scale / _pinchScale,
+          details.localFocalPoint);
+      _pinchScale = details.scale;
+    }
+    // focalPointDelta is local to the receiver, which sits inside the
+    // zoom transform — list-space pixels, exactly what _grabPanBy takes
+    final delta = details.focalPointDelta;
+    if (delta != Offset.zero) _grabPanBy(delta);
+  }
+
+  void _onPinchEnd(ScaleEndDetails details) => _settleZoomGesture();
+
+  /// Settles a finished zoom gesture into the layout/transform regime
+  /// split: total zoom at or below 1 lives in the page layout, above 1
+  /// in the InteractiveViewer transform. Shared by touch pinches and
+  /// InteractiveViewer's own gesture end.
+  void _settleZoomGesture() {
+    final total = _transform.value.getMaxScaleOnAxis() * _layoutZoom;
+    if (total <= 1) {
+      _transform.value = Matrix4.identity();
+      _setLayoutZoom(total);
+    } else if (_layoutZoom < 1) {
+      // fold the layout factor into the transform zoom
+      final fold = _layoutZoom;
+      _setLayoutZoom(1);
+      final matrix = _transform.value.clone()
+        ..translateByDouble(_viewWidth / 2, _viewHeight / 2, 0, 1)
+        ..scaleByDouble(fold, fold, fold, 1)
+        ..translateByDouble(-_viewWidth / 2, -_viewHeight / 2, 0, 1);
+      _transform.value = _clampedTransform(matrix);
+    } else {
+      _transform.value = _clampedTransform(_transform.value.clone());
+    }
+    final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
+    if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
   }
 
   // --- trackpad gestures ---
@@ -1565,6 +1662,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                     widget.editingTextPrompt ?? showPdfTextPrompt,
                 formImagePicker: widget.formImagePicker,
                 onPanViewport: _grabPanBy,
+                onShowAnnotationMenu: _showSelectionMenu,
                 transformScale: _transformScale,
                 renderHold: _renderHold,
               ),
@@ -1650,32 +1748,10 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                   // vertical drags scroll the list; horizontal panning engages
                   // once zoomed in
                   panEnabled: _zoomed,
-                  onInteractionEnd: (_) {
-                    // touch pinches run on the transform mid-gesture; settle
-                    // them into the layout/transform regime split
-                    final total =
-                        _transform.value.getMaxScaleOnAxis() * _layoutZoom;
-                    if (total <= 1) {
-                      _transform.value = Matrix4.identity();
-                      _setLayoutZoom(total);
-                    } else if (_layoutZoom < 1) {
-                      // fold the layout factor into the transform zoom
-                      final fold = _layoutZoom;
-                      _setLayoutZoom(1);
-                      final matrix = _transform.value.clone()
-                        ..translateByDouble(
-                            _viewWidth / 2, _viewHeight / 2, 0, 1)
-                        ..scaleByDouble(fold, fold, fold, 1)
-                        ..translateByDouble(
-                            -_viewWidth / 2, -_viewHeight / 2, 0, 1);
-                      _transform.value = _clampedTransform(matrix);
-                    } else {
-                      _transform.value =
-                          _clampedTransform(_transform.value.clone());
-                    }
-                    final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
-                    if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
-                  },
+                  // touch pinches that InteractiveViewer still wins run on
+                  // the transform mid-gesture; settle them the same way as
+                  // the eager pinch recognizer's
+                  onInteractionEnd: (_) => _settleZoomGesture(),
                   // all trackpad pan-zoom gestures are handled here, never by
                   // the list's drag recognizer (whose iOS-style velocity
                   // tracker asserts on macOS trackpad timestamps) nor by
@@ -1692,6 +1768,17 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                           ..onStart = _onTrackpadPanZoomStart
                           ..onUpdate = _onTrackpadPanZoomUpdate
                           ..onEnd = _onTrackpadPanZoomEnd,
+                      ),
+                      // touch pinch zoom: passive for single touches,
+                      // claims the gesture when a second finger lands
+                      _EagerPinchRecognizer:
+                          GestureRecognizerFactoryWithHandlers<
+                              _EagerPinchRecognizer>(
+                        () => _EagerPinchRecognizer(debugOwner: this),
+                        (recognizer) => recognizer
+                          ..onStart = _onPinchStart
+                          ..onUpdate = _onPinchUpdate
+                          ..onEnd = _onPinchEnd,
                       ),
                     },
                     // plain wheel events the list can't use (at its extents)
@@ -1789,6 +1876,7 @@ class _PdfViewerPage extends StatefulWidget {
     required this.editingTextPrompt,
     required this.formImagePicker,
     required this.onPanViewport,
+    required this.onShowAnnotationMenu,
     required this.transformScale,
     required this.renderHold,
   });
@@ -1806,6 +1894,9 @@ class _PdfViewerPage extends StatefulWidget {
   final PdfTextPrompt editingTextPrompt;
   final PdfFormImagePicker? formImagePicker;
   final void Function(Offset delta) onPanViewport;
+
+  /// See [EditingPageOverlay.onShowAnnotationMenu].
+  final void Function(Offset globalPosition) onShowAnnotationMenu;
 
   /// The viewer transform's scale — the editing overlay's chrome divides
   /// by it to stay constant-size on screen while zoomed.
@@ -1899,6 +1990,8 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
                               formImagePicker: widget.formImagePicker,
                               pageColor: widget.pageColor,
                               onPanViewport: widget.onPanViewport,
+                              onShowAnnotationMenu:
+                                  widget.onShowAnnotationMenu,
                               rasterCurrent: _rastered,
                               zoom: zoom,
                             ),
@@ -2000,4 +2093,44 @@ class _TrackpadPanRecognizer extends OneSequenceGestureRecognizer {
 
   @override
   String get debugDescription => 'trackpad pan';
+}
+
+/// Touch pinch zoom. The stock arena loses pinches: the list's vertical
+/// drag (or, with a tool armed, the editing overlay's pan) accepts one
+/// finger's motion before InteractiveViewer's scale recognizer can claim
+/// the pair, so pinching scrolled — or drew — instead of zooming. This
+/// recognizer stays passive for single touches (taps, scrolls, and
+/// strokes resolve exactly as before) and claims the whole gesture the
+/// moment a second touch pointer lands, while both arenas are still
+/// open. A second finger that arrives after a drag already won its
+/// pointer simply never forms a pinch (the set stays at one).
+class _EagerPinchRecognizer extends ScaleGestureRecognizer {
+  _EagerPinchRecognizer({super.debugOwner})
+      : super(supportedDevices: {PointerDeviceKind.touch});
+
+  final Set<int> _pointers = {};
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    _pointers.add(event.pointer);
+    if (_pointers.length == 2) resolve(GestureDisposition.accepted);
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (event is PointerUpEvent || event is PointerCancelEvent) {
+      _pointers.remove(event.pointer);
+    }
+    super.handleEvent(event);
+  }
+
+  @override
+  void rejectGesture(int pointer) {
+    _pointers.remove(pointer);
+    super.rejectGesture(pointer);
+  }
+
+  @override
+  String get debugDescription => 'eager pinch';
 }

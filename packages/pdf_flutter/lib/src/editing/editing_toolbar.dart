@@ -182,7 +182,8 @@ class PdfEditingToolbar extends StatelessWidget {
                   ),
               ],
               toolButton(PdfEditTool.ink, Icons.draw, 'Draw'),
-              if (controller.tool == PdfEditTool.ink)
+              if (controller.tool == PdfEditTool.ink ||
+                  controller.tool == PdfEditTool.eraser)
                 IconButton(
                   icon: const Icon(Icons.touch_app),
                   tooltip: controller.fingerDrawsInk
@@ -206,6 +207,10 @@ class PdfEditingToolbar extends StatelessWidget {
                   onPressed: controller.discardInk,
                 ),
               ],
+              // the Material icon font ships no true eraser glyph; the
+              // magic-wand outline is the closest stand-in
+              toolButton(PdfEditTool.eraser, Icons.auto_fix_normal,
+                  'Erase ink strokes'),
               toolButton(
                   PdfEditTool.rectangle, Icons.rectangle_outlined, 'Rectangle'),
               toolButton(PdfEditTool.ellipse, Icons.circle_outlined, 'Ellipse'),

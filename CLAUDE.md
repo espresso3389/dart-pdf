@@ -965,3 +965,60 @@ paint position and hit region disagree mid-animation (tap lands on
 the barrier, menu dismisses, value never set); commit-tap targets
 must stay inside the 800×600 viewport (view(450, 300) is y≈643 —
 silently misses, editor never closes).
+Batch 3, session 7 (iPad input, from Ben's on-device testing): five
+fixes/features. (1) Touch pinch zoom: InteractiveViewer's scale
+recognizer always lost the arena (list drag at 18px, overlay pan at
+36px with a tool armed) — `_EagerPinchRecognizer` (pdf_viewer.dart,
+touch-only ScaleGestureRecognizer subclass) stays passive for single
+pointers and `resolve(accepted)` the moment a 2nd touch joins;
+_onPinchUpdate rides `_zoomTo` (focal zoom) + `_grabPanBy`
+(focalPointDelta is LOCAL = list-space — verified in SDK scale.dart);
+gesture end settles via `_settleZoomGesture()` (extracted from
+onInteractionEnd, shared). Limitation: the 2nd finger must land
+before the 1st finger's arena closes — mid-scroll add-finger won't
+zoom. (2) Raw-driven drawing: with ink/eraser armed, stylus (always)
+and touch (iff fingerDrawsInk) draw from the overlay's raw Listener —
+`_rawDrives(kind)`, `_rawPointer` claims the gesture in
+_onPointerDown, moves append, up commits; pan recognizers still claim
+the arena (blocking IV pan/list scroll) but _panStart/_panUpdate/
+_panEnd early-return for raw-driven kinds. Zero start latency; a
+down+up dot commits as a 2-point stroke [p, p] (round cap renders the
+dot, §8.5.3.2). Viewer guards: `_kindDrawsInk` early-returns
+_onSelectionStart (no grab-pan under a stroke) and _onDoubleTap (two
+quick pen dots must not zoom). Mouse/trackpad keep the arena path.
+(3) Multi-touch bail: `_touchPointers` tracked on the raw listener; a
+2nd concurrent touch calls `_bailActiveGesture()` (discards stroke/
+erase/drag state without committing, `cancelInkStroke()` re-arms the
+auto-commit for earlier buffered strokes, `_gestureBailed` deadens
+the rest until all touches lift) — EXCEPT when `_rawPointer` is a
+stylus (not in _touchPointers): that's a palm, the pen stroke
+survives. (4) Selection action chip: `_buildSelectionChip` — floating
+Material row (keys 'pdf-selection-chip', '-delete', '-edit' (only
+canEditSelectedText), '-menu') above the selection (below when near
+the page top), shown only when `_lastPointerKind` ∈ {touch, stylus}
+(set on every overlay pointer-down), select mode, not dragging;
+Transform.scale(_chromeScale) keeps it screen-constant; '-menu' calls
+`EditingPageOverlay.onShowAnnotationMenu(globalPos)` → viewer
+`_showSelectionMenu` → showPdfAnnotationMenu with the host's
+annotationMenuBuilder (threaded through _PdfViewerPage). (5) Eraser:
+`PdfEditTool.eraser` — whole-annotation; `inkAnnotationAt(page, x, y,
+tolerance:)` (editing_controller) demands proximity to the /InkList
+polyline (segment distance ≤ tolerance + borderWidth/2; rect-only
+fallback), `PdfAnnotation.inkList` (pdf_document) parses the point
+arrays; swipe collects slots (`_eraseSlots`) → ONE deleteAnnotations
+apply on lift (one undo); live fade + afterimage = painter
+`fadeRects` washed in pageColor@0.72 (`_afterEraseRects` until
+rasterCurrent); invertedStylus erases while INK is armed; mouse uses
+the arena (_panErasing, click via _onTapUp); toolbar button
+Icons.auto_fix_normal (no real eraser glyph in the icon font), shown
+for all input — Ben suggested maybe hiding it from mouse users, but
+click-to-erase is genuinely useful on desktop; the touch_app
+finger-toggle now also shows with the eraser armed. Tests:
+editing_ipad_test.dart (17 — pinch via two TestGestures, raw stroke
+under-slop + dots, bail + palm + buffered-stroke release, eraser
+precision/undo/inverted, chip visibility per kind + menu). Gotchas:
+finishInk aggregates the whole buffer into ONE annotation — tests
+needing two annotations must finishInk between strokes; a touch tap
+on overlay chrome resolves only after the viewer's 400ms double-tap
+timeout, and pumpAndSettle does NOT advance that timer (no frames
+scheduled) — pump(400ms) explicitly.

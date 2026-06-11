@@ -22,6 +22,13 @@ enum PdfEditTool {
   /// [PdfEditingController.finishInk] commits them as one Ink annotation.
   ink,
 
+  /// Drag (or tap) over ink strokes to delete them. Whole-annotation:
+  /// every Ink annotation the pointer crosses is removed; one swipe is
+  /// one undo step. Pointer-kind rules mirror the ink tool's
+  /// ([PdfEditingController.fingerDrawsInk]): in stylus mode only the
+  /// pen erases and fingers keep scrolling.
+  eraser,
+
   /// Drag out a rectangle (/Square) annotation.
   rectangle,
 
@@ -367,6 +374,17 @@ class PdfEditingController extends ChangeNotifier {
   void beginInkStroke() {
     _inkTimer?.cancel();
     _inkTimer = null;
+  }
+
+  /// Releases a [beginInkStroke] hold without adding a stroke — the
+  /// gesture was aborted (a second finger landed, the pointer was
+  /// canceled). Earlier strokes waiting in the buffer get their
+  /// auto-commit timer back; without this they'd sit uncommitted until
+  /// the next stroke or tool switch.
+  void cancelInkStroke() {
+    if (_inkTimer != null || !hasPendingInk) return;
+    final delay = inkCommitDelay;
+    if (delay != null) _inkTimer = Timer(delay, finishInk);
   }
 
   /// The strokes of the most recent ink commit, while [document] is
@@ -810,6 +828,66 @@ class PdfEditingController extends ChangeNotifier {
       if (annotation.rect.contains(x, y)) return (i, annotation);
     }
     return null;
+  }
+
+  /// The topmost Ink annotation whose strokes pass within [tolerance]
+  /// page units of ([x], [y]) on [pageIndex], with its /Annots slot —
+  /// the eraser's hit test. Precise: the point must be near the inked
+  /// centerline (padded by half the pen width), not merely inside the
+  /// bounding rect, so crossing strokes don't erase together. An Ink
+  /// annotation without a usable /InkList falls back to its rect.
+  (int index, PdfAnnotation)? inkAnnotationAt(
+      int pageIndex, double x, double y,
+      {double tolerance = 4}) {
+    final annotations = _page(pageIndex).annotations;
+    for (var i = annotations.length - 1; i >= 0; i--) {
+      final annotation = annotations[i];
+      if (annotation.subtype != 'Ink' || annotation.isHidden) continue;
+      final rect = annotation.rect;
+      final reach = tolerance + (annotation.borderWidth ?? 1) / 2;
+      if (x < rect.left - reach ||
+          x > rect.right + reach ||
+          y < rect.bottom - reach ||
+          y > rect.top + reach) {
+        continue;
+      }
+      final strokes = annotation.inkList;
+      if (strokes == null) return (i, annotation); // rect is all we have
+      for (final stroke in strokes) {
+        if (stroke.length == 1) {
+          final (px, py) = stroke.single;
+          if (_distanceSquared(x, y, px, py) <= reach * reach) {
+            return (i, annotation);
+          }
+          continue;
+        }
+        for (var p = 0; p + 1 < stroke.length; p++) {
+          if (_segmentDistanceSquared(x, y, stroke[p], stroke[p + 1]) <=
+              reach * reach) {
+            return (i, annotation);
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  static double _distanceSquared(double x, double y, double px, double py) {
+    final dx = x - px, dy = y - py;
+    return dx * dx + dy * dy;
+  }
+
+  /// Squared distance from ([x], [y]) to the segment [a]–[b].
+  static double _segmentDistanceSquared(
+      double x, double y, (double, double) a, (double, double) b) {
+    final (ax, ay) = a;
+    final (bx, by) = b;
+    final dx = bx - ax, dy = by - ay;
+    final lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared == 0) return _distanceSquared(x, y, ax, ay);
+    final t = (((x - ax) * dx + (y - ay) * dy) / lengthSquared)
+        .clamp(0.0, 1.0);
+    return _distanceSquared(x, y, ax + t * dx, ay + t * dy);
   }
 
   /// Selects the topmost selectable annotation under ([x], [y]) on

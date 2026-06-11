@@ -33,6 +33,7 @@ class EditingPageOverlay extends StatefulWidget {
     this.rasterCurrent = true,
     this.zoom = 1,
     this.formImagePicker,
+    this.onShowAnnotationMenu,
   });
 
   final PdfEditingController controller;
@@ -66,6 +67,12 @@ class EditingPageOverlay extends StatefulWidget {
   /// to stay constant-size on screen at any zoom. Page-content previews
   /// (ink, shapes, the drag ghost) scale with the page on purpose.
   final double zoom;
+
+  /// Opens the annotation context menu at a global position — the
+  /// selection action chip's "more" button, which gives touch input the
+  /// menu that mice reach by right-clicking. The viewer supplies its
+  /// menu (including the host's custom actions).
+  final void Function(Offset globalPosition)? onShowAnnotationMenu;
 
   @override
   State<EditingPageOverlay> createState() => _EditingPageOverlayState();
@@ -127,6 +134,37 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   /// The latest normalized pressure of the pointer being tracked, or null
   /// for devices that don't report pressure (finger, mouse).
   double? _pointerPressure;
+
+  // raw-driven drawing: with ink or the eraser armed, stylus pointers
+  // (and touch, when fingers draw) skip the gesture arena entirely — a
+  // pan recognizer only wins after ~36px of motion, which swallowed the
+  // start of every pencil stroke and dropped quick dots as taps. The
+  // pointer id claims the gesture; moves append, up commits.
+  int? _rawPointer;
+  bool _rawErasing = false;
+
+  /// Concurrent touch pointers on this page. A second finger landing
+  /// mid-gesture aborts it (see [_bailActiveGesture]) instead of feeding
+  /// both fingers' positions into one stroke.
+  final Set<int> _touchPointers = {};
+
+  /// True from a multi-touch bail until every touch pointer lifts —
+  /// the remainder of the gesture is dead air.
+  bool _gestureBailed = false;
+
+  /// The device kind of the latest pointer down on this page — the
+  /// selection action chip only shows for touch and stylus input.
+  PointerDeviceKind? _lastPointerKind;
+
+  // eraser: /Annots slots crossed during the swipe (deleted in one apply
+  // on lift) and their view rects, faded while pending
+  final Set<int> _eraseSlots = {};
+  final List<Rect> _eraseRects = [];
+  bool _panErasing = false; // a mouse drag is erasing (arena path)
+
+  /// Erased rects kept faded until the deletion's raster lands —
+  /// without it the strokes pop back at full strength for a frame.
+  List<Rect>? _afterEraseRects;
 
   // in-place text editor: open after a free-text drag-out (new) or a
   // tap on the already-selected free text annotation (existing)
@@ -260,15 +298,52 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
               .clamp(0.0, 1.0)
           : null;
 
+  bool get _drawTool =>
+      _tool == PdfEditTool.ink || _tool == PdfEditTool.eraser;
+
+  /// Whether a pointer of [kind] draws (or erases) through the raw
+  /// event stream instead of the gesture arena. Pan recognizers only
+  /// win the arena after ~36px of motion, which swallowed the start of
+  /// every pencil stroke and dropped quick dots as taps — so with ink
+  /// or the eraser armed, stylus input (and touch, when fingers draw)
+  /// starts on pointer-down. Mouse and trackpad keep the arena path:
+  /// they have no latency problem and hover/click semantics to honor.
+  bool _rawDrives(PointerDeviceKind? kind) {
+    if (!_drawTool) return false;
+    return switch (kind) {
+      PointerDeviceKind.stylus || PointerDeviceKind.invertedStylus => true,
+      PointerDeviceKind.touch => _controller.fingerDrawsInk,
+      _ => false,
+    };
+  }
+
   /// Raw-pointer bookkeeping the pan callbacks can't see: the pressure
-  /// stream, and stylus detection for palm rejection.
+  /// stream, stylus detection for palm rejection, multi-touch bail, and
+  /// — with ink or the eraser armed — the stroke itself.
   void _onPointerDown(PointerDownEvent event) {
     _pointerPressure = _normalizedPressure(event);
+    if (_lastPointerKind != event.kind) {
+      // the selection action chip shows for touch/stylus input only
+      setState(() => _lastPointerKind = event.kind);
+    }
+    if (event.kind == PointerDeviceKind.touch) {
+      _touchPointers.add(event.pointer);
+      if (_touchPointers.length >= 2) {
+        // a stylus stroke survives stray touches — that second contact
+        // is the palm resting on the screen, not a gesture
+        if (_rawPointer != null && !_touchPointers.contains(_rawPointer)) {
+          return;
+        }
+        _bailActiveGesture();
+        return;
+      }
+    }
     if (_controller.isPickingColor) {
       _updatePickPreview(event.localPosition);
       return;
     }
-    if (_tool == PdfEditTool.ink &&
+    if (_gestureBailed) return;
+    if (_drawTool &&
         _controller.fingerDrawsInk &&
         (event.kind == PointerDeviceKind.stylus ||
             event.kind == PointerDeviceKind.invertedStylus)) {
@@ -276,12 +351,155 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       // pen draws and fingers scroll, until the user toggles it back
       _controller.fingerDrawsInk = false;
     }
+    if (_rawPointer == null && _rawDrives(event.kind)) {
+      _rawPointer = event.pointer;
+      // a flipped pencil erases even while the ink tool is armed —
+      // that's what the flip is for
+      _rawErasing = _tool == PdfEditTool.eraser ||
+          event.kind == PointerDeviceKind.invertedStylus;
+      if (_rawErasing) {
+        _eraseAt(event.localPosition);
+      } else {
+        // hold the auto-commit while this stroke is on the page
+        _controller.beginInkStroke();
+        final pressure = _pointerPressure;
+        setState(() {
+          _activeStroke = [_geometry.toPagePoint(event.localPosition)];
+          _activeStrokePressures = pressure == null ? null : [pressure];
+        });
+      }
+    }
   }
 
   void _onPointerMove(PointerMoveEvent event) {
     final pressure = _normalizedPressure(event);
     if (pressure != null) _pointerPressure = pressure;
-    if (_controller.isPickingColor) _updatePickPreview(event.localPosition);
+    if (_controller.isPickingColor) {
+      _updatePickPreview(event.localPosition);
+      return;
+    }
+    if (event.pointer != _rawPointer) return;
+    if (_rawErasing) {
+      _eraseAt(event.localPosition);
+    } else if (_activeStroke != null) {
+      setState(() {
+        _activeStroke!.add(_geometry.toPagePoint(event.localPosition));
+        _activeStrokePressures
+            ?.add(_pointerPressure ?? _activeStrokePressures!.last);
+      });
+    }
+  }
+
+  /// Aborts whatever gesture is in flight — a second finger landed, so
+  /// the first one wasn't drawing or dragging after all (it's a pinch,
+  /// or just a clumsy grip). Nothing commits; the rest of the gesture
+  /// is dead air until every touch pointer lifts.
+  void _bailActiveGesture() {
+    _gestureBailed = true;
+    _rawPointer = null;
+    _rawErasing = false;
+    setState(() {
+      _activeStroke = null;
+      _activeStrokePressures = null;
+      _eraseSlots.clear();
+      _eraseRects.clear();
+      _panErasing = false;
+      _dragStart = null;
+      _dragCurrent = null;
+      _moveStart = null;
+      _moveCurrent = null;
+      _resizeHandle = null;
+      _resizeFrom = null;
+      _resizeRect = null;
+      _resizeAngle = 0;
+      _rotateStartAngle = null;
+      _rotateDelta = 0;
+      _marqueeStart = null;
+      _marqueeCurrent = null;
+      _marqueeAdd = false;
+      _viewportPanning = false;
+      _signatureDrag = false;
+      _signaturePreview = null;
+    });
+    // earlier strokes waiting in the buffer get their auto-commit back
+    _controller.cancelInkStroke();
+  }
+
+  /// Touch bookkeeping and the raw gesture's commit, shared by
+  /// pointer-up and pointer-cancel.
+  void _endRawPointer(PointerEvent event, {required bool canceled}) {
+    if (event.kind == PointerDeviceKind.touch) {
+      _touchPointers.remove(event.pointer);
+      if (_touchPointers.isEmpty) _gestureBailed = false;
+    }
+    if (event.pointer != _rawPointer) return;
+    _rawPointer = null;
+    final erasing = _rawErasing;
+    _rawErasing = false;
+    if (erasing) {
+      if (canceled) {
+        setState(() {
+          _eraseSlots.clear();
+          _eraseRects.clear();
+        });
+      } else {
+        _commitErase();
+      }
+      return;
+    }
+    final stroke = _activeStroke;
+    final pressures = _activeStrokePressures;
+    setState(() {
+      _activeStroke = null;
+      _activeStrokePressures = null;
+    });
+    if (canceled || stroke == null || stroke.isEmpty) {
+      _controller.cancelInkStroke();
+      return;
+    }
+    if (stroke.length == 1) {
+      // a dot (the i's, mostly): a zero-length segment renders as a
+      // filled circle under the round line cap (PDF §8.5.3.2)
+      stroke.add(stroke.single);
+      pressures?.add(pressures.single);
+    }
+    _controller.addInkStroke(widget.pageIndex, stroke,
+        pressures: pressures);
+  }
+
+  /// Marks the topmost Ink annotation under the view-space [position]
+  /// for erasure: collected into one swipe (one apply, one undo on
+  /// lift) and faded on screen meanwhile.
+  void _eraseAt(Offset position) {
+    final (x, y) = _geometry.toPagePoint(position);
+    // ~6 screen pixels of slack, beyond the half-pen-width the hit
+    // test already grants — constant feel at any zoom
+    final tolerance = 6 * _chromeScale / _geometry.scale;
+    final hit = _controller.inkAnnotationAt(widget.pageIndex, x, y,
+        tolerance: tolerance);
+    if (hit == null || _eraseSlots.contains(hit.$1)) return;
+    setState(() {
+      _eraseSlots.add(hit.$1);
+      _eraseRects.add(_geometry.toViewRect(hit.$2.rect));
+    });
+  }
+
+  /// Deletes the swipe's collected annotations in one apply and keeps
+  /// their rects faded until the new revision's raster lands.
+  void _commitErase() {
+    if (_eraseSlots.isEmpty) return;
+    final slots = [for (final index in _eraseSlots) (widget.pageIndex, index)];
+    final rects = List.of(_eraseRects);
+    setState(() {
+      _eraseSlots.clear();
+      _eraseRects.clear();
+    });
+    final before = _controller.document;
+    _controller.deleteAnnotations(slots);
+    if (identical(before, _controller.document)) return;
+    _clearAfterimage();
+    _afterEraseRects = rects;
+    _afterDocument = _controller.document;
   }
 
   /// The primary selected annotation's view rect when it lives on this
@@ -362,6 +580,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterShape = null;
     _afterText = null;
     _afterSignature = null;
+    _afterEraseRects = null;
     _afterDocument = null;
   }
 
@@ -682,6 +901,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   }
 
   void _panStart(DragStartDetails details) {
+    // raw-driven pointers own their gesture: the pan recognizer still
+    // claims the arena (keeping the viewer's pan/zoom from fighting the
+    // stroke) but its callbacks must not double-drive it
+    if (_gestureBailed || _rawDrives(details.kind)) return;
     final position = details.localPosition;
     if (_textEditRect != null) {
       // a drag outside the open editor commits it, like a tap
@@ -697,6 +920,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         break; // eyedropper only — taps, no drags
       case PdfEditTool.select:
         break; // handled by _selectPanStart above
+      case PdfEditTool.eraser:
+        // mouse/trackpad erase through the arena like any drag
+        _panErasing = true;
+        _eraseAt(position);
       case PdfEditTool.ink:
         // hold the auto-commit while this stroke is on the page
         _controller.beginInkStroke();
@@ -813,7 +1040,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   }
 
   void _panUpdate(DragUpdateDetails details) {
+    if (_gestureBailed || _rawPointer != null) return;
     final position = details.localPosition;
+    if (_panErasing) {
+      _eraseAt(position);
+      return;
+    }
     if (_viewportPanning) {
       widget.onPanViewport?.call(details.delta);
       return;
@@ -857,6 +1089,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   }
 
   void _panEnd(DragEndDetails details) {
+    if (_rawPointer != null) return; // the raw pointer-up commits
+    if (_panErasing) {
+      _panErasing = false;
+      _commitErase();
+      return;
+    }
     final stroke = _activeStroke;
     final strokePressures = _activeStrokePressures;
     final dragStart = _dragStart;
@@ -1104,10 +1342,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     });
   }
 
-  /// Releasing the pointer picks the previewed color — so both a plain
-  /// tap and press-drag-release (watching the preview) work. A raw
-  /// listener, so it fires regardless of the gesture arena.
+  /// Releasing the pointer commits the raw gesture (stroke or erase
+  /// swipe) and picks the eyedropper's previewed color — so both a
+  /// plain tap and press-drag-release (watching the preview) work. A
+  /// raw listener, so it fires regardless of the gesture arena.
   Future<void> _onPointerUp(PointerUpEvent event) async {
+    _endRawPointer(event, canceled: false);
     if (!_controller.isPickingColor) return;
     final document = _controller.document;
     final sampler = await _ensureSampler();
@@ -1120,9 +1360,22 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     if (color != null) _controller.finishColorPick(color);
   }
 
+  void _onPointerCancel(PointerCancelEvent event) =>
+      _endRawPointer(event, canceled: true);
+
   Future<void> _onTapUp(TapUpDetails details) async {
     // the eyedropper commits from the raw pointer-up instead
     if (_controller.isPickingColor) return;
+    if (_gestureBailed) return;
+    if (_tool == PdfEditTool.eraser) {
+      // a mouse/trackpad click erases what's under it; raw-driven
+      // pointers already handled theirs on the way down
+      if (!_rawDrives(details.kind)) {
+        _eraseAt(details.localPosition);
+        _commitErase();
+      }
+      return;
+    }
     if (_textEditRect != null) {
       // tapping outside the open editor commits it
       _commitTextEdit();
@@ -1208,6 +1461,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       }
     } else if (_tool == PdfEditTool.note) {
       cursor = SystemMouseCursors.click;
+    } else if (_tool == PdfEditTool.eraser) {
+      final (x, y) = _geometry.toPagePoint(event.localPosition);
+      cursor = _controller.inkAnnotationAt(widget.pageIndex, x, y,
+                  tolerance: 6 * _chromeScale / _geometry.scale) !=
+              null
+          ? SystemMouseCursors.click
+          : SystemMouseCursors.precise;
     } else if (_tool == PdfEditTool.signature) {
       // the live preview rides the mouse; a click commits it
       if (_controller.signature != null &&
@@ -1241,6 +1501,74 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       cursor = SystemMouseCursors.precise;
     }
     if (cursor != _cursor) setState(() => _cursor = cursor);
+  }
+
+  /// The floating action row beside a touch/stylus selection — the
+  /// affordances mice get from hover and right-click (delete, the
+  /// context menu, edit-in-place). Rides above the selection, clear of
+  /// the rotate knob; flips below when the selection hugs the page top.
+  /// Constant size on screen at any zoom, like the rest of the chrome.
+  Widget _buildSelectionChip(Rect selected) {
+    final clearance = (_rotateHandleDistance + 16) * _chromeScale;
+    final above =
+        selected.top - clearance - 44 * _chromeScale >= 0;
+    // keep the chip's body on the page near the side edges
+    final width = _geometry.viewSize.width;
+    final halfChip = 80 * _chromeScale;
+    final anchor = Offset(
+      width <= 2 * halfChip
+          ? width / 2
+          : selected.center.dx.clamp(halfChip, width - halfChip),
+      above
+          ? selected.top - clearance
+          : selected.bottom + 12 * _chromeScale,
+    );
+    return Positioned(
+      left: anchor.dx,
+      top: anchor.dy,
+      child: FractionalTranslation(
+        translation: Offset(-0.5, above ? -1 : 0),
+        child: Transform.scale(
+          scale: _chromeScale,
+          alignment: above ? Alignment.bottomCenter : Alignment.topCenter,
+          child: Material(
+            key: const ValueKey('pdf-selection-chip'),
+            elevation: 3,
+            borderRadius: BorderRadius.circular(22),
+            clipBehavior: Clip.antiAlias,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              IconButton(
+                key: const ValueKey('pdf-selection-chip-delete'),
+                icon: const Icon(Icons.delete_outline),
+                tooltip: 'Delete',
+                onPressed: _controller.deleteSelected,
+              ),
+              if (_controller.canEditSelectedText)
+                IconButton(
+                  key: const ValueKey('pdf-selection-chip-edit'),
+                  icon: const Icon(Icons.edit_outlined),
+                  tooltip: 'Edit text',
+                  onPressed: () {
+                    final rect = _selectedViewRect;
+                    if (rect != null) _openTextEditor(rect, existing: true);
+                  },
+                ),
+              if (widget.onShowAnnotationMenu != null)
+                IconButton(
+                  key: const ValueKey('pdf-selection-chip-menu'),
+                  icon: const Icon(Icons.more_horiz),
+                  tooltip: 'More',
+                  onPressed: () {
+                    final box = context.findRenderObject() as RenderBox?;
+                    if (box == null) return;
+                    widget.onShowAnnotationMenu!(box.localToGlobal(anchor));
+                  },
+                ),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 
   /// The Flutter font family that visually matches [font] — the same
@@ -1331,6 +1659,17 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     // warm the eyedropper's raster so the first preview is instant-ish
     if (_controller.isPickingColor) unawaited(_ensureSampler());
     final preview = _controller.isPickingColor ? _pickPosition : null;
+    // touch and stylus get the hover/right-click affordances as a
+    // floating action chip beside the selection
+    final showChip = (_lastPointerKind == PointerDeviceKind.touch ||
+            _lastPointerKind == PointerDeviceKind.stylus) &&
+        _selectMode &&
+        selected != null &&
+        !dragging &&
+        _moveStart == null &&
+        _marqueeStart == null &&
+        _textEditRect == null &&
+        _rawPointer == null;
     return Listener(
       // raw events carry what pan callbacks drop: pressure and the
       // device kind (for Apple Pencil palm rejection); pointer-up is
@@ -1338,19 +1677,19 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       onPointerDown: _onPointerDown,
       onPointerMove: _onPointerMove,
       onPointerUp: _onPointerUp,
+      onPointerCancel: _onPointerCancel,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         // with finger drawing off, touch falls through to the scroll
         // view and only pen-like devices reach the ink recognizers
-        supportedDevices:
-            _tool == PdfEditTool.ink && !_controller.fingerDrawsInk
-                ? const {
-                    PointerDeviceKind.stylus,
-                    PointerDeviceKind.invertedStylus,
-                    PointerDeviceKind.mouse,
-                    PointerDeviceKind.trackpad,
-                  }
-                : null,
+        supportedDevices: _drawTool && !_controller.fingerDrawsInk
+            ? const {
+                PointerDeviceKind.stylus,
+                PointerDeviceKind.invertedStylus,
+                PointerDeviceKind.mouse,
+                PointerDeviceKind.trackpad,
+              }
+            : null,
         // anchor drags at the press point, not where the recognizer won the
         // arena — a shape should start exactly where the pointer went down
         dragStartBehavior: DragStartBehavior.down,
@@ -1414,6 +1753,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                   ghostLocalAngle:
                       _resizeHandle != null ? _resizeAngle : 0,
                   extraInk: extraInk,
+                  fadeRects: [
+                    ..._eraseRects,
+                    ...?_afterEraseRects,
+                  ],
+                  fadeColor: widget.pageColor.withValues(alpha: 0.72),
                   afterGhost: _afterGhost != null
                       ? (
                           picture: _afterGhost!,
@@ -1539,6 +1883,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                   ),
                 ),
               ),
+            if (showChip) _buildSelectionChip(chrome?.$1 ?? selected),
           ]),
         ),
       ),
@@ -1607,6 +1952,8 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.ghostRotation,
     this.ghostLocalAngle = 0,
     required this.extraInk,
+    this.fadeRects = const [],
+    this.fadeColor = const Color(0x00000000),
     required this.afterGhost,
     required this.afterShape,
     required this.showHandles,
@@ -1661,6 +2008,13 @@ class _EditingPreviewPainter extends CustomPainter {
   /// Stroke sets beyond the pending ink: committed-ink afterimages and
   /// the signature tool's live preview.
   final List<_InkPaint> extraInk;
+
+  /// Annotations the eraser swipe has marked: their view rects, washed
+  /// with [fadeColor] (the paper color, mostly opaque) so they read as
+  /// going — live during the swipe, and as the afterimage until the
+  /// deletion's raster lands.
+  final List<Rect> fadeRects;
+  final Color fadeColor;
 
   /// A just-committed move/resize/rotate, kept painted at full strength
   /// until the new revision's raster lands.
@@ -1798,6 +2152,13 @@ class _EditingPreviewPainter extends CustomPainter {
     for (final ink in extraInk) {
       _paintInk(canvas, ink.strokes, ink.pressures, ink.color,
           ink.strokeWidth);
+    }
+
+    if (fadeRects.isNotEmpty) {
+      final wash = Paint()..color = fadeColor;
+      for (final rect in fadeRects) {
+        canvas.drawRect(rect.inflate(2), wash);
+      }
     }
 
     final after = afterShape;
@@ -1977,6 +2338,8 @@ class _EditingPreviewPainter extends CustomPainter {
       oldDelegate.ghostRotation != ghostRotation ||
       oldDelegate.ghostLocalAngle != ghostLocalAngle ||
       _inkChanged(oldDelegate.extraInk, extraInk) ||
+      !listEquals(oldDelegate.fadeRects, fadeRects) ||
+      oldDelegate.fadeColor != fadeColor ||
       oldDelegate.afterGhost != afterGhost ||
       oldDelegate.afterShape != afterShape ||
       oldDelegate.showHandles != showHandles ||

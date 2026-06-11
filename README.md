@@ -126,11 +126,22 @@ stroke width, opacity, font size, the stylus/finger mode, and panel
 visibility all come back the way the user left them.
 Apple Pencil (and any stylus) is first-class for ink: strokes record
 pressure and render with variable width, and the first pen contact
-turns on palm rejection — fingers scroll while the pen draws. Ink
-strokes are smoothed: the sampled points become a Catmull-Rom spline
-written as Bézier curves in the appearance stream, so fast strokes
-stay rounded instead of showing polyline corners — in this viewer and
-any other.
+turns on palm rejection — fingers scroll while the pen draws. Pen and
+drawing-finger strokes start the instant the pointer touches the page
+(no gesture-recognizer latency eating the start of a line), a quick
+tap lands as a dot — handwriting keeps its i-dots and punctuation —
+and stray palm contact never cancels a pen stroke, while a deliberate
+second finger does cancel an accidental one. Ink strokes are
+smoothed: the sampled points become a Catmull-Rom spline written as
+Bézier curves in the appearance stream, so fast strokes stay rounded
+instead of showing polyline corners — in this viewer and any other.
+An eraser tool removes whole ink strokes with a swipe (precise: it
+demands proximity to the inked line, not just its bounding box; one
+swipe is one undo), and a flipped pencil erases while the ink tool is
+armed. Touch pinch zoom works everywhere — including with a tool
+armed — and touch or stylus selections get a floating action chip
+(delete, context menu, edit text) standing in for hover and
+right-click.
 Trackpad gestures behave like the platform's own: a pinch zooms about
 the fingers without also scrolling the document (each gesture commits
 to scrolling or zooming, whichever its motion shows first), and

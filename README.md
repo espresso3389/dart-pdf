@@ -163,6 +163,18 @@ no confirm button (set `inkCommitDelay` to null for the old manual
 flow). And the signature tool shows the signature riding the pointer —
 hover with a mouse, press-and-drag on touch — at exactly the size and
 position a tap or release will stamp.
+The side panels are desktop-grade too. Both sidebars resize by
+dragging their inner edge (the chosen widths persist on the device
+with the other UI preferences), the thumbnail strip follows the
+viewer — scrolling, search hits, and link jumps bring the current
+page's tile into view — and tapping an annotation in the list pulses
+an amber attention ring around it on the page, so the eye lands on
+the right spot after the zoom. The strip is also built for large
+documents: thumbnails are rasterized at tile resolution into an LRU
+cache keyed by a per-page render stamp, so an edit (or undo) only
+re-renders the pages it actually touched, renders run one page at a
+time instead of bursting on first layout, and scrolling the viewer
+repaints only the little viewport indicators — never the page images.
 Text boxes are written and edited in place, like a desktop editor:
 dragging out the free-text tool opens an inline editor right on the
 page — same font, size, and color the committed annotation will have —

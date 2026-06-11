@@ -1,0 +1,399 @@
+import 'dart:async';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
+import 'package:flutter_test/flutter_test.dart';
+import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_flutter/pdf_flutter.dart';
+import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+void main() {
+  setUp(() {
+    // the mock store is process-global: start every test from defaults
+    SharedPreferences.setMockInitialValues({});
+    PdfThumbnailSidebar.debugRasterizations = 0;
+  });
+
+  group('pageRenderStamp', () {
+    test('moves only for the pages an edit touched', () {
+      final editing = PdfEditingController(buildMultiPagePdf(3));
+      addTearDown(editing.dispose);
+      final before = [for (var i = 0; i < 3; i++) editing.pageRenderStamp(i)];
+
+      editing.addRectangle(0, const PdfRect(100, 100, 200, 150));
+      expect(editing.pageRenderStamp(0), isNot(before[0]));
+      expect(editing.pageRenderStamp(1), before[1]);
+      expect(editing.pageRenderStamp(2), before[2]);
+    });
+
+    test('undo and redo bump exactly the reverted revision\'s pages', () {
+      final editing = PdfEditingController(buildMultiPagePdf(3))
+        ..addRectangle(1, const PdfRect(100, 100, 200, 150));
+      addTearDown(editing.dispose);
+      final after = [for (var i = 0; i < 3; i++) editing.pageRenderStamp(i)];
+
+      editing.undo();
+      expect(editing.pageRenderStamp(0), after[0]);
+      expect(editing.pageRenderStamp(1), isNot(after[1]));
+      expect(editing.pageRenderStamp(2), after[2]);
+
+      final undone = editing.pageRenderStamp(1);
+      editing.redo();
+      expect(editing.pageRenderStamp(0), after[0]);
+      expect(editing.pageRenderStamp(1), isNot(undone));
+      expect(editing.pageRenderStamp(2), after[2]);
+    });
+
+    test('structural and unattributed edits bump every page', () {
+      final editing = PdfEditingController(buildMultiPagePdf(3));
+      addTearDown(editing.dispose);
+      final before = [for (var i = 0; i < 3; i++) editing.pageRenderStamp(i)];
+
+      editing.movePage(0, 2);
+      final moved = [for (var i = 0; i < 3; i++) editing.pageRenderStamp(i)];
+      for (var i = 0; i < 3; i++) {
+        expect(moved[i], isNot(before[i]));
+      }
+
+      // a host edit through the public apply, with no pages named
+      editing.apply((e) => e.rotatePage(0, 90));
+      for (var i = 0; i < 3; i++) {
+        expect(editing.pageRenderStamp(i), isNot(moved[i]));
+      }
+    });
+
+    test('pageAt caches within a revision', () {
+      final editing = PdfEditingController(buildMultiPagePdf(2));
+      addTearDown(editing.dispose);
+      expect(identical(editing.pageAt(0), editing.pageAt(0)), isTrue);
+      final before = editing.pageAt(0);
+      editing.addRectangle(0, const PdfRect(100, 100, 200, 150));
+      expect(identical(editing.pageAt(0), before), isFalse);
+    });
+  });
+
+  group('thumbnail rasters', () {
+    Future<void> waitForRasters(WidgetTester tester, int target) async {
+      for (var i = 0;
+          i < 100 && PdfThumbnailSidebar.debugRasterizations < target;
+          i++) {
+        await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await tester.pump();
+      }
+      expect(PdfThumbnailSidebar.debugRasterizations, target);
+    }
+
+    testWidgets('an edit re-renders only the page it touched',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(3));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            PdfThumbnailSidebar(controller: editing, viewerController: viewer),
+            const Expanded(child: SizedBox()),
+          ]),
+        ),
+      ));
+      await waitForRasters(tester, 3);
+
+      // an edit on page 0 re-rasterizes that page alone
+      editing.addRectangle(0, const PdfRect(100, 100, 200, 150));
+      await waitForRasters(tester, 4);
+      // give any over-eager renders a chance to land, then re-assert
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+      expect(PdfThumbnailSidebar.debugRasterizations, 4);
+
+      // undoing it re-renders page 0 again — and only page 0
+      editing.undo();
+      await waitForRasters(tester, 5);
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+      expect(PdfThumbnailSidebar.debugRasterizations, 5);
+    });
+  });
+
+  group('resizable sidebars', () {
+    testWidgets('the thumbnail grip drags the panel wider and persists',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            PdfThumbnailSidebar(controller: editing, viewerController: viewer),
+            const Expanded(child: SizedBox()),
+          ]),
+        ),
+      ));
+      await tester.pump();
+
+      final before = tester.getSize(find.byType(PdfThumbnailSidebar)).width;
+      expect(before, 160);
+
+      final grip = tester
+          .getCenter(find.byKey(const ValueKey('pdf-thumbnail-resize-grip')));
+      final gesture =
+          await tester.startGesture(grip, kind: PointerDeviceKind.mouse);
+      await gesture.moveBy(const Offset(60, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      final after = tester.getSize(find.byType(PdfThumbnailSidebar)).width;
+      expect(after, greaterThan(before + 40));
+      expect(editing.preferences.thumbnailSidebarWidth, after);
+    });
+
+    testWidgets(
+        'the annotation grip grows leftward, clamps, and persists',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            const Expanded(child: SizedBox()),
+            PdfAnnotationSidebar(controller: editing, viewerController: viewer),
+          ]),
+        ),
+      ));
+      await tester.pump();
+
+      expect(tester.getSize(find.byType(PdfAnnotationSidebar)).width, 280);
+
+      // docked right: dragging the grip left makes the panel wider
+      final grip = tester
+          .getCenter(find.byKey(const ValueKey('pdf-annotation-resize-grip')));
+      final gesture =
+          await tester.startGesture(grip, kind: PointerDeviceKind.mouse);
+      await gesture.moveBy(const Offset(-1000, 0)); // far past the clamp
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+
+      expect(tester.getSize(find.byType(PdfAnnotationSidebar)).width, 480);
+      expect(editing.preferences.annotationSidebarWidth, 480);
+    });
+
+    testWidgets('a persisted width comes back on the next build',
+        (tester) async {
+      SharedPreferences.setMockInitialValues(
+          {'pdf_flutter.editing.thumbnailSidebarWidth': 222.0});
+      final editing = PdfEditingController(buildMultiPagePdf(1));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await editing.preferences.ready;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            PdfThumbnailSidebar(controller: editing, viewerController: viewer),
+            const Expanded(child: SizedBox()),
+          ]),
+        ),
+      ));
+      await tester.pump();
+      expect(tester.getSize(find.byType(PdfThumbnailSidebar)).width, 222);
+    });
+  });
+
+  group('the strip follows the viewer', () {
+    testWidgets('jumping pages scrolls the current tile into view',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(12));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            PdfThumbnailSidebar(
+              controller: editing,
+              viewerController: viewer,
+              width: 140,
+            ),
+            Expanded(
+              child: PdfViewer(
+                initialFit: PdfViewerFit.width,
+                document: editing.document,
+                controller: viewer,
+                editing: editing,
+              ),
+            ),
+          ]),
+        ),
+      ));
+      await tester.pump();
+
+      // page 10's tile starts far below the strip's viewport
+      expect(find.text('Page 10').hitTestable(), findsNothing);
+
+      // fire-and-forget: awaiting would deadlock the fake-async pump
+      unawaited(viewer.jumpToPage(9));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(viewer.currentPage, 9);
+      expect(find.text('Page 10').hitTestable(), findsOneWidget);
+
+      // and back up
+      unawaited(viewer.jumpToPage(0));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Page 1').hitTestable(), findsOneWidget);
+    });
+  });
+
+  group('zoom-to flash', () {
+    (int, int, int) pixelAt(ByteData pixels, int width, int x, int y) {
+      final i = (y * width + x) * 4;
+      return (
+        pixels.getUint8(i),
+        pixels.getUint8(i + 1),
+        pixels.getUint8(i + 2),
+      );
+    }
+
+    /// Whether the captured frame holds the flash's amber anywhere —
+    /// the 0.9-alpha stroke stays close to (255, 179, 0) over any paper.
+    bool hasAmber(ByteData pixels, int width, int height) {
+      for (var y = 0; y < height; y += 2) {
+        for (var x = 0; x < width; x += 2) {
+          final (r, g, b) = pixelAt(pixels, width, x, y);
+          if (r > 230 && g > 150 && g < 220 && b < 90) return true;
+        }
+      }
+      return false;
+    }
+
+    Future<ByteData> capture(WidgetTester tester, Key key) async {
+      final boundary =
+          tester.renderObject<RenderRepaintBoundary>(find.byKey(key));
+      final ui.Image image =
+          (await tester.runAsync(() => boundary.toImage()))!;
+      final pixels = (await tester.runAsync(() => image.toByteData()))!;
+      addTearDown(image.dispose);
+      return pixels;
+    }
+
+    testWidgets('a sidebar tap pulses the annotation, then it expires',
+        (tester) async {
+      const boundaryKey = ValueKey('flash-capture');
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..addRectangle(0, const PdfRect(250, 350, 400, 450));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            Expanded(
+              child: RepaintBoundary(
+                key: boundaryKey,
+                child: ListenableBuilder(
+                  listenable: editing,
+                  builder: (context, _) => PdfViewer(
+                    initialFit: PdfViewerFit.width,
+                    document: editing.document,
+                    controller: viewer,
+                    editing: editing,
+                  ),
+                ),
+              ),
+            ),
+            PdfAnnotationSidebar(controller: editing, viewerController: viewer),
+          ]),
+        ),
+      ));
+      await tester.pump();
+
+      await tester.tap(find.text('Square'));
+      await tester.pump();
+      expect(editing.pendingFlash,
+          (page: 0, slot: 0, sequence: editing.pendingFlash!.sequence));
+      expect(editing.selectedAnnotationSlot, (0, 0));
+
+      // mid-pulse: the amber ring is on screen
+      await tester.pump(const Duration(milliseconds: 120));
+      final boundary = tester
+          .renderObject<RenderRepaintBoundary>(find.byKey(boundaryKey));
+      final size = boundary.size;
+      var pixels = await capture(tester, boundaryKey);
+      expect(hasAmber(pixels, size.width.round(), size.height.round()), isTrue,
+          reason: 'the flash ring should be painted mid-pulse');
+
+      // the animation ends, then the pending flash expires on its timer
+      await tester.pump(const Duration(milliseconds: 1200));
+      pixels = await capture(tester, boundaryKey);
+      expect(
+          hasAmber(pixels, size.width.round(), size.height.round()), isFalse,
+          reason: 'the flash should be gone once the pulse ends');
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(editing.pendingFlash, isNull);
+    });
+
+    testWidgets('a second tap on the same tile pulses again', (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..addRectangle(0, const PdfRect(250, 350, 400, 450));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            Expanded(
+              child: ListenableBuilder(
+                listenable: editing,
+                builder: (context, _) => PdfViewer(
+                  initialFit: PdfViewerFit.width,
+                  document: editing.document,
+                  controller: viewer,
+                  editing: editing,
+                ),
+              ),
+            ),
+            PdfAnnotationSidebar(controller: editing, viewerController: viewer),
+          ]),
+        ),
+      ));
+      await tester.pump();
+
+      await tester.tap(find.text('Square'));
+      await tester.pump();
+      final first = editing.pendingFlash!.sequence;
+      await tester.pump(const Duration(seconds: 2)); // pulse + expiry
+
+      expect(editing.pendingFlash, isNull);
+      await tester.tap(find.text('Square'));
+      await tester.pump();
+      expect(editing.pendingFlash!.sequence, isNot(first));
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    test('an edit invalidates the pending flash', () {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..addRectangle(0, const PdfRect(250, 350, 400, 450));
+      addTearDown(editing.dispose);
+      editing.flashAnnotation(0, 0);
+      expect(editing.pendingFlash, isNotNull);
+      editing.addNote(0, 100, 700, 'note'); // new revision, slots may shift
+      expect(editing.pendingFlash, isNull);
+    });
+  });
+}

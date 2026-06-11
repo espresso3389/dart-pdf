@@ -55,6 +55,8 @@ class PdfEditingPreferences extends ChangeNotifier {
   List<PdfCustomStamp> _customStamps = const [];
   ThemeMode _themeMode = ThemeMode.system;
   Color _pageColor = const Color(0xFFFFFFFF);
+  double? _thumbnailSidebarWidth;
+  double? _annotationSidebarWidth;
 
   Future<void> _load() async {
     final SharedPreferences store;
@@ -91,6 +93,12 @@ class PdfEditingPreferences extends ChangeNotifier {
       }
       final pageColor = store.getInt('${_prefix}pageColor');
       if (pageColor != null) _pageColor = Color(pageColor);
+      _thumbnailSidebarWidth =
+          store.getDouble('${_prefix}thumbnailSidebarWidth') ??
+              _thumbnailSidebarWidth;
+      _annotationSidebarWidth =
+          store.getDouble('${_prefix}annotationSidebarWidth') ??
+              _annotationSidebarWidth;
       final stamps = store.getStringList('${_prefix}customStamps');
       if (stamps != null) {
         _customStamps = List.unmodifiable([
@@ -241,6 +249,32 @@ class PdfEditingPreferences extends ChangeNotifier {
     if (value == _pageColor) return;
     _pageColor = value;
     _write((s) => s.setInt('${_prefix}pageColor', value.toARGB32()));
+    notifyListeners();
+  }
+
+  /// The thumbnail sidebar's user-dragged width, or null while it has
+  /// never been resized (the widget's own default width applies).
+  double? get thumbnailSidebarWidth => _thumbnailSidebarWidth;
+
+  set thumbnailSidebarWidth(double? value) {
+    if (value == _thumbnailSidebarWidth) return;
+    _thumbnailSidebarWidth = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}thumbnailSidebarWidth')
+        : s.setDouble('${_prefix}thumbnailSidebarWidth', value));
+    notifyListeners();
+  }
+
+  /// The annotation sidebar's user-dragged width, or null while it has
+  /// never been resized.
+  double? get annotationSidebarWidth => _annotationSidebarWidth;
+
+  set annotationSidebarWidth(double? value) {
+    if (value == _annotationSidebarWidth) return;
+    _annotationSidebarWidth = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}annotationSidebarWidth')
+        : s.setDouble('${_prefix}annotationSidebarWidth', value));
     notifyListeners();
   }
 

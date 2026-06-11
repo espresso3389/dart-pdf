@@ -97,6 +97,7 @@ class PdfEditingController extends ChangeNotifier {
   @override
   void dispose() {
     _inkTimer?.cancel();
+    _flashTimer?.cancel();
     preferences.removeListener(notifyListeners);
     super.dispose();
   }
@@ -110,6 +111,34 @@ class PdfEditingController extends ChangeNotifier {
   /// is the current one; entries past the cursor are redoable.
   final List<int> _revisions;
   int _cursor = 0;
+
+  /// Parallels [_revisions]: the page indices each revision changed
+  /// visually (null = unknown, treat as all). Entry 0 — the original
+  /// document — is never consulted.
+  final List<Set<int>?> _revisionPages = [null];
+
+  /// Render stamps: how many times each page's rendering has changed.
+  /// [_renderStampEpoch] counts the all-pages bumps (structural edits,
+  /// unknown-page edits) so they don't iterate a large document.
+  final Map<int, int> _renderStamps = {};
+  int _renderStampEpoch = 0;
+
+  void _bumpRenderStamps(Set<int>? pages) {
+    if (pages == null) {
+      _renderStampEpoch++;
+    } else {
+      for (final page in pages) {
+        _renderStamps[page] = (_renderStamps[page] ?? 0) + 1;
+      }
+    }
+  }
+
+  /// A value that changes whenever [pageIndex]'s rendering may have
+  /// changed — and stays put across edits, undo, and redo that touched
+  /// other pages only. Thumbnails key their raster caches on it instead
+  /// of re-rendering every page on every revision.
+  int pageRenderStamp(int pageIndex) =>
+      _renderStampEpoch + (_renderStamps[pageIndex] ?? 0);
 
   PdfDocument _document;
 
@@ -128,6 +157,8 @@ class PdfEditingController extends ChangeNotifier {
 
   void undo() {
     if (!canUndo) return;
+    // reverting revision N un-renders exactly the pages N touched
+    _bumpRenderStamps(_revisionPages[_cursor]);
     _cursor--;
     _reopen();
   }
@@ -135,6 +166,7 @@ class PdfEditingController extends ChangeNotifier {
   void redo() {
     if (!canRedo) return;
     _cursor++;
+    _bumpRenderStamps(_revisionPages[_cursor]);
     _reopen();
   }
 
@@ -150,14 +182,23 @@ class PdfEditingController extends ChangeNotifier {
   /// new revision. Returns false (and changes nothing) if [edit] staged no
   /// changes. Redoable revisions are discarded, like any editor's redo
   /// stack on a fresh edit.
-  bool apply(void Function(PdfEditor editor) edit) {
+  ///
+  /// [pages] names the page indices the edit changes visually — it feeds
+  /// [pageRenderStamp], which lets page thumbnails skip re-rendering
+  /// pages an edit didn't touch. Omit it (null) when the affected pages
+  /// are unknown and every page's stamp is bumped.
+  bool apply(void Function(PdfEditor editor) edit, {Iterable<int>? pages}) {
     final editor = PdfEditor(_document);
     edit(editor);
     if (!editor.hasChanges) return false;
     final saved = editor.save();
+    final touched = pages == null ? null : Set<int>.unmodifiable(pages);
     _revisions.removeRange(_cursor + 1, _revisions.length);
+    _revisionPages.removeRange(_cursor + 1, _revisionPages.length);
     _bytes = saved;
     _revisions.add(saved.length);
+    _revisionPages.add(touched);
+    _bumpRenderStamps(touched);
     _cursor++;
     final selected = List.of(_selected);
     _document = PdfDocument.open(bytes, password: _password);
@@ -394,7 +435,7 @@ class PdfEditingController extends ChangeNotifier {
               author: author);
         }
       });
-    });
+    }, pages: strokes.keys);
     if (committed) {
       _committedInk = (
         document: _document,
@@ -450,7 +491,7 @@ class PdfEditingController extends ChangeNotifier {
                 author: author);
         }
       });
-    });
+    }, pages: quadsByPage.keys);
   }
 
   void addRectangle(int pageIndex, PdfRect rect) =>
@@ -458,31 +499,33 @@ class PdfEditingController extends ChangeNotifier {
           strokeColor: _colorValue,
           strokeWidth: preferences.strokeWidth,
           opacity: preferences.opacity,
-          author: author));
+          author: author), pages: [pageIndex]);
 
   void addEllipse(int pageIndex, PdfRect rect) =>
       apply((e) => e.addCircle(pageIndex, rect,
           strokeColor: _colorValue,
           strokeWidth: preferences.strokeWidth,
           opacity: preferences.opacity,
-          author: author));
+          author: author), pages: [pageIndex]);
 
   void addFreeText(int pageIndex, PdfRect rect, String text) =>
       apply((e) => e.addFreeText(pageIndex, rect, text,
           fontSize: preferences.fontSize,
           font: preferences.fontFamily,
           color: _colorValue,
-          author: author));
+          author: author), pages: [pageIndex]);
 
   void addStamp(int pageIndex, PdfRect rect, String text, {int? color}) =>
       apply((e) => e.addStamp(pageIndex, rect, text,
           color: color ?? _colorValue,
           opacity: preferences.opacity,
-          author: author));
+          author: author), pages: [pageIndex]);
 
   /// Adds a sticky note with its top-left corner at ([x], [y]).
-  void addNote(int pageIndex, double x, double y, String text) => apply((e) =>
-      e.addNote(pageIndex, x, y, text, color: _colorValue, author: author));
+  void addNote(int pageIndex, double x, double y, String text) => apply(
+      (e) =>
+          e.addNote(pageIndex, x, y, text, color: _colorValue, author: author),
+      pages: [pageIndex]);
 
   // ---------------------------------------------------------------------
   // signature
@@ -539,12 +582,14 @@ class PdfEditingController extends ChangeNotifier {
   bool placeSignature(int pageIndex, double x, double y, {double width = 160}) {
     final placement = signaturePlacement(pageIndex, x, y, width: width);
     if (placement == null) return false;
-    return apply((e) => e.addInk(pageIndex, placement.strokes,
-        color: placement.color,
-        strokeWidth: placement.strokeWidth,
-        opacity: 1,
-        pressures: placement.pressures,
-        author: author));
+    return apply(
+        (e) => e.addInk(pageIndex, placement.strokes,
+            color: placement.color,
+            strokeWidth: placement.strokeWidth,
+            opacity: 1,
+            pressures: placement.pressures,
+            author: author),
+        pages: [pageIndex]);
   }
 
   // ---------------------------------------------------------------------
@@ -601,9 +646,11 @@ class PdfEditingController extends ChangeNotifier {
         .clamp(h, box.width * 0.9);
     final cx = x.clamp(box.left + w / 2, box.right - w / 2);
     final cy = y.clamp(box.bottom + h / 2, box.top - h / 2);
-    return apply((e) => e.addStamp(pageIndex,
-        PdfRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), stamp.text,
-        color: stamp.color, opacity: preferences.opacity, author: author));
+    return apply(
+        (e) => e.addStamp(pageIndex,
+            PdfRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), stamp.text,
+            color: stamp.color, opacity: preferences.opacity, author: author),
+        pages: [pageIndex]);
   }
 
   /// Bakes every page's annotation appearances into its content and
@@ -661,6 +708,12 @@ class PdfEditingController extends ChangeNotifier {
 
   PdfPage _page(int index) =>
       _pageCache.putIfAbsent(index, () => _document.page(index));
+
+  /// The page at [index], cached for the current revision.
+  /// [PdfDocument.page] re-walks the page tree and re-parses /Annots on
+  /// every call — UI that reads pages per frame (sidebars, hit tests)
+  /// should come through here.
+  PdfPage pageAt(int index) => _page(index);
 
   PdfAnnotation? _annotationAt((int, int) selected) {
     final (page, index) = selected;
@@ -829,7 +882,8 @@ class PdfEditingController extends ChangeNotifier {
       final (page, slot) = _selected[i];
       if (page == pageIndex && slot > index) _selected[i] = (page, slot - 1);
     }
-    apply((e) => e.removeAnnotation(pageIndex, annotation));
+    apply((e) => e.removeAnnotation(pageIndex, annotation),
+        pages: [pageIndex]);
   }
 
   /// Removes several annotations — (pageIndex, /Annots slot) pairs — in
@@ -848,12 +902,61 @@ class PdfEditingController extends ChangeNotifier {
       for (final (page, annotation) in targets) {
         e.removeAnnotation(page, annotation);
       }
-    });
+    }, pages: [for (final (page, _) in targets) page]);
   }
 
   void clearAnnotationSelection() {
     if (_selected.isEmpty) return;
     _selected.clear();
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------------
+  // attention flash
+
+  ({PdfDocument document, int page, int slot})? _flash;
+  int _flashSequence = 0;
+  Timer? _flashTimer;
+
+  /// How long a [flashAnnotation] pulse stays pending before it expires
+  /// on its own (the overlay's animation is shorter).
+  static const flashLifetime = Duration(milliseconds: 1600);
+
+  /// Fires a brief attention pulse around the annotation in slot
+  /// [index] of [pageIndex]'s /Annots — the page overlay animates it.
+  /// The annotation sidebar calls this when a tile zooms the viewer to
+  /// its annotation, so the eye lands on the right spot.
+  void flashAnnotation(int pageIndex, int index) {
+    if (annotationAt(pageIndex, index) == null) return;
+    _flash = (document: _document, page: pageIndex, slot: index);
+    _flashSequence++;
+    _flashTimer?.cancel();
+    _flashTimer = Timer(flashLifetime, () {
+      _flash = null;
+      notifyListeners();
+    });
+    notifyListeners();
+  }
+
+  /// The attention pulse in flight, or null. [sequence] distinguishes
+  /// consecutive flashes of the same annotation. Expires when the
+  /// overlay finishes the pulse ([expireFlash]), after [flashLifetime]
+  /// as the backstop, and with any edit (the slot may mean something
+  /// else now).
+  ({int page, int slot, int sequence})? get pendingFlash {
+    final flash = _flash;
+    if (flash == null || !identical(flash.document, _document)) return null;
+    return (page: flash.page, slot: flash.slot, sequence: _flashSequence);
+  }
+
+  /// Clears [pendingFlash] once its pulse has run — the page overlay
+  /// calls this when the animation completes. The [flashLifetime] timer
+  /// stays as the backstop for a flash no overlay ever picked up.
+  void expireFlash(int sequence) {
+    if (_flash == null || sequence != _flashSequence) return;
+    _flashTimer?.cancel();
+    _flashTimer = null;
+    _flash = null;
     notifyListeners();
   }
 
@@ -870,7 +973,7 @@ class PdfEditingController extends ChangeNotifier {
       for (final (page, annotation) in targets) {
         e.moveAnnotation(page, annotation, dx, dy);
       }
-    });
+    }, pages: [for (final (page, _) in targets) page]);
   }
 
   /// Resizes the selected annotation so its /Rect becomes [to].
@@ -878,7 +981,8 @@ class PdfEditingController extends ChangeNotifier {
     final annotation = selectedAnnotation;
     if (annotation == null || !canResizeSelected) return;
     if (to.width < 1 || to.height < 1) return;
-    apply((e) => e.resizeAnnotation(_selected.last.$1, annotation, to));
+    apply((e) => e.resizeAnnotation(_selected.last.$1, annotation, to),
+        pages: [_selected.last.$1]);
   }
 
   /// Rotates the selected annotation by [degrees] counterclockwise (page
@@ -887,7 +991,8 @@ class PdfEditingController extends ChangeNotifier {
     final annotation = selectedAnnotation;
     if (annotation == null || !canRotateSelected) return;
     if (degrees.abs() < 0.01) return;
-    apply((e) => e.rotateAnnotation(_selected.last.$1, annotation, degrees));
+    apply((e) => e.rotateAnnotation(_selected.last.$1, annotation, degrees),
+        pages: [_selected.last.$1]);
   }
 
   /// Deletes whatever is selected: the content element when the content
@@ -976,7 +1081,7 @@ class PdfEditingController extends ChangeNotifier {
           e.addNote(page, rect.left, rect.top, text,
               color: color ?? 0xFFD100, author: by);
       }
-    });
+    }, pages: [page]);
     // the rewritten annotation lands in the last /Annots slot — keep it
     // selected so consecutive restyles (a settings popup) stay anchored
     final annotations = _page(page).annotations;
@@ -1054,7 +1159,8 @@ class PdfEditingController extends ChangeNotifier {
     final selected = _selectedElement;
     final element = selectedElement;
     if (selected == null || element == null) return;
-    apply((e) => e.deleteElements(elementsOn(selected.$1), [element.id]));
+    apply((e) => e.deleteElements(elementsOn(selected.$1), [element.id]),
+        pages: [selected.$1]);
   }
 
   /// Rewrites the selected text element's characters to [text] and
@@ -1071,7 +1177,8 @@ class PdfEditingController extends ChangeNotifier {
       return 0;
     }
     var count = 0;
-    apply((e) => count = e.replaceText(selected.$1, element.text!, text));
+    apply((e) => count = e.replaceText(selected.$1, element.text!, text),
+        pages: [selected.$1]);
     return count;
   }
 }

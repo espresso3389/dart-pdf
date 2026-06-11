@@ -492,3 +492,52 @@ assert the afterimage source (committedInkOn == null), not pixels; any
 touch gesture on the viewer leaves the double-tap recognizer's 40ms
 timer — end such tests with pump(400ms); an Ink annotation's rect hugs
 the strokes (pen-width padded), not the placement box.
+Sidebar round (session 4 of batch 2): four features. (1) Thumbnail
+performance: `controller.apply` takes `pages:` (the page indices an
+edit changes visually; null = unknown = all) — every internal call
+site names its pages, structural ops (movePage/removePage/flatten)
+and host edits leave null. `pageRenderStamp(page)` =
+`_renderStampEpoch + _renderStamps[page]` (per-revision page sets in
+`_revisionPages`, bumped on apply/undo/redo of exactly the touched
+pages). `pageAt(index)` is the public per-revision page cache (use it
+anywhere UI reads pages per frame — sidebars now do). The strip
+rasterizes tiles via `PdfPageRenderer.renderImage` into a per-sidebar
+LRU (`_ThumbnailCache`, 96 entries, hands out `ui.Image.clone()`s so
+eviction can't pull pixels from a painting tile; key =
+page|stamp|color|pxWidth with 64px width buckets), renders serialized
+through a static future chain (one page per event-loop turn), and
+only per-tile ListenableBuilders watch viewer/viewport changes — the
+outer list rebuilds on controller notifies alone.
+`PdfThumbnailSidebar.debugRasterizations` counts real renders for
+tests. (2) Resizable panels: both sidebars take `side` (which side of
+the viewer they're docked on, `PdfSidebarSide` in editing_panel.dart),
+`resizable`, `minWidth`/`maxWidth`; `PdfSidebarResizeGrip` (8px hit
+strip, hairline that thickens on hover/drag) reports deltas already
+signed toward growth; widths persist as preferences
+`thumbnailSidebarWidth`/`annotationSidebarWidth` (null until first
+dragged — the widget's `width` param is just the default). Grip keys:
+'pdf-thumbnail-resize-grip'/'pdf-annotation-resize-grip'. (3) Follow
+the viewer: the strip keeps per-slot GlobalKeys; on currentPage change
+it `Scrollable.ensureVisible`s a built tile (keepVisibleAtEnd then
+keepVisibleAtStart = minimal scroll), or jumps to an estimated offset
+(aspect math mirroring tile layout: 12px side pad, 1px border, 4px
+vert pad, 28px footer) and fine-tunes post-frame once built.
+(4) Zoom-to flash: `controller.flashAnnotation(page, slot)` →
+`pendingFlash` (`(page, slot, sequence)`; dies with any revision via
+document-identity check); the sidebar tap calls it after
+showRect+select; the overlay (now SingleTickerProviderStateMixin)
+runs a 1100ms pulse — amber (0xFFFFB300) ring closing onto the rect
+while fading — and calls `expireFlash(sequence)` on completion
+(cancels the 1600ms `flashLifetime` backstop Timer, which only
+matters when no overlay ever runs the pulse); the viewer mounts the
+overlay for `pendingFlash != null` too (links/widgets flash without a
+selection). Test gotchas (editing_panels_test.dart): thumbnails are
+RawImages now (page_color's wait condition polls RawImage, not
+CustomPaint); resize-grip drags eat pointer slop even for mouse kind —
+assert greaterThan + prefs equals rendered width, not exact pixels;
+tile-tap tests must pump the pulse out (pumpAndSettle, or pump ~2s) or
+the backstop timer trips `!timersPending` — that invariant check runs
+BEFORE addTearDown(dispose); never `await viewer.jumpToPage` in a
+widget test (fake-async deadlock — fire it unawaited and pump); a
+queue yield via Future.delayed(zero) leaves stray fake timers, so the
+thumbnail render queue serializes on the rasterize awaits alone.

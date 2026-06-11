@@ -1,24 +1,31 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:pdf_document/pdf_document.dart';
 
 import '../pdf_viewer.dart';
 import '../renderer.dart';
 import 'editing_controller.dart';
+import 'editing_panel.dart';
+import 'editing_preferences.dart';
 
 /// A panel of page thumbnails: tap one to jump there, drag a tile up or
 /// down to reorder pages (with a mouse just drag; on touch, long-press
 /// first so the list still scrolls), and the footer button deletes a
 /// page (the last remaining page cannot be deleted).
 ///
-/// Thumbnails replay each page's recorded display list, so they stay
-/// sharp at any width and re-render on every revision — including undo
-/// and redo. The current page is outlined, and the part of the document
-/// inside the viewer's viewport is marked on the thumbnails it touches.
+/// Built to stay light on large documents: thumbnails are rasterized at
+/// tile resolution and cached, keyed by
+/// [PdfEditingController.pageRenderStamp] — so an edit re-renders only
+/// the pages it touched, renders are serialized (one page at a time)
+/// instead of bursting on first layout, and scrolling the viewer
+/// repaints only each tile's viewport indicator, never the page images.
+///
+/// The strip follows the viewer ([followsViewer]): when the current page
+/// changes — scrolling, search, a link jump — the strip scrolls its tile
+/// into view. The inner edge is draggable ([resizable]); the chosen
+/// width persists via [PdfEditingPreferences.thumbnailSidebarWidth].
 ///
 /// Place it beside the viewer, typically in a [Row]:
 ///
@@ -31,13 +38,18 @@ import 'editing_controller.dart';
 ///   Expanded(child: PdfViewer(...)),
 /// ])
 /// ```
-class PdfThumbnailSidebar extends StatelessWidget {
+class PdfThumbnailSidebar extends StatefulWidget {
   const PdfThumbnailSidebar({
     super.key,
     required this.controller,
     required this.viewerController,
     this.width = 160,
     this.pageColor = const Color(0xFFFFFFFF),
+    this.side = PdfSidebarSide.left,
+    this.resizable = true,
+    this.minWidth = 100,
+    this.maxWidth = 400,
+    this.followsViewer = true,
   });
 
   final PdfEditingController controller;
@@ -45,42 +57,206 @@ class PdfThumbnailSidebar extends StatelessWidget {
   /// The viewer to navigate when a thumbnail is tapped.
   final PdfViewerController viewerController;
 
+  /// The default width — a user-dragged width, persisted in
+  /// [PdfEditingPreferences.thumbnailSidebarWidth], wins over it.
   final double width;
 
   /// The paper color thumbnails render on — pass the viewer's
   /// [PdfViewer.pageColor] so they match the pages.
   final Color pageColor;
 
+  /// Which side of the viewer the panel sits on; the resize grip rides
+  /// the opposite (inner) edge.
+  final PdfSidebarSide side;
+
+  /// Whether the inner edge can be dragged to resize the panel.
+  final bool resizable;
+
+  /// Clamps for the dragged width.
+  final double minWidth;
+  final double maxWidth;
+
+  /// Whether the strip scrolls the current page's tile into view when
+  /// the viewer's page changes.
+  final bool followsViewer;
+
+  /// How many thumbnails have actually been rasterized — cache misses
+  /// only, across all sidebars. Tests assert on the deltas.
+  @visibleForTesting
+  static int debugRasterizations = 0;
+
+  @override
+  State<PdfThumbnailSidebar> createState() => _PdfThumbnailSidebarState();
+}
+
+class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
+  final ScrollController _scroll = ScrollController();
+  final _ThumbnailCache _cache = _ThumbnailCache();
+
+  /// Per-slot keys so [_revealPage] can [Scrollable.ensureVisible] a
+  /// built tile.
+  final Map<int, GlobalKey> _tileKeys = {};
+
+  /// The panel width while a resize drag is in flight, overriding the
+  /// preference until the drag ends and persists it.
+  double? _dragWidth;
+
+  int _lastCurrent = 0;
+
+  PdfEditingPreferences get _preferences => widget.controller.preferences;
+
+  double get _width => (_dragWidth ??
+          _preferences.thumbnailSidebarWidth ??
+          widget.width)
+      .clamp(widget.minWidth, widget.maxWidth);
+
+  @override
+  void initState() {
+    super.initState();
+    _lastCurrent = widget.viewerController.currentPage;
+    widget.viewerController.addListener(_onViewerChanged);
+    _preferences.addListener(_onPreferences);
+  }
+
+  @override
+  void didUpdateWidget(PdfThumbnailSidebar old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.viewerController, widget.viewerController)) {
+      old.viewerController.removeListener(_onViewerChanged);
+      widget.viewerController.addListener(_onViewerChanged);
+      _lastCurrent = widget.viewerController.currentPage;
+    }
+    if (!identical(old.controller.preferences, _preferences)) {
+      old.controller.preferences.removeListener(_onPreferences);
+      _preferences.addListener(_onPreferences);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.viewerController.removeListener(_onViewerChanged);
+    _preferences.removeListener(_onPreferences);
+    _scroll.dispose();
+    _cache.dispose();
+    super.dispose();
+  }
+
+  void _onPreferences() {
+    if (mounted) setState(() {});
+  }
+
+  void _onViewerChanged() {
+    final current = widget.viewerController.currentPage;
+    if (current == _lastCurrent) return;
+    _lastCurrent = current;
+    if (widget.followsViewer) _revealPage(current);
+  }
+
+  /// Scrolls the strip the minimal distance that makes [index]'s tile
+  /// fully visible. Unbuilt tiles get a jump to an estimated offset
+  /// first; the post-frame pass fine-tunes against the real layout.
+  void _revealPage(int index) {
+    if (_ensureTileVisible(index)) return;
+    if (!_scroll.hasClients) return;
+    _scroll.jumpTo(_estimateOffset(index)
+        .clamp(0.0, _scroll.position.maxScrollExtent));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _ensureTileVisible(index);
+    });
+  }
+
+  bool _ensureTileVisible(int index) {
+    final context = _tileKeys[index]?.currentContext;
+    if (context == null) return false;
+    // the two policies each no-op unless the tile is hidden past their
+    // edge — together they scroll the minimal distance
+    for (final policy in const [
+      ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+      ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+    ]) {
+      unawaited(Scrollable.ensureVisible(context,
+          alignmentPolicy: policy,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic));
+    }
+    return true;
+  }
+
+  /// The list offset where [index]'s tile roughly starts, from the same
+  /// layout math the tiles use (12px side padding, 1px border, 4px
+  /// vertical padding, ~28px footer row).
+  double _estimateOffset(int index) {
+    final thumbWidth = _width - 26;
+    var offset = 8.0; // the list's top padding
+    for (var i = 0; i < index; i++) {
+      final size = PdfPageRenderer.pageSize(widget.controller.pageAt(i));
+      offset += 8 + 28 + 2 + thumbWidth * size.height / size.width;
+    }
+    return offset;
+  }
+
+  void _onResizeDelta(double delta) => setState(() {
+        _dragWidth =
+            (_width + delta).clamp(widget.minWidth, widget.maxWidth);
+      });
+
+  void _onResizeEnd() {
+    if (_dragWidth == null) return;
+    _preferences.thumbnailSidebarWidth = _dragWidth;
+    setState(() => _dragWidth = null);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final width = _width;
+    final controller = widget.controller;
     return SizedBox(
       width: width,
-      child: Material(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        child: ListenableBuilder(
-          listenable: Listenable.merge([
-            controller,
-            viewerController,
-            viewerController.viewportChanges,
-          ]),
-          builder: (context, _) => ReorderableListView.builder(
-            buildDefaultDragHandles: false,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: controller.document.pageCount,
-            onReorderItem: controller.movePage,
-            itemBuilder: (context, index) => _ReorderDragStartListener(
-              key: ValueKey(index),
-              index: index,
-              child: _PageTile(
-                controller: controller,
-                viewerController: viewerController,
-                pageIndex: index,
-                pageColor: pageColor,
+      child: Stack(children: [
+        Positioned.fill(
+          child: Material(
+            color: Theme.of(context).colorScheme.surfaceContainerLow,
+            // only document changes rebuild the list — viewer scrolling
+            // repaints the per-tile indicators alone
+            child: ListenableBuilder(
+              listenable: controller,
+              builder: (context, _) => ReorderableListView.builder(
+                scrollController: _scroll,
+                buildDefaultDragHandles: false,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                itemCount: controller.document.pageCount,
+                onReorderItem: controller.movePage,
+                itemBuilder: (context, index) => _ReorderDragStartListener(
+                  key: ValueKey(index),
+                  index: index,
+                  child: _PageTile(
+                    key: _tileKeys[index] ??= GlobalKey(),
+                    controller: controller,
+                    viewerController: widget.viewerController,
+                    pageIndex: index,
+                    pageColor: widget.pageColor,
+                    cache: _cache,
+                    tileWidth: width - 26,
+                  ),
+                ),
               ),
             ),
           ),
         ),
-      ),
+        if (widget.resizable)
+          Positioned(
+            top: 0,
+            bottom: 0,
+            left: widget.side == PdfSidebarSide.right ? 0 : null,
+            right: widget.side == PdfSidebarSide.left ? 0 : null,
+            child: PdfSidebarResizeGrip(
+              key: const ValueKey('pdf-thumbnail-resize-grip'),
+              side: widget.side,
+              onWidthDelta: _onResizeDelta,
+              onResizeEnd: _onResizeEnd,
+            ),
+          ),
+      ]),
     );
   }
 }
@@ -118,23 +294,26 @@ class _ReorderDragStartListener extends ReorderableDragStartListener {
 /// One page's thumbnail with its "Page N" / delete footer.
 class _PageTile extends StatelessWidget {
   const _PageTile({
+    super.key,
     required this.controller,
     required this.viewerController,
     required this.pageIndex,
     required this.pageColor,
+    required this.cache,
+    required this.tileWidth,
   });
 
   final PdfEditingController controller;
   final PdfViewerController viewerController;
   final int pageIndex;
   final Color pageColor;
+  final _ThumbnailCache cache;
+  final double tileWidth;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final document = controller.document;
-    final current = viewerController.currentPage == pageIndex;
-    final viewport = viewerController.visiblePageRegion(pageIndex);
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
       child: GestureDetector(
@@ -143,30 +322,44 @@ class _PageTile extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: current ? scheme.primary : scheme.outlineVariant,
-                  width: current ? 2 : 1,
-                ),
-              ),
-              child: Stack(children: [
-                // the boundary keeps scroll-driven indicator repaints
-                // from replaying the page picture
-                RepaintBoundary(
-                  child: _PageThumbnail(
-                    document: document,
-                    pageIndex: pageIndex,
-                    pageColor: pageColor,
-                  ),
-                ),
-                if (viewport != null)
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: _ViewportPainter(viewport, scheme.primary),
+            // the current-page outline and the viewport mark track the
+            // viewer per tile, without rebuilding the page image
+            ListenableBuilder(
+              listenable: Listenable.merge([
+                viewerController,
+                viewerController.viewportChanges,
+              ]),
+              builder: (context, _) {
+                final current = viewerController.currentPage == pageIndex;
+                final viewport = viewerController.visiblePageRegion(pageIndex);
+                return DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: current ? scheme.primary : scheme.outlineVariant,
+                      width: current ? 2 : 1,
                     ),
                   ),
-              ]),
+                  child: Stack(children: [
+                    // the boundary keeps scroll-driven indicator repaints
+                    // from re-uploading the thumbnail
+                    RepaintBoundary(
+                      child: _PageThumbnail(
+                        controller: controller,
+                        pageIndex: pageIndex,
+                        pageColor: pageColor,
+                        cache: cache,
+                        tileWidth: tileWidth,
+                      ),
+                    ),
+                    if (viewport != null)
+                      Positioned.fill(
+                        child: CustomPaint(
+                          painter: _ViewportPainter(viewport, scheme.primary),
+                        ),
+                      ),
+                  ]),
+                );
+              },
             ),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -196,82 +389,147 @@ class _PageTile extends StatelessWidget {
   }
 }
 
-/// Renders a page's display list scaled down to the tile width.
+/// Renders a page to a tile-resolution bitmap, cached across revisions
+/// by the page's render stamp — an edit elsewhere reuses the raster.
 class _PageThumbnail extends StatefulWidget {
   const _PageThumbnail({
-    required this.document,
+    required this.controller,
     required this.pageIndex,
     required this.pageColor,
+    required this.cache,
+    required this.tileWidth,
   });
 
-  final PdfDocument document;
+  final PdfEditingController controller;
   final int pageIndex;
   final Color pageColor;
+  final _ThumbnailCache cache;
+  final double tileWidth;
 
   @override
   State<_PageThumbnail> createState() => _PageThumbnailState();
 }
 
 class _PageThumbnailState extends State<_PageThumbnail> {
-  ui.Picture? _picture;
-  Size _pictureSize = Size.zero;
-  int _generation = 0;
+  /// Renders run strictly one page at a time, shared across every
+  /// sidebar — a burst of fresh tiles never interprets a dozen pages
+  /// at once, and the rasterize await yields the event loop between
+  /// pages.
+  static Future<void> _queue = Future<void>.value();
 
-  @override
-  void initState() {
-    super.initState();
-    _render();
-  }
+  ui.Image? _image; // this tile's clone; the cache owns the original
+  String? _imageKey;
+  String? _pendingKey;
 
-  @override
-  void didUpdateWidget(_PageThumbnail old) {
-    super.didUpdateWidget(old);
-    // the document changes identity on every revision
-    if (!identical(old.document, widget.document) ||
-        old.pageIndex != widget.pageIndex ||
-        old.pageColor != widget.pageColor) {
-      _render();
-    }
-  }
+  /// Raster widths snap to 64px steps so a resize drag doesn't re-render
+  /// every page per pixel.
+  static int _bucket(double px) => ((px / 64).ceil() * 64).clamp(64, 1024);
 
   @override
   void dispose() {
-    _generation++; // orphan any render still in flight
-    _picture?.dispose();
+    _pendingKey = null;
+    _image?.dispose();
+    _image = null;
     super.dispose();
   }
 
-  void _render() {
-    final generation = ++_generation;
-    final page = widget.document.page(widget.pageIndex);
-    final size = PdfPageRenderer.pageSize(page);
-    unawaited(PdfPageRenderer.renderPicture(page, pageColor: widget.pageColor)
-        .then((picture) {
-      if (generation != _generation) {
-        picture.dispose();
+  void _enqueue(String key, int pixelWidth) {
+    _pendingKey = key;
+    final controller = widget.controller;
+    final pageIndex = widget.pageIndex;
+    final pageColor = widget.pageColor;
+    final cache = widget.cache;
+    _queue = _queue.then((_) async {
+      // superseded (newer revision, resize) or already landed — skip
+      if (!mounted || _pendingKey != key) return;
+      final page = controller.pageAt(pageIndex);
+      final size = PdfPageRenderer.pageSize(page);
+      if (size.width <= 0 || size.height <= 0) return;
+      try {
+        final image = await PdfPageRenderer.renderImage(page,
+            pixelRatio: pixelWidth / size.width, pageColor: pageColor);
+        PdfThumbnailSidebar.debugRasterizations++;
+        cache.put(key, image);
+      } catch (_) {
+        // a page the main viewer fails on keeps the blank placeholder
         return;
       }
+      if (!mounted || _pendingKey != key) return;
       setState(() {
-        _picture?.dispose();
-        _picture = picture;
-        _pictureSize = size;
+        _pendingKey = null;
+        _image?.dispose();
+        _image = cache.claim(key);
+        _imageKey = key;
       });
-      // a page the main viewer fails on just keeps the blank placeholder
-    }, onError: (Object _, StackTrace __) {}));
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    // sized from the current page; the painted picture may briefly be
-    // the previous revision's while the new render is in flight
-    final size =
-        PdfPageRenderer.pageSize(widget.document.page(widget.pageIndex));
+    final page = widget.controller.pageAt(widget.pageIndex);
+    final size = PdfPageRenderer.pageSize(page);
+    final pixelWidth =
+        _bucket(widget.tileWidth * MediaQuery.devicePixelRatioOf(context));
+    final stamp = widget.controller.pageRenderStamp(widget.pageIndex);
+    final key = '${widget.pageIndex}|$stamp'
+        '|${widget.pageColor.toARGB32()}|$pixelWidth';
+    if (_imageKey != key) {
+      final cached = widget.cache.claim(key);
+      if (cached != null) {
+        _image?.dispose();
+        _image = cached;
+        _imageKey = key;
+        _pendingKey = null;
+      } else if (_pendingKey != key) {
+        _enqueue(key, pixelWidth);
+      }
+    }
+    // while a re-render is in flight the previous raster keeps showing
     return AspectRatio(
-      aspectRatio: size.width / size.height,
-      child: _picture == null
+      aspectRatio: size.width <= 0 || size.height <= 0
+          ? 1
+          : size.width / size.height,
+      child: _image == null
           ? ColoredBox(color: widget.pageColor)
-          : CustomPaint(painter: _ThumbnailPainter(_picture!, _pictureSize)),
+          : RawImage(image: _image, fit: BoxFit.contain),
     );
+  }
+}
+
+/// An LRU of rasterized thumbnails, owned by the sidebar. Entries hand
+/// out [ui.Image.clone]s, so an eviction never pulls pixels out from
+/// under a tile that is still painting them.
+class _ThumbnailCache {
+  static const _capacity = 96;
+
+  final Map<String, ui.Image> _images = {};
+  bool _disposed = false;
+
+  ui.Image? claim(String key) {
+    final image = _images.remove(key);
+    if (image == null) return null;
+    _images[key] = image; // back to most-recently-used
+    return image.clone();
+  }
+
+  void put(String key, ui.Image image) {
+    if (_disposed) {
+      image.dispose(); // landed after the sidebar went away
+      return;
+    }
+    _images.remove(key)?.dispose();
+    _images[key] = image;
+    while (_images.length > _capacity) {
+      _images.remove(_images.keys.first)!.dispose();
+    }
+  }
+
+  void dispose() {
+    _disposed = true;
+    for (final image in _images.values) {
+      image.dispose();
+    }
+    _images.clear();
   }
 }
 
@@ -304,25 +562,4 @@ class _ViewportPainter extends CustomPainter {
   @override
   bool shouldRepaint(_ViewportPainter old) =>
       old.region != region || old.color != color;
-}
-
-class _ThumbnailPainter extends CustomPainter {
-  const _ThumbnailPainter(this.picture, this.pageSize);
-
-  final ui.Picture picture;
-  final Size pageSize;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (pageSize.isEmpty) return;
-    canvas
-      ..clipRect(Offset.zero & size)
-      ..scale(
-          math.min(size.width / pageSize.width, size.height / pageSize.height))
-      ..drawPicture(picture);
-  }
-
-  @override
-  bool shouldRepaint(_ThumbnailPainter old) =>
-      old.picture != picture || old.pageSize != pageSize;
 }

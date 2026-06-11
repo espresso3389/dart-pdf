@@ -92,7 +92,8 @@ const double _rotateHandleDistance = 22;
 /// Rotation drags snap to 45° multiples when within this margin.
 const double _rotateSnapRadians = 3 * math.pi / 180;
 
-class _EditingPageOverlayState extends State<EditingPageOverlay> {
+class _EditingPageOverlayState extends State<EditingPageOverlay>
+    with SingleTickerProviderStateMixin {
   // shape/text/stamp drag
   Offset? _dragStart;
   Offset? _dragCurrent;
@@ -176,6 +177,24 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   // once per (revision, selection) and drawn stretched while dragging
   ui.Picture? _ghost;
   (PdfDocument, int, int)? _ghostKey;
+
+  // attention flash (the annotation sidebar's zoom-to): an amber pulse
+  // closing in on the annotation, driven by its own short animation
+  late final AnimationController _flashController = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 1100))
+    ..addListener(_onFlashTick)
+    ..addStatusListener(_onFlashStatus);
+  int _flashSequence = 0;
+  PdfRect? _flashRect; // page space — view rect derives per build
+
+  void _onFlashTick() => setState(() {});
+
+  void _onFlashStatus(AnimationStatus status) {
+    // pulse done: retire the pending flash so the overlay can unmount
+    if (status == AnimationStatus.completed) {
+      _controller.expireFlash(_flashSequence);
+    }
+  }
 
   MouseCursor _cursor = MouseCursor.defer;
 
@@ -386,6 +405,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     _textEditText.dispose();
     _ghost?.dispose();
     _afterGhost?.dispose();
+    _flashController.dispose();
     super.dispose();
   }
 
@@ -1070,6 +1090,15 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       if (_afterSignature != null) _afterSignature!,
       if (signaturePreview != null) signaturePreview,
     ];
+    // a fresh attention flash for this page starts its pulse
+    final flash = _controller.pendingFlash;
+    if (flash != null &&
+        flash.page == widget.pageIndex &&
+        flash.sequence != _flashSequence) {
+      _flashSequence = flash.sequence;
+      _flashRect = _controller.annotationAt(flash.page, flash.slot)?.rect;
+      if (_flashRect != null) _flashController.forward(from: 0);
+    }
     // warm the eyedropper's raster so the first preview is instant-ish
     if (_controller.isPickingColor) unawaited(_ensureSampler());
     final preview = _controller.isPickingColor ? _pickPosition : null;
@@ -1167,6 +1196,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
                       _controller.canRotateSelected &&
                       _moveStart == null,
                   elementRect: _selectedElementViewRect,
+                  flashRect: _flashController.isAnimating &&
+                          _flashRect != null
+                      ? _geometry.toViewRect(_flashRect!)
+                      : null,
+                  flashProgress: _flashController.value,
                 ),
                 size: Size.infinite,
               ),
@@ -1322,6 +1356,8 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.showHandles,
     required this.showRotateHandle,
     required this.elementRect,
+    this.flashRect,
+    this.flashProgress = 0,
   });
 
   final PdfEditTool? tool;
@@ -1381,8 +1417,15 @@ class _EditingPreviewPainter extends CustomPainter {
   /// content", distinct from the blue annotation chrome.
   final Rect? elementRect;
 
+  /// An attention pulse around [flashRect] (the annotation a sidebar
+  /// tile zoomed to), animated by [flashProgress] 0→1: an amber ring
+  /// closing in on the rect, fading as it settles.
+  final Rect? flashRect;
+  final double flashProgress;
+
   static const _chrome = Color(0xFF1E88E5);
   static const _elementChrome = Color(0xFFFB8C00);
+  static const _flash = Color(0xFFFFB300);
 
   /// Paints one set of page-space ink strokes with the committed
   /// appearance's smoothing and pressure mapping.
@@ -1596,6 +1639,24 @@ class _EditingPreviewPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5);
     }
+
+    final flash = flashRect;
+    if (flash != null) {
+      final fade = (1 - flashProgress).clamp(0.0, 1.0);
+      // close in over the first third, then hold while fading out
+      final settle =
+          Curves.easeOutCubic.transform((flashProgress * 3).clamp(0.0, 1.0));
+      final ring = RRect.fromRectAndRadius(
+          flash.inflate(4 + 26 * (1 - settle)), const Radius.circular(6));
+      canvas.drawRRect(
+          ring, Paint()..color = _flash.withValues(alpha: 0.20 * fade));
+      canvas.drawRRect(
+          ring,
+          Paint()
+            ..color = _flash.withValues(alpha: 0.9 * fade)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 3);
+    }
   }
 
   /// Cheap inequality for the extra ink sets: counts plus each set's
@@ -1640,6 +1701,8 @@ class _EditingPreviewPainter extends CustomPainter {
       oldDelegate.showHandles != showHandles ||
       oldDelegate.showRotateHandle != showRotateHandle ||
       oldDelegate.elementRect != elementRect ||
+      oldDelegate.flashRect != flashRect ||
+      oldDelegate.flashProgress != flashProgress ||
       oldDelegate.strokes.length != strokes.length ||
       (strokes.isNotEmpty &&
           oldDelegate.strokes.isNotEmpty &&

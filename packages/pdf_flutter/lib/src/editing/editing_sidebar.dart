@@ -5,16 +5,22 @@ import 'package:pdf_document/pdf_document.dart';
 
 import '../pdf_viewer.dart';
 import 'editing_controller.dart';
+import 'editing_panel.dart';
+import 'editing_preferences.dart';
 
 /// A panel listing every annotation in the document, grouped by page,
 /// each tile showing its author (/T) when the annotation carries one.
 ///
-/// Tapping a tile zooms the viewer to the annotation and selects it
-/// (arming the select tool); the trailing button deletes it. A long
-/// press starts multi-select: checkboxes replace the icons, tapping
-/// toggles, and the header's delete removes everything checked as one
-/// undo step. The list rebuilds on every revision, so it always
-/// reflects the current state — including undo and redo.
+/// Tapping a tile zooms the viewer to the annotation, selects it
+/// (arming the select tool), and pulses an attention flash around it on
+/// the page; the trailing button deletes it. A long press starts
+/// multi-select: checkboxes replace the icons, tapping toggles, and the
+/// header's delete removes everything checked as one undo step. The
+/// list rebuilds on every revision, so it always reflects the current
+/// state — including undo and redo.
+///
+/// The inner edge is draggable ([resizable]); the chosen width persists
+/// via [PdfEditingPreferences.annotationSidebarWidth].
 ///
 /// Place it beside the viewer, typically in a [Row]:
 ///
@@ -33,6 +39,10 @@ class PdfAnnotationSidebar extends StatefulWidget {
     required this.controller,
     required this.viewerController,
     this.width = 280,
+    this.side = PdfSidebarSide.right,
+    this.resizable = true,
+    this.minWidth = 200,
+    this.maxWidth = 480,
   });
 
   final PdfEditingController controller;
@@ -40,7 +50,20 @@ class PdfAnnotationSidebar extends StatefulWidget {
   /// The viewer to navigate when a tile is tapped.
   final PdfViewerController viewerController;
 
+  /// The default width — a user-dragged width, persisted in
+  /// [PdfEditingPreferences.annotationSidebarWidth], wins over it.
   final double width;
+
+  /// Which side of the viewer the panel sits on; the resize grip rides
+  /// the opposite (inner) edge.
+  final PdfSidebarSide side;
+
+  /// Whether the inner edge can be dragged to resize the panel.
+  final bool resizable;
+
+  /// Clamps for the dragged width.
+  final double minWidth;
+  final double maxWidth;
 
   @override
   State<PdfAnnotationSidebar> createState() => _PdfAnnotationSidebarState();
@@ -60,6 +83,53 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
   /// The document revision the selection state belongs to. Any edit,
   /// undo, or redo can shift /Annots slots, so a new revision drops it.
   PdfDocument? _builtFor;
+
+  /// The panel width while a resize drag is in flight, overriding the
+  /// preference until the drag ends and persists it.
+  double? _dragWidth;
+
+  PdfEditingPreferences get _preferences => widget.controller.preferences;
+
+  double get _width => (_dragWidth ??
+          _preferences.annotationSidebarWidth ??
+          widget.width)
+      .clamp(widget.minWidth, widget.maxWidth);
+
+  @override
+  void initState() {
+    super.initState();
+    _preferences.addListener(_onPreferences);
+  }
+
+  @override
+  void didUpdateWidget(PdfAnnotationSidebar old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.controller.preferences, _preferences)) {
+      old.controller.preferences.removeListener(_onPreferences);
+      _preferences.addListener(_onPreferences);
+    }
+  }
+
+  @override
+  void dispose() {
+    _preferences.removeListener(_onPreferences);
+    super.dispose();
+  }
+
+  void _onPreferences() {
+    if (mounted) setState(() {});
+  }
+
+  void _onResizeDelta(double delta) => setState(() {
+        _dragWidth =
+            (_width + delta).clamp(widget.minWidth, widget.maxWidth);
+      });
+
+  void _onResizeEnd() {
+    if (_dragWidth == null) return;
+    _preferences.annotationSidebarWidth = _dragWidth;
+    setState(() => _dragWidth = null);
+  }
 
   static IconData _icon(String subtype) => switch (subtype) {
         'Highlight' => Icons.border_color,
@@ -124,6 +194,8 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
               if (selectable) {
                 widget.controller.selectAnnotation(pageIndex, index);
               }
+              // pulse it on the page so the eye lands right
+              widget.controller.flashAnnotation(pageIndex, index);
             },
       onLongPress: selectable && !_selecting
           ? () => setState(() {
@@ -171,49 +243,67 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: widget.width,
-      child: Material(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        child: ListenableBuilder(
-          listenable: widget.controller,
-          builder: (context, _) {
-            final document = widget.controller.document;
-            if (!identical(document, _builtFor)) {
-              // already rebuilding — adjust the state in place
-              _builtFor = document;
-              _checked.clear();
-              _selecting = false;
-            }
-            final children = <Widget>[];
-            for (var page = 0; page < document.pageCount; page++) {
-              final annotations = document.page(page).annotations;
-              final tiles = <Widget>[];
-              for (var i = 0; i < annotations.length; i++) {
-                final annotation = annotations[i];
-                if (_unlisted.contains(annotation.subtype)) continue;
-                tiles.add(_tile(context, page, i, annotation));
-              }
-              if (tiles.isNotEmpty) {
-                children
-                  ..add(Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                    child: Text('Page ${page + 1}',
-                        style: Theme.of(context).textTheme.labelLarge),
-                  ))
-                  ..addAll(tiles);
-              }
-            }
-            final list = children.isEmpty
-                ? const Center(child: Text('No annotations'))
-                : ListView(children: children);
-            if (!_selecting) return list;
-            return Column(children: [
-              _selectionHeader(context),
-              Expanded(child: list),
-            ]);
-          },
+      width: _width,
+      child: Stack(children: [
+        Positioned.fill(
+          child: Material(
+            color: Theme.of(context).colorScheme.surfaceContainerLow,
+            child: ListenableBuilder(
+              listenable: widget.controller,
+              builder: (context, _) {
+                final document = widget.controller.document;
+                if (!identical(document, _builtFor)) {
+                  // already rebuilding — adjust the state in place
+                  _builtFor = document;
+                  _checked.clear();
+                  _selecting = false;
+                }
+                final children = <Widget>[];
+                for (var page = 0; page < document.pageCount; page++) {
+                  final annotations =
+                      widget.controller.pageAt(page).annotations;
+                  final tiles = <Widget>[];
+                  for (var i = 0; i < annotations.length; i++) {
+                    final annotation = annotations[i];
+                    if (_unlisted.contains(annotation.subtype)) continue;
+                    tiles.add(_tile(context, page, i, annotation));
+                  }
+                  if (tiles.isNotEmpty) {
+                    children
+                      ..add(Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                        child: Text('Page ${page + 1}',
+                            style: Theme.of(context).textTheme.labelLarge),
+                      ))
+                      ..addAll(tiles);
+                  }
+                }
+                final list = children.isEmpty
+                    ? const Center(child: Text('No annotations'))
+                    : ListView(children: children);
+                if (!_selecting) return list;
+                return Column(children: [
+                  _selectionHeader(context),
+                  Expanded(child: list),
+                ]);
+              },
+            ),
+          ),
         ),
-      ),
+        if (widget.resizable)
+          Positioned(
+            top: 0,
+            bottom: 0,
+            left: widget.side == PdfSidebarSide.right ? 0 : null,
+            right: widget.side == PdfSidebarSide.left ? 0 : null,
+            child: PdfSidebarResizeGrip(
+              key: const ValueKey('pdf-annotation-resize-grip'),
+              side: widget.side,
+              onWidthDelta: _onResizeDelta,
+              onResizeEnd: _onResizeEnd,
+            ),
+          ),
+      ]),
     );
   }
 }

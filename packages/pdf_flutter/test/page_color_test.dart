@@ -83,14 +83,14 @@ void main() {
         ),
       ),
     ));
-    // let the display-list renders land, then capture a thumbnail's pixels
+    // let the rasterized thumbnails land, then capture a tile's pixels
     for (var i = 0; i < 50; i++) {
       await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 20)));
       await tester.pump();
       if (find
           .descendant(
-              of: find.byType(AspectRatio), matching: find.byType(CustomPaint))
+              of: find.byType(AspectRatio), matching: find.byType(RawImage))
           .evaluate()
           .isNotEmpty) {
         break;

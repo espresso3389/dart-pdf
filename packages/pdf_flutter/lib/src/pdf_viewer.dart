@@ -1740,11 +1740,14 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
               if (editing != null)
                 ListenableBuilder(
                   listenable: editing,
-                  // mounted for an armed tool, the eyedropper, or a
-                  // default-mode (mouse click) annotation selection
+                  // mounted for an armed tool, the eyedropper, a
+                  // default-mode (mouse click) annotation selection, or
+                  // a pending attention flash (the sidebar's zoom-to —
+                  // links and form fields flash without a selection)
                   builder: (context, _) => editing.tool == null &&
                           !editing.isPickingColor &&
-                          !editing.hasAnnotationSelection
+                          !editing.hasAnnotationSelection &&
+                          editing.pendingFlash == null
                       ? const SizedBox.shrink()
                       : Positioned.fill(
                           child: EditingPageOverlay(

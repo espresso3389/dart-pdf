@@ -14,6 +14,7 @@ import 'editing/editing_controller.dart';
 import 'editing/editing_menu.dart';
 import 'editing/editing_overlay.dart';
 import 'editing/text_prompt.dart';
+import 'exact_extent_list.dart';
 import 'page_geometry.dart';
 import 'pdf_page_view.dart';
 import 'scrollbar.dart';
@@ -1499,7 +1500,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       // zoom transform — thin, low-contrast, and scaled or translated out
       // of view when zoomed. The viewer paints its own bar outside the
       // transform instead (_PdfScrollbar below).
-      final list = ListView.builder(
+      final list = ExactExtentListView.builder(
         controller: _scroll,
         // with a tool armed, touch drags belong to the editing overlay —
         // the list's drag recognizer would win vertical-ish strokes in
@@ -1509,7 +1510,11 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
         // every page's extent is known up front, so give the sliver exact
         // geometry instead of letting it estimate from built children —
         // estimates drift on long mixed-size documents, landing jumps
-        // (search, links, page navigation) off target
+        // (search, links, page navigation) off target. ExactExtentListView
+        // additionally makes maxScrollExtent the exact total: the stock
+        // sliver still ESTIMATES it from the built children's average, which
+        // oscillates on mixed-size documents and made the scrollbar thumb
+        // jump (AMT-SP-101: 93k↔162k px between frames).
         itemExtentBuilder: (index, dimensions) => index >= _pages.length
             ? null
             : _pageHeight(index) + (index == 0 ? 0 : widget.pageSpacing),

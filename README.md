@@ -210,6 +210,12 @@ hundreds of milliseconds and the scrollbar visibly leapt; with it,
 the fling glides and the pages fill in the moment the view comes to
 rest (slow scrolling still renders continuously — the hold only
 engages past about two viewport-heights per second).
+The scrollbar itself is rock-steady on documents that mix page sizes:
+the viewer's list reports exact scroll metrics computed from the real
+page heights instead of the framework's running estimate, which on a
+291-page spec with landscape drawings interleaved would otherwise
+swing by tens of thousands of pixels mid-scroll and make the thumb
+jump around the track.
 The side panels are desktop-grade too. Both sidebars resize by
 dragging their inner edge (the chosen widths persist on the device
 with the other UI preferences), both keep their content clear of the

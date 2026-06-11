@@ -832,3 +832,27 @@ editing_sidebar_test detail tiles (sidebar mounts fine without a
 viewer), editing_panels_test clearance (assert the list widgets'
 `padding`). buildAcroFormPdf/buildAnnotatedPdf already cover fields
 and link actions; link-over-text needed an inline fixture.
+Scrollbar jumping, the SECOND cause (Ben, AMT-SP-101.pdf, 291 pages =
+232 portrait + 59 landscape A4): debug-logged scroll state while he
+scrolled — maxScrollExtent oscillated 93k↔162k px between FRAMES.
+itemExtentBuilder gives every child an exact layout offset, but the
+sliver's TOTAL scrollExtent comes from
+childManager.estimateMaxScrollOffset (average built-child extent
+extrapolated over the rest), which the builder never feeds — uniform
+docs hide it because the average is constant. Fix:
+`ExactExtentListView` (exact_extent_list.dart, package-private) —
+ListView subclass overriding buildChildLayout to mount a
+SliverVariedExtentList whose render object overrides
+estimateMaxScrollOffset → computeMaxScrollOffset (sums the extent
+builder over all children; O(n) per layout, trivial). Diagnosis
+pattern worth repeating: buffered scrollDbg logging (250ms-batched
+print) of px/max/vp/ty/s/velocity/hold per scroll event + FrameTiming
++ per-render ms — the log cleared render stalls (hold worked; frames
+fine) and convicted the metrics in one pass. Regression:
+exact_extent_test.dart (buildVariedHeightPdf, asserts maxScrollExtent
+== the exact sum AND constant across jumps; fails on stock ListView
+~2k px off). Reminder: any temp logger that re-arms a Timer trips
+widget tests' !timersPending — strip instrumentation before running
+suites. The thumbnail strip's ReorderableListView still estimates
+(no itemExtentBuilder support); its bar could wobble on mixed docs —
+known, unfixed.

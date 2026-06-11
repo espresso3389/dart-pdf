@@ -211,7 +211,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
           _dragStart = position;
           _dragCurrent = position;
         });
-      case PdfEditTool.note || PdfEditTool.content:
+      case PdfEditTool.note || PdfEditTool.content || PdfEditTool.signature:
         break; // driven by taps
     }
   }
@@ -362,6 +362,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
             await widget.textPrompt(context, title: 'Note', multiline: true);
         if (text == null || text.isEmpty) return;
         _controller.addNote(widget.pageIndex, x, y, text);
+      case PdfEditTool.signature:
+        _controller.placeSignature(widget.pageIndex, x, y);
       default:
         break;
     }

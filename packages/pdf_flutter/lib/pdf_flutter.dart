@@ -6,6 +6,7 @@ export 'src/editing/editing_color_picker.dart';
 export 'src/editing/editing_controller.dart';
 export 'src/editing/editing_preferences.dart';
 export 'src/editing/editing_sidebar.dart';
+export 'src/editing/editing_signature.dart';
 export 'src/editing/editing_thumbnails.dart';
 export 'src/editing/editing_toolbar.dart';
 export 'src/editing/text_prompt.dart';

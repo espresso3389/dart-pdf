@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'editing_signature.dart';
+
 /// Editing-UI preferences, persisted on the local device.
 ///
 /// Every [PdfEditingController] creates one by default, so tool styles
@@ -44,6 +46,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   bool _fingerDrawsInk = true;
   bool _showThumbnailSidebar = false;
   bool _showAnnotationSidebar = false;
+  PdfInkSignature? _signature;
 
   Future<void> _load() async {
     final SharedPreferences store;
@@ -67,6 +70,8 @@ class PdfEditingPreferences extends ChangeNotifier {
       _showAnnotationSidebar =
           store.getBool('${_prefix}showAnnotationSidebar') ??
               _showAnnotationSidebar;
+      final signature = store.getString('${_prefix}signature');
+      if (signature != null) _signature = PdfInkSignature.decode(signature);
     }
     _store = store;
     notifyListeners();
@@ -138,6 +143,19 @@ class PdfEditingPreferences extends ChangeNotifier {
     if (value == _showThumbnailSidebar) return;
     _showThumbnailSidebar = value;
     _write((s) => s.setBool('${_prefix}showThumbnailSidebar', value));
+    notifyListeners();
+  }
+
+  /// The saved hand-drawn signature the signature tool stamps, or null
+  /// when none has been drawn yet.
+  PdfInkSignature? get signature => _signature;
+
+  set signature(PdfInkSignature? value) {
+    if (value == _signature) return;
+    _signature = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}signature')
+        : s.setString('${_prefix}signature', value.encode()));
     notifyListeners();
   }
 

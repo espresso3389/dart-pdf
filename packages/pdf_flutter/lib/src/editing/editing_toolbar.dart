@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../pdf_viewer.dart';
 import 'editing_color_picker.dart';
 import 'editing_controller.dart';
+import 'editing_signature.dart';
 import 'text_prompt.dart';
 
 /// A ready-made Material toolbar for [PdfEditingController]: text-markup
@@ -60,6 +61,27 @@ class PdfEditingToolbar extends StatelessWidget {
   void _toggleTool(PdfEditTool value) {
     controller.tool = controller.tool == value ? null : value;
     if (controller.tool != null) viewerController.clearSelection();
+  }
+
+  /// Arms the signature tool, collecting a signature first when none is
+  /// saved yet. Tapping again while armed disarms, like any tool.
+  Future<void> _toggleSignatureTool(BuildContext context) async {
+    if (controller.tool == PdfEditTool.signature) {
+      controller.tool = null;
+      return;
+    }
+    if (controller.signature == null &&
+        !await _drawSignature(context)) {
+      return;
+    }
+    _toggleTool(PdfEditTool.signature);
+  }
+
+  Future<bool> _drawSignature(BuildContext context) async {
+    final signature = await showPdfSignatureDialog(context);
+    if (signature == null) return false;
+    controller.signature = signature;
+    return true;
   }
 
   Future<void> _editElementText(BuildContext context) async {
@@ -185,6 +207,18 @@ class PdfEditingToolbar extends StatelessWidget {
               toolButton(
                   PdfEditTool.note, Icons.sticky_note_2_outlined, 'Note'),
               toolButton(PdfEditTool.stamp, Icons.approval, 'Stamp'),
+              IconButton(
+                icon: const Icon(Icons.history_edu),
+                tooltip: 'Signature — tap a page to place it',
+                isSelected: controller.tool == PdfEditTool.signature,
+                onPressed: () => _toggleSignatureTool(context),
+              ),
+              if (controller.tool == PdfEditTool.signature)
+                IconButton(
+                  icon: const Icon(Icons.restart_alt),
+                  tooltip: 'Draw a new signature…',
+                  onPressed: () => _drawSignature(context),
+                ),
               toolButton(PdfEditTool.content, Icons.format_shapes,
                   'Edit page content'),
               if (controller.selectedElement != null) ...[

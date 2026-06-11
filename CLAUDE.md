@@ -171,3 +171,17 @@ deterministic with zero mocking. A setter call during the in-flight
 load wins over stored data (`_modified` guard). Persistence tests use
 `SharedPreferences.setMockInitialValues` + `pumpEventQueue()` before
 reading back (writes are unawaited).
+Signature tool (editing_signature.dart): `PdfInkSignature` stores
+strokes normalized 0–1 (y-down) + aspect + RGB color + optional
+pressures, JSON-encoded into preferences (`signature` slot).
+`PdfEditTool.signature` is tap-driven: `placeSignature(page, x, y,
+width: 160)` maps normalized→page space (y-flip), clamps center so the
+whole thing stays in the crop box, strokeWidth = w/75, commits via
+addInk (so pressure-variable width and select/move/resize come free).
+Toolbar history_edu button opens `showPdfSignatureDialog` first when
+no signature is saved, then arms; restart_alt redraws while armed. Pad
+key: ValueKey('pdf-signature-pad'). Test gotcha: scrollUntilVisible
+needs `scrollable:` scoped to the toolbar once a viewer is in the tree
+(two Scrollables otherwise). Example app: ⌘F/Ctrl+F focuses search via
+CallbackShortcuts wrapping the Scaffold (shortcuts bubble up the focus
+tree from the viewer's focus node).

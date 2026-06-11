@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_flutter/pdf_flutter.dart';
 
@@ -34,6 +34,7 @@ class ViewerScreen extends StatefulWidget {
 class _ViewerScreenState extends State<ViewerScreen> {
   final _controller = PdfViewerController();
   final _searchField = TextEditingController();
+  final _searchFocus = FocusNode();
 
   /// UI preferences saved on this device — tool styles and which panels
   /// are open. Shared with every editing session so they persist across
@@ -180,11 +181,19 @@ class _ViewerScreenState extends State<ViewerScreen> {
 
   void _onPrefsChanged() => setState(() {});
 
+  /// ⌘F / Ctrl+F: jump to the search field, ready to overtype.
+  void _focusSearch() {
+    _searchFocus.requestFocus();
+    _searchField.selection = TextSelection(
+        baseOffset: 0, extentOffset: _searchField.text.length);
+  }
+
   @override
   void dispose() {
     _prefs.removeListener(_onPrefsChanged);
     _controller.dispose();
     _searchField.dispose();
+    _searchFocus.dispose();
     _noteField.dispose();
     _editing?.dispose();
     super.dispose();
@@ -225,7 +234,16 @@ class _ViewerScreenState extends State<ViewerScreen> {
   @override
   Widget build(BuildContext context) {
     final editing = _editing;
-    return Scaffold(
+    // shortcuts bubble up the focus tree, so wrapping the scaffold catches
+    // them with focus anywhere inside — including on the viewer itself
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+            _focusSearch,
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            _focusSearch,
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(_title.isEmpty ? 'dart-pdf viewer' : _title,
             overflow: TextOverflow.ellipsis),
@@ -295,8 +313,10 @@ class _ViewerScreenState extends State<ViewerScreen> {
             ? null
             : PreferredSize(
                 preferredSize: const Size.fromHeight(56),
-                child:
-                    _SearchBar(controller: _controller, field: _searchField),
+                child: _SearchBar(
+                    controller: _controller,
+                    field: _searchField,
+                    focusNode: _searchFocus),
               ),
       ),
       body: switch ((editing, _error)) {
@@ -355,6 +375,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
               viewerController: _controller,
               onSave: (bytes) => unawaited(_saveAs(bytes)),
             ),
+      ),
     );
   }
 }
@@ -464,10 +485,12 @@ class _CounterControl extends StatelessWidget {
 }
 
 class _SearchBar extends StatelessWidget {
-  const _SearchBar({required this.controller, required this.field});
+  const _SearchBar(
+      {required this.controller, required this.field, this.focusNode});
 
   final PdfViewerController controller;
   final TextEditingController field;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -477,8 +500,9 @@ class _SearchBar extends StatelessWidget {
         Expanded(
           child: TextField(
             controller: field,
+            focusNode: focusNode,
             decoration: const InputDecoration(
-              hintText: 'Search document…',
+              hintText: 'Search document… (⌘F / Ctrl+F)',
               prefixIcon: Icon(Icons.search),
               isDense: true,
               border: OutlineInputBorder(),

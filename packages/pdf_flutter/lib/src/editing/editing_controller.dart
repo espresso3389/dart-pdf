@@ -3,6 +3,7 @@ import 'package:flutter/painting.dart';
 import 'package:pdf_document/pdf_document.dart';
 
 import 'editing_preferences.dart';
+import 'editing_signature.dart';
 
 /// The annotation tools a [PdfEditingController] can arm.
 ///
@@ -32,6 +33,10 @@ enum PdfEditTool {
 
   /// Drag out a box, then type the rubber-stamp caption (/Stamp).
   stamp,
+
+  /// Tap to place the saved hand-drawn signature
+  /// ([PdfEditingController.signature]) as an Ink annotation.
+  signature,
 
   /// Tap to select a page content element (text run, path, image); the
   /// selection can be deleted or, for text, rewritten. Edits the page's
@@ -349,6 +354,49 @@ class PdfEditingController extends ChangeNotifier {
   /// Adds a sticky note with its top-left corner at ([x], [y]).
   void addNote(int pageIndex, double x, double y, String text) =>
       apply((e) => e.addNote(pageIndex, x, y, text, color: _colorValue));
+
+  // ---------------------------------------------------------------------
+  // signature
+
+  /// The saved hand-drawn signature the signature tool stamps. Persisted
+  /// with the other [preferences], so it survives app restarts. Drawn in
+  /// [showPdfSignatureDialog].
+  PdfInkSignature? get signature => preferences.signature;
+
+  set signature(PdfInkSignature? value) => preferences.signature = value;
+
+  /// Stamps [signature] as an Ink annotation centered on ([x], [y]) in
+  /// page space, [width] points wide (clamped, with the center, so the
+  /// whole signature stays on the page). Keeps the signature's own ink
+  /// color and pen pressures. Returns false when none is saved.
+  bool placeSignature(int pageIndex, double x, double y,
+      {double width = 160}) {
+    final signature = preferences.signature;
+    if (signature == null) return false;
+    final box = _document.page(pageIndex).cropBox;
+    final aspect = signature.aspect > 0 ? signature.aspect : 2.0;
+    var w = width.clamp(8.0, box.width * 0.9);
+    var h = w / aspect;
+    if (h > box.height * 0.9) {
+      h = box.height * 0.9;
+      w = h * aspect;
+    }
+    final cx = x.clamp(box.left + w / 2, box.right - w / 2);
+    final cy = y.clamp(box.bottom + h / 2, box.top - h / 2);
+    final left = cx - w / 2, top = cy + h / 2;
+    final strokes = [
+      for (final stroke in signature.strokes)
+        [
+          // normalized pad space is y-down; page space is y-up
+          for (final (nx, ny) in stroke) (left + nx * w, top - ny * h)
+        ]
+    ];
+    return apply((e) => e.addInk(pageIndex, strokes,
+        color: signature.color,
+        strokeWidth: w / 75, // pen-like: ~2pt at the default width
+        opacity: 1,
+        pressures: signature.pressures));
+  }
 
   /// Bakes every page's annotation appearances into its content and
   /// removes the annotations.

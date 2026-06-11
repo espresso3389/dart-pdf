@@ -913,3 +913,55 @@ must still leave the anchor nearest the run END boundary). Test
 gotchas: flattened field values live in FlatAnnot XObject streams,
 not page contentBytes; a sanitized trailing '✓' leaves trailing
 spaces in the appearance string — count them when asserting.
+Batch 3, session 6 (forms in the editing UI): the session-5 forms API
+surfaced as direct manipulation. `PdfEditTool.form` +
+`PdfFormFieldKind` {text, checkBox, pushButton} (editing_controller).
+Controller: `acroForm` cached per revision (reset in
+_invalidateElements — field enumeration walks the tree and hit tests
+run per pointer event); `formFieldAt(page, x, y)` → (field,
+widgetIndex) by identity-matching the hit Widget annotation's dict
+against field.widgets (topmost /Annots entry wins); fill ops re-resolve
+the field BY NAME inside apply() (PdfFormField dies with every
+revision — names are the stable handle) and turn editor
+ArgumentError/StateError into a false return: `setFormFieldText`
+(unchanged-value guard), `toggleFormCheckBox`, `setFormRadioValue`,
+`setFormChoiceValue`, `setFormButtonImage(name, bytes)`
+(PdfEmbeddableImage.decode, junk → false); admin: `addFormField`
+(auto-names 'Field N', returns the name), `renameFormField`,
+`removeFormField`, `changeFormFieldKind`, `flattenFormFields`,
+transient `newFormFieldKind`. `pages:` for fills = every widget's
+widgetPageIndex (null when any is -1); rename passes const [] (no
+visual change). pdf_document: `PdfFormField.widgetOnState(index)` —
+first non-Off /AP /N key of THAT widget (which state a radio kid tap
+selects). Overlay: form-tool taps route by field.type — text opens
+the existing inline editor in a form mode (`_textEditFieldName` +
+`_textEditMultiline`; key becomes 'pdf-form-text-editor'; /DA-parsed
+font/size, 0 Tf edits at 12; single-line fields get maxLines 1 +
+onSubmitted commit; commit → setFormFieldText + the _afterText
+afterimage with washed: true), checkbox/radio toggle instantly,
+choice shows showMenu (item keys 'pdf-form-option-<export>'),
+push button runs `PdfViewer.formImagePicker` (typedef
+PdfFormImagePicker lives in text_prompt.dart — the overlay file is
+unexported, so public typedefs can't live there); read-only fields
+ignore taps; drag-out on empty area adds newFormFieldKind (drags
+starting ON a widget are not creation gestures); hover: text cursor
+over text fields, click over buttons/choices, precise elsewhere.
+Menu: `showPdfFormFieldMenu` (editing_menu.dart, keys
+'pdf-form-menu-rename/-text/-checkbox/-button/-delete/-flatten');
+viewer _onSecondaryTapUp branches to it when the form tool is armed
+(field hit-test first — widgets stay out of selectableAnnotationAt).
+_menuRow's label is now Flexible+ellipsis: long labels overflowed the
+popup's 280px cap under the Ahem test font. Toolbar: ballot_outlined
+form button; while armed a PopupMenuButton ('pdf-form-field-type',
+entries 'pdf-form-type-text/-checkbox/-button') picks the drag-out
+kind and layers_clear flattens. Example: `_pickFormImage` via
+file_selector (png/jpg type group needs all three platform fields).
+Tests (editing_form_test.dart, 18): controller round-trips + viewer
+widget tests on buildAcroFormPdf (612×792 → view() helper like
+editing_text_edit_test). Gotchas: a showMenu opened from a TOUCH tap
+has burned ~300ms of the usual 400ms double-tap pump on tap
+resolution — pumpAndSettle before tapping a menu item or the item's
+paint position and hit region disagree mid-animation (tap lands on
+the barrier, menu dismisses, value never set); commit-tap targets
+must stay inside the 800×600 viewport (view(450, 300) is y≈643 —
+silently misses, editor never closes).

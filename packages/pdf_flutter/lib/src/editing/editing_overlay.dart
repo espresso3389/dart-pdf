@@ -32,12 +32,17 @@ class EditingPageOverlay extends StatefulWidget {
     this.onPanViewport,
     this.rasterCurrent = true,
     this.zoom = 1,
+    this.formImagePicker,
   });
 
   final PdfEditingController controller;
   final int pageIndex;
   final PdfPageGeometry geometry;
   final PdfTextPrompt textPrompt;
+
+  /// How the form tool asks for a push-button field's image. With none,
+  /// tapping a push button does nothing.
+  final PdfFormImagePicker? formImagePicker;
 
   /// The paper color the page is displayed with — the eyedropper's
   /// raster must match what's on screen.
@@ -135,6 +140,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   double _textEditSize = 14; // pt
   Color _textEditColor = const Color(0xFF000000);
   Color? _textEditFill; // the box background the commit will paint
+
+  // form-tool text fill: when set, the inline editor commits into this
+  // field's /V instead of creating a free-text annotation
+  String? _textEditFieldName;
+  bool _textEditMultiline = true;
 
   // select-tool drags. A rotated selection resizes in its local frame:
   // _resizeFrom/_resizeRect are then the chrome's local box (the rect
@@ -556,11 +566,66 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     });
   }
 
-  /// Commits the editor's text: a new free-text annotation, or the
-  /// selected one rewritten. Empty text adds nothing / changes nothing.
+  /// Opens the inline editor over a text field's widget, prefilled with
+  /// its value — the form tool's tap-to-fill. The commit goes into the
+  /// field's /V instead of creating an annotation.
+  void _openFormTextEditor(PdfFormField field, int widgetIndex) {
+    final rect = field.widgetRect(widgetIndex);
+    if (rect == null) return;
+    final tf = RegExp(r'/(\S+)\s+(\d+(?:\.\d+)?)\s+Tf')
+        .firstMatch(field.defaultAppearance ?? '');
+    final size = double.tryParse(tf?.group(2) ?? '') ?? 0;
+    _textEditText.text = field.value ?? '';
+    setState(() {
+      _textEditRect = _geometry.toViewRect(rect);
+      _textEditExisting = false;
+      _textEditTool = _tool;
+      _textEditFieldName = field.name;
+      _textEditMultiline = field.isMultiline;
+      _textEditFont = tf == null
+          ? PdfStandardFont.helvetica
+          : PdfStandardFont.fromName(tf.group(1)!);
+      // an auto-size /DA (0 Tf) edits at a readable default; the
+      // committed appearance derives its own size as usual
+      _textEditSize = size > 0 ? size : 12;
+      _textEditColor = const Color(0xFF000000);
+      _textEditFill = null;
+    });
+    _controller.setEditingText(true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _textEditRect != null) _textEditFocus.requestFocus();
+    });
+  }
+
+  /// Commits the editor's text: a new free-text annotation, the
+  /// selected one rewritten, or — for the form tool — the field's new
+  /// value. Empty text adds nothing / changes nothing.
   void _commitTextEdit() {
     final rect = _textEditRect;
     if (rect == null) return;
+    final fieldName = _textEditFieldName;
+    if (fieldName != null) {
+      // form fields: empty is a legitimate value (clearing the field)
+      final value = _textEditText.text;
+      final font = _textEditFont;
+      final size = _textEditSize;
+      _closeTextEditor();
+      final before = _controller.document;
+      _controller.setFormFieldText(fieldName, value);
+      if (identical(before, _controller.document)) return;
+      _clearAfterimage();
+      _afterText = (
+        rect: rect,
+        text: value,
+        font: font,
+        size: size,
+        color: const Color(0xFF000000),
+        fill: null,
+        washed: true, // cover the old value until the raster lands
+      );
+      _afterDocument = _controller.document;
+      return;
+    }
     final text = _textEditText.text.trimRight();
     final existing = _textEditExisting;
     final font = _textEditFont;
@@ -598,9 +663,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   void _closeTextEditor() {
     if (_textEditRect == null) return;
     if (mounted) {
-      setState(() => _textEditRect = null);
+      setState(() {
+        _textEditRect = null;
+        _textEditFieldName = null;
+      });
     } else {
       _textEditRect = null;
+      _textEditFieldName = null;
     }
     _controller.setEditingText(false);
   }
@@ -646,6 +715,16 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           _dragStart = position;
           _dragCurrent = position;
         });
+      case PdfEditTool.form:
+        // drag-out on empty page area adds a field; a drag starting on
+        // an existing widget is not a creation gesture
+        final (x, y) = _geometry.toPagePoint(position);
+        if (_controller.formFieldAt(widget.pageIndex, x, y) == null) {
+          setState(() {
+            _dragStart = position;
+            _dragCurrent = position;
+          });
+        }
       case PdfEditTool.signature:
         // press-drag-release placement: the preview rides the pointer
         // (touch has no hover), release commits where it landed
@@ -924,9 +1003,64 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
             title: 'Stamp text', initial: 'APPROVED');
         if (text == null || text.isEmpty) return;
         _controller.addStamp(widget.pageIndex, rect, text);
+      case PdfEditTool.form:
+        _controller.addFormField(
+            _controller.newFormFieldKind, widget.pageIndex, rect);
       default:
         break;
     }
+  }
+
+  /// The form tool's tap: routes the hit field to its fill interaction.
+  Future<void> _onFormTap(TapUpDetails details) async {
+    final (x, y) = _geometry.toPagePoint(details.localPosition);
+    final hit = _controller.formFieldAt(widget.pageIndex, x, y);
+    if (hit == null) return;
+    final (field, widgetIndex) = hit;
+    if (field.isReadOnly) return;
+    switch (field.type) {
+      case PdfFieldType.text:
+        _openFormTextEditor(field, widgetIndex);
+      case PdfFieldType.checkBox:
+        _controller.toggleFormCheckBox(field.name);
+      case PdfFieldType.radioGroup:
+        final state = field.widgetOnState(widgetIndex);
+        if (state != null) _controller.setFormRadioValue(field.name, state);
+      case PdfFieldType.comboBox || PdfFieldType.listBox:
+        await _pickFormChoice(field, details.globalPosition);
+      case PdfFieldType.pushButton:
+        final picker = widget.formImagePicker;
+        if (picker == null) return;
+        final name = field.name;
+        final bytes = await picker(context, field);
+        if (bytes != null) _controller.setFormButtonImage(name, bytes);
+      case PdfFieldType.signature || PdfFieldType.unknown:
+        break;
+    }
+  }
+
+  /// A choice field's options as a context menu at the tap position.
+  Future<void> _pickFormChoice(
+      PdfFormField field, Offset globalPosition) async {
+    final options = field.options;
+    if (options.isEmpty) return;
+    final name = field.name;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final picked = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+          globalPosition & Size.zero, Offset.zero & overlay.size),
+      items: [
+        for (final (export, display) in options)
+          PopupMenuItem(
+            key: ValueKey('pdf-form-option-$export'),
+            value: export,
+            child: Text(display),
+          ),
+      ],
+    );
+    if (picked != null) _controller.setFormChoiceValue(name, picked);
   }
 
   /// Rasterizes this page once for the eyedropper, keyed on document
@@ -1028,6 +1162,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       case PdfEditTool.stamp:
         // no-op without an active custom stamp (the classic flow drags)
         _controller.placeStamp(widget.pageIndex, x, y);
+      case PdfEditTool.form:
+        await _onFormTap(details);
       default:
         break;
     }
@@ -1085,6 +1221,22 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           _controller.elementsOn(widget.pageIndex).elementsAt(x, y).isNotEmpty
               ? SystemMouseCursors.click
               : SystemMouseCursors.basic;
+    } else if (_tool == PdfEditTool.form) {
+      final (x, y) = _geometry.toPagePoint(event.localPosition);
+      final hit = _controller.formFieldAt(widget.pageIndex, x, y);
+      if (hit == null) {
+        cursor = SystemMouseCursors.precise; // a drag here adds a field
+      } else if (hit.$1.isReadOnly) {
+        cursor = SystemMouseCursors.basic;
+      } else {
+        cursor = switch (hit.$1.type) {
+          PdfFieldType.text => SystemMouseCursors.text,
+          PdfFieldType.signature ||
+          PdfFieldType.unknown =>
+            SystemMouseCursors.basic,
+          _ => SystemMouseCursors.click,
+        };
+      }
     } else {
       cursor = SystemMouseCursors.precise;
     }
@@ -1350,13 +1502,25 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                           width: 1.5 * _chromeScale),
                     ),
                     child: TextField(
-                      key: const ValueKey('pdf-freetext-editor'),
+                      key: ValueKey(_textEditFieldName == null
+                          ? 'pdf-freetext-editor'
+                          : 'pdf-form-text-editor'),
                       controller: _textEditText,
                       focusNode: _textEditFocus,
                       autofocus: true,
-                      maxLines: null,
-                      expands: true,
-                      textAlignVertical: TextAlignVertical.top,
+                      // single-line form fields edit single-line: Enter
+                      // commits instead of inserting a newline
+                      maxLines: _textEditFieldName == null ||
+                              _textEditMultiline
+                          ? null
+                          : 1,
+                      expands:
+                          _textEditFieldName == null || _textEditMultiline,
+                      onSubmitted: (_) => _commitTextEdit(),
+                      textAlignVertical: _textEditFieldName == null ||
+                              _textEditMultiline
+                          ? TextAlignVertical.top
+                          : TextAlignVertical.center,
                       cursorColor: _textEditColor,
                       // mirrors the committed appearance: same size in view
                       // pixels, same 1.2 leading, matching family and color
@@ -1616,7 +1780,7 @@ class _EditingPreviewPainter extends CustomPainter {
     switch (tool) {
       case PdfEditTool.ellipse:
         canvas.drawOval(rect, paint);
-      case PdfEditTool.freeText || PdfEditTool.stamp:
+      case PdfEditTool.freeText || PdfEditTool.stamp || PdfEditTool.form:
         canvas.drawRect(
             rect,
             Paint()

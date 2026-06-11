@@ -241,6 +241,7 @@ class PdfViewer extends StatefulWidget {
     this.editing,
     this.editingTextPrompt,
     this.annotationMenuBuilder,
+    this.formImagePicker,
     this.pageSpacing = 12,
     this.initialFit = PdfViewerFit.page,
     this.minZoom = 0.25,
@@ -287,6 +288,11 @@ class PdfViewer extends StatefulWidget {
   /// appear below a divider. Needs [editing] — without a controller
   /// there is no context menu.
   final PdfAnnotationMenuBuilder? annotationMenuBuilder;
+
+  /// How the form tool fills a tapped push-button field with an image
+  /// (signature and logo fields) — typically a file picker returning
+  /// PNG or JPEG bytes. With none, tapping a push button does nothing.
+  final PdfFormImagePicker? formImagePicker;
 
   final double pageSpacing;
 
@@ -929,6 +935,21 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     final point = _pagePointAt(details.localPosition);
     if (point == null) return;
     final (page, x, y) = point;
+    // form mode: a right-clicked field widget gets the field menu
+    // (rename/convert/delete/flatten) instead of the annotation menu
+    if (editing.tool == PdfEditTool.form) {
+      final field = editing.formFieldAt(page, x, y);
+      if (field != null) {
+        await showPdfFormFieldMenu(
+          context: context,
+          position: details.globalPosition,
+          controller: editing,
+          fieldName: field.$1.name,
+          textPrompt: widget.editingTextPrompt ?? showPdfTextPrompt,
+        );
+      }
+      return;
+    }
     final hit = editing.selectableAnnotationAt(page, x, y);
     if (hit == null) return;
     if (!editing.isAnnotationSelected(page, hit.$1)) {
@@ -1542,6 +1563,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                 editing: editing,
                 editingTextPrompt:
                     widget.editingTextPrompt ?? showPdfTextPrompt,
+                formImagePicker: widget.formImagePicker,
                 onPanViewport: _grabPanBy,
                 transformScale: _transformScale,
                 renderHold: _renderHold,
@@ -1765,6 +1787,7 @@ class _PdfViewerPage extends StatefulWidget {
     required this.overlayBuilder,
     required this.editing,
     required this.editingTextPrompt,
+    required this.formImagePicker,
     required this.onPanViewport,
     required this.transformScale,
     required this.renderHold,
@@ -1781,6 +1804,7 @@ class _PdfViewerPage extends StatefulWidget {
   final PdfPageOverlayBuilder? overlayBuilder;
   final PdfEditingController? editing;
   final PdfTextPrompt editingTextPrompt;
+  final PdfFormImagePicker? formImagePicker;
   final void Function(Offset delta) onPanViewport;
 
   /// The viewer transform's scale — the editing overlay's chrome divides
@@ -1872,6 +1896,7 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
                               pageIndex: widget.index,
                               geometry: geometry,
                               textPrompt: widget.editingTextPrompt,
+                              formImagePicker: widget.formImagePicker,
                               pageColor: widget.pageColor,
                               onPanViewport: widget.onPanViewport,
                               rasterCurrent: _rastered,

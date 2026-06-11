@@ -306,6 +306,23 @@ class PdfFormField {
     return form._pageIndexOf(all[index]);
   }
 
+  /// The on-state name widget [index] defines: the first key of its
+  /// /AP /N state dictionary that isn't 'Off'. For a radio group this is
+  /// the state tapping that particular button selects; null for widgets
+  /// without state appearances (or an out-of-range [index]).
+  String? widgetOnState(int index) {
+    final all = widgets;
+    if (index < 0 || index >= all.length) return null;
+    final ap = _cos.resolve(all[index]['AP']);
+    if (ap is! CosDictionary) return null;
+    final n = _cos.resolve(ap['N']);
+    if (n is! CosDictionary) return null;
+    for (final key in n.entries.keys) {
+      if (key != 'Off') return key;
+    }
+    return null;
+  }
+
   /// The on-state names a button's widgets define: the keys of each
   /// /AP /N state dictionary except 'Off'. A plain check box has one
   /// (conventionally 'Yes'); a radio group has one per button.

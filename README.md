@@ -111,7 +111,16 @@ like the ink tool), and tap pages to stamp it as an Ink annotation;
 the signature is saved on the device and reused across documents and
 sessions. Custom rubber stamps work the same way: author a
 caption-and-color stamp once in the stamp picker, and from then on a
-tap places it — the collection is saved on the device. UI preferences persist on the device by default
+tap places it — the collection is saved on the device.
+Interactive forms are first-class in the viewer too: a form tool
+fills fields in place (text fields open an inline editor over the
+widget, check boxes and radio buttons toggle on tap, choice fields
+drop down their options, and push-button fields fill with an image
+through a host-supplied picker — the signature/logo flow), drags out
+new fields on empty page area (text, check box, or image button), and
+right-clicks fields for rename, convert-to-another-kind, delete, and
+whole-form flattening — the template-editing API surfaced as direct
+manipulation. UI preferences persist on the device by default
 (`PdfEditingPreferences`, backed by `shared_preferences`): color,
 stroke width, opacity, font size, the stylus/finger mode, and panel
 visibility all come back the way the user left them.

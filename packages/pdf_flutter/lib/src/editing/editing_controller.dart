@@ -46,10 +46,21 @@ enum PdfEditTool {
   /// selection can be deleted or, for text, rewritten. Edits the page's
   /// content stream itself, not annotations.
   content,
+
+  /// Interactive forms: tap a field widget to fill it (text fields open
+  /// an inline editor, check boxes and radio buttons toggle, choice
+  /// fields offer their options), drag on empty page area to add a new
+  /// field of [PdfEditingController.newFormFieldKind], right-click a
+  /// widget for rename/convert/delete.
+  form,
 }
 
 /// Text-markup kinds for [PdfEditingController.addMarkup].
 enum PdfMarkupKind { highlight, underline, strikeOut, squiggly }
+
+/// The field kinds the form tool can create (and convert fields to) —
+/// the subset of [PdfFieldType] with creation support in [PdfEditor].
+enum PdfFormFieldKind { text, checkBox, pushButton }
 
 /// An editing session over a PDF document: applies edits through
 /// [PdfEditor], owns the resulting document revisions, and carries the
@@ -1241,6 +1252,8 @@ class PdfEditingController extends ChangeNotifier {
     _elements.clear();
     _pageCache.clear();
     _selectedElement = null;
+    _form = null;
+    _formResolved = false;
   }
 
   /// The content elements of [pageIndex] at the current revision.
@@ -1315,4 +1328,215 @@ class PdfEditingController extends ChangeNotifier {
         pages: [selected.$1]);
     return count;
   }
+
+  // ---------------------------------------------------------------------
+  // forms
+
+  PdfAcroForm? _form;
+  bool _formResolved = false;
+
+  /// The document's interactive form at the current revision, or null
+  /// when it has none. Cached per revision — enumerating fields walks
+  /// the whole field tree, and the form tool's hit tests run per
+  /// pointer event.
+  PdfAcroForm? get acroForm {
+    if (!_formResolved) {
+      _form = PdfAcroForm.of(_document);
+      _formResolved = true;
+    }
+    return _form;
+  }
+
+  /// The topmost visible form-field widget under ([x], [y]) on
+  /// [pageIndex], with the hit widget's index within its field — for a
+  /// radio group that index says which button was tapped
+  /// ([PdfFormField.widgetOnState]). Null when nothing is hit.
+  (PdfFormField field, int widgetIndex)? formFieldAt(
+      int pageIndex, double x, double y) {
+    final form = acroForm;
+    if (form == null) return null;
+    final annotations = _page(pageIndex).annotations;
+    // later /Annots entries paint on top, so they win the hit test
+    for (var i = annotations.length - 1; i >= 0; i--) {
+      final annotation = annotations[i];
+      if (annotation.subtype != 'Widget' || annotation.isHidden) continue;
+      if (!annotation.rect.contains(x, y)) continue;
+      for (final field in form.fields) {
+        final widgets = field.widgets;
+        for (var w = 0; w < widgets.length; w++) {
+          if (identical(widgets[w], annotation.dict)) return (field, w);
+        }
+      }
+    }
+    return null;
+  }
+
+  /// The pages a field's widgets are displayed on, or null when any
+  /// widget's page is unknown (then every page's render stamp bumps).
+  List<int>? _fieldPages(String name) {
+    final field = acroForm?.fieldNamed(name);
+    if (field == null) return null;
+    final pages = <int>{};
+    for (var i = 0; i < field.widgets.length; i++) {
+      final page = field.widgetPageIndex(i);
+      if (page < 0) return null;
+      pages.add(page);
+    }
+    return pages.toList();
+  }
+
+  /// Shared fill plumbing: resolves the field by [name] (fields die with
+  /// every revision, so names are the stable handle), guards type and
+  /// read-only, and turns editor complaints into a false return — a UI
+  /// tap must never crash on a quirky field.
+  bool _fillField(String name, Set<PdfFieldType> types,
+      void Function(PdfEditor e, PdfFormField f) fill) {
+    final field = acroForm?.fieldNamed(name);
+    if (field == null || field.isReadOnly || !types.contains(field.type)) {
+      return false;
+    }
+    final pages = _fieldPages(name);
+    try {
+      return apply((e) {
+        final f = e.acroForm?.fieldNamed(name);
+        if (f != null) fill(e, f);
+      }, pages: pages);
+    } on ArgumentError {
+      return false;
+    } on StateError {
+      return false;
+    }
+  }
+
+  /// Sets the text field [name]'s value, regenerating its appearance.
+  /// Returns false for missing/read-only fields and unchanged values.
+  bool setFormFieldText(String name, String value) {
+    final field = acroForm?.fieldNamed(name);
+    if (field != null && (field.value ?? '') == value) return false;
+    return _fillField(
+        name, const {PdfFieldType.text}, (e, f) => e.setTextValue(f, value));
+  }
+
+  /// Toggles the check box [name].
+  bool toggleFormCheckBox(String name) => _fillField(
+      name,
+      const {PdfFieldType.checkBox},
+      (e, f) => e.setCheckBoxValue(f, !f.isChecked));
+
+  /// Selects [onState] in the radio group [name] (the tapped widget's
+  /// [PdfFormField.widgetOnState]).
+  bool setFormRadioValue(String name, String onState) {
+    final field = acroForm?.fieldNamed(name);
+    if (field != null && field.value == onState) return false;
+    return _fillField(name, const {PdfFieldType.radioGroup},
+        (e, f) => e.setRadioValue(f, onState));
+  }
+
+  /// Sets the choice field [name] to [value] (an export or display
+  /// value, per [PdfEditor.setChoiceValue]).
+  bool setFormChoiceValue(String name, String value) => _fillField(
+      name,
+      const {PdfFieldType.comboBox, PdfFieldType.listBox},
+      (e, f) => e.setChoiceValue(f, value));
+
+  /// Fills the push button [name] with [imageBytes] (PNG or JPEG),
+  /// aspect-fit — signature and logo fields in template pipelines.
+  bool setFormButtonImage(String name, Uint8List imageBytes) {
+    final PdfEmbeddableImage image;
+    try {
+      image = PdfEmbeddableImage.decode(imageBytes);
+    } catch (_) {
+      return false;
+    }
+    return _fillField(name, const {PdfFieldType.pushButton},
+        (e, f) => e.setButtonImage(f, image));
+  }
+
+  PdfFormFieldKind _newFormFieldKind = PdfFormFieldKind.text;
+
+  /// The kind of field a form-tool drag on empty page area creates.
+  /// Not persisted — each session starts adding text fields.
+  PdfFormFieldKind get newFormFieldKind => _newFormFieldKind;
+
+  set newFormFieldKind(PdfFormFieldKind value) {
+    if (value == _newFormFieldKind) return;
+    _newFormFieldKind = value;
+    notifyListeners();
+  }
+
+  /// Adds a new [kind] field covering [rect] on [pageIndex], creating
+  /// the document's /AcroForm when it has none. The name is generated
+  /// ('Field 1', 'Field 2', …); rename it via [renameFormField].
+  /// Returns the new field's name, or null when nothing was added.
+  String? addFormField(PdfFormFieldKind kind, int pageIndex, PdfRect rect) {
+    var i = 1;
+    while (acroForm?.fieldNamed('Field $i') != null) {
+      i++;
+    }
+    final name = 'Field $i';
+    final added = apply((e) {
+      switch (kind) {
+        case PdfFormFieldKind.text:
+          e.addTextField(pageIndex, name, rect);
+        case PdfFormFieldKind.checkBox:
+          e.addCheckBoxField(pageIndex, name, rect);
+        case PdfFormFieldKind.pushButton:
+          e.addPushButtonField(pageIndex, name, rect);
+      }
+    }, pages: [pageIndex]);
+    return added ? name : null;
+  }
+
+  /// Renames the field [name] to [newName]. Returns false when the
+  /// field is missing, [newName] is empty, or another field already
+  /// carries it.
+  bool renameFormField(String name, String newName) {
+    if (acroForm?.fieldNamed(name) == null) return false;
+    try {
+      // a rename changes no page's rendering
+      return apply((e) {
+        final f = e.acroForm?.fieldNamed(name);
+        if (f != null) e.renameField(f, newName);
+      }, pages: const <int>[]);
+    } on ArgumentError {
+      return false;
+    }
+  }
+
+  /// Removes the field [name] and its widgets.
+  bool removeFormField(String name) {
+    if (acroForm?.fieldNamed(name) == null) return false;
+    final pages = _fieldPages(name);
+    return apply((e) {
+      final f = e.acroForm?.fieldNamed(name);
+      if (f != null) e.removeField(f);
+    }, pages: pages);
+  }
+
+  /// Rebuilds the field [name] as [kind] at its first widget's place,
+  /// keeping the name ([PdfEditor.changeFieldType]). Returns false when
+  /// the field is missing, already that kind, or unrebuildable.
+  bool changeFormFieldKind(String name, PdfFormFieldKind kind) {
+    if (acroForm?.fieldNamed(name) == null) return false;
+    final type = switch (kind) {
+      PdfFormFieldKind.text => PdfFieldType.text,
+      PdfFormFieldKind.checkBox => PdfFieldType.checkBox,
+      PdfFormFieldKind.pushButton => PdfFieldType.pushButton,
+    };
+    final pages = _fieldPages(name);
+    try {
+      return apply((e) {
+        final f = e.acroForm?.fieldNamed(name);
+        if (f != null) e.changeFieldType(f, type);
+      }, pages: pages);
+    } on ArgumentError {
+      return false;
+    } on StateError {
+      return false;
+    }
+  }
+
+  /// Flattens the interactive form: bakes every widget's appearance
+  /// into its page and removes all fields ([PdfEditor.flattenForm]).
+  bool flattenFormFields() => apply((e) => e.flattenForm());
 }

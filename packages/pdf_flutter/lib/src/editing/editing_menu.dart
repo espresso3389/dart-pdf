@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:pdf_document/pdf_document.dart';
 
 import 'editing_controller.dart';
+import 'text_prompt.dart';
 
 /// What an annotation context menu acts on: the controller and the
 /// selection at the moment the menu opened. The right-clicked annotation
@@ -118,6 +119,91 @@ Future<void> showPdfAnnotationMenu({
   picked?.onSelected(request);
 }
 
+/// Shows the form tool's field context menu at [position] (global
+/// coordinates) for the field named [fieldName]: rename, convert to the
+/// other creatable kinds, delete, and flatten the whole form. Resolves
+/// when the menu closes, after the picked action ran.
+Future<void> showPdfFormFieldMenu({
+  required BuildContext context,
+  required Offset position,
+  required PdfEditingController controller,
+  required String fieldName,
+  PdfTextPrompt textPrompt = showPdfTextPrompt,
+}) async {
+  final field = controller.acroForm?.fieldNamed(fieldName);
+  if (field == null) return;
+  final type = field.type;
+  bool convertsTo(PdfFormFieldKind kind) => switch (kind) {
+        PdfFormFieldKind.text => type != PdfFieldType.text,
+        PdfFormFieldKind.checkBox => type != PdfFieldType.checkBox,
+        PdfFormFieldKind.pushButton => type != PdfFieldType.pushButton,
+      };
+
+  final items = <PdfAnnotationMenuItem>[
+    PdfAnnotationMenuItem(
+      key: const ValueKey('pdf-form-menu-rename'),
+      label: 'Rename…',
+      icon: Icons.drive_file_rename_outline,
+      onSelected: (_) async {
+        final newName = await textPrompt(context,
+            title: 'Field name', initial: fieldName);
+        if (newName == null || newName.isEmpty || newName == fieldName) {
+          return;
+        }
+        controller.renameFormField(fieldName, newName);
+      },
+    ),
+    PdfAnnotationMenuItem(
+      key: const ValueKey('pdf-form-menu-text'),
+      label: 'Convert to text field',
+      icon: Icons.text_fields,
+      enabled: convertsTo(PdfFormFieldKind.text),
+      onSelected: (_) => controller.changeFormFieldKind(
+          fieldName, PdfFormFieldKind.text),
+    ),
+    PdfAnnotationMenuItem(
+      key: const ValueKey('pdf-form-menu-checkbox'),
+      label: 'Convert to check box',
+      icon: Icons.check_box_outlined,
+      enabled: convertsTo(PdfFormFieldKind.checkBox),
+      onSelected: (_) => controller.changeFormFieldKind(
+          fieldName, PdfFormFieldKind.checkBox),
+    ),
+    PdfAnnotationMenuItem(
+      key: const ValueKey('pdf-form-menu-button'),
+      label: 'Convert to image button',
+      icon: Icons.smart_button,
+      enabled: convertsTo(PdfFormFieldKind.pushButton),
+      onSelected: (_) => controller.changeFormFieldKind(
+          fieldName, PdfFormFieldKind.pushButton),
+    ),
+    PdfAnnotationMenuItem(
+      key: const ValueKey('pdf-form-menu-delete'),
+      label: 'Delete field',
+      icon: Icons.delete_outline,
+      onSelected: (_) => controller.removeFormField(fieldName),
+    ),
+    PdfAnnotationMenuItem(
+      key: const ValueKey('pdf-form-menu-flatten'),
+      label: 'Flatten form',
+      icon: Icons.layers_clear_outlined,
+      onSelected: (_) => controller.flattenFormFields(),
+    ),
+  ];
+
+  final overlay =
+      Overlay.of(context).context.findRenderObject()! as RenderBox;
+  final picked = await showMenu<PdfAnnotationMenuItem>(
+    context: context,
+    position: RelativeRect.fromRect(
+        position & Size.zero, Offset.zero & overlay.size),
+    items: [for (final item in items) _menuRow(item)],
+  );
+  // the request param is unused by these closures; reuse the row type
+  // so the menu plumbing stays shared with the annotation menu
+  picked?.onSelected(PdfAnnotationMenuRequest._(controller, -1));
+}
+
 PopupMenuItem<PdfAnnotationMenuItem> _menuRow(PdfAnnotationMenuItem item) =>
     PopupMenuItem<PdfAnnotationMenuItem>(
       key: item.key,
@@ -136,7 +222,9 @@ PopupMenuItem<PdfAnnotationMenuItem> _menuRow(PdfAnnotationMenuItem item) =>
             ),
             const SizedBox(width: 10),
           ],
-          Text(item.label),
+          // flexible: long labels ellipsize at the popup's width cap
+          // instead of overflowing
+          Flexible(child: Text(item.label, overflow: TextOverflow.ellipsis)),
         ],
       ),
     );

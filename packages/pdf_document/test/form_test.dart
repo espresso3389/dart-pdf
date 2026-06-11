@@ -40,6 +40,17 @@ void main() {
     expect(color.rect, const PdfRect(72, 500, 92, 520));
   });
 
+  test('widgetOnState names the state each widget selects', () {
+    final f = form();
+    expect(f.fieldNamed('agree')!.widgetOnState(0), 'Yes');
+    final color = f.fieldNamed('color')!;
+    expect(color.widgetOnState(0), 'Red');
+    expect(color.widgetOnState(1), 'Blue');
+    expect(color.widgetOnState(2), isNull, reason: 'index out of range');
+    expect(f.fieldNamed('name')!.widgetOnState(0), isNull,
+        reason: 'no /AP state dictionary');
+  });
+
   test('a widget no page claims reports index -1', () {
     // strip the widget from the page /Annots so it only exists in the
     // AcroForm tree — no /P and no page lists it

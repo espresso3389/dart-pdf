@@ -1,4 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:pdf_document/pdf_document.dart' show PdfFormField;
+
+/// Supplies the image a tapped push-button field should be filled with
+/// — typically a file picker. Return null to leave the button alone.
+/// PNG and JPEG bytes are accepted
+/// ([PdfEditingController.setFormButtonImage]).
+typedef PdfFormImagePicker = Future<Uint8List?> Function(
+    BuildContext context, PdfFormField field);
 
 /// Signature of the prompt the editing UI uses to ask for annotation text
 /// (free text, notes, stamps). Returns null when the user cancels.

@@ -235,6 +235,45 @@ class PdfEditingToolbar extends StatelessWidget {
                 ),
               toolButton(PdfEditTool.content, Icons.format_shapes,
                   'Edit page content'),
+              toolButton(PdfEditTool.form, Icons.ballot_outlined,
+                  'Form fields — tap to fill, drag to add'),
+              if (controller.tool == PdfEditTool.form) ...[
+                PopupMenuButton<PdfFormFieldKind>(
+                  key: const ValueKey('pdf-form-field-type'),
+                  tooltip: 'New field type — drag on a page to add one',
+                  icon: Icon(switch (controller.newFormFieldKind) {
+                    PdfFormFieldKind.text => Icons.text_fields,
+                    PdfFormFieldKind.checkBox => Icons.check_box_outlined,
+                    PdfFormFieldKind.pushButton => Icons.smart_button,
+                  }),
+                  initialValue: controller.newFormFieldKind,
+                  onSelected: (kind) => controller.newFormFieldKind = kind,
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      key: ValueKey('pdf-form-type-text'),
+                      value: PdfFormFieldKind.text,
+                      child: Text('Text field'),
+                    ),
+                    PopupMenuItem(
+                      key: ValueKey('pdf-form-type-checkbox'),
+                      value: PdfFormFieldKind.checkBox,
+                      child: Text('Check box'),
+                    ),
+                    PopupMenuItem(
+                      key: ValueKey('pdf-form-type-button'),
+                      value: PdfFormFieldKind.pushButton,
+                      child: Text('Image button'),
+                    ),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(Icons.layers_clear_outlined),
+                  tooltip: 'Flatten form — bake values into the pages',
+                  onPressed: controller.acroForm == null
+                      ? null
+                      : controller.flattenFormFields,
+                ),
+              ],
               if (controller.selectedElement != null) ...[
                 IconButton(
                   icon: const Icon(Icons.delete_outline),

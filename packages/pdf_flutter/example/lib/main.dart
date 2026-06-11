@@ -20,6 +20,20 @@ const _pdfTypeGroup = XTypeGroup(
   uniformTypeIdentifiers: ['com.adobe.pdf'],
 );
 
+/// Images the form tool's push-button fill accepts.
+const _imageTypeGroup = XTypeGroup(
+  label: 'Images',
+  extensions: ['png', 'jpg', 'jpeg'],
+  mimeTypes: ['image/png', 'image/jpeg'],
+  uniformTypeIdentifiers: ['public.png', 'public.jpeg'],
+);
+
+/// The form tool's image picker: tapped push-button fields (signature
+/// and logo slots in templates) fill with the chosen PNG or JPEG.
+Future<Uint8List?> _pickFormImage(BuildContext context, PdfFormField field) =>
+    openFile(acceptedTypeGroups: const [_imageTypeGroup])
+        .then((file) => file?.readAsBytes());
+
 void main() => runApp(const ViewerApp());
 
 class ViewerApp extends StatefulWidget {
@@ -491,6 +505,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     pageOverlayBuilder: _isDemo ? _demoOverlays : null,
                     editing: session,
                     annotationMenuBuilder: _annotationMenuActions,
+                    formImagePicker: _pickFormImage,
                     pageColor: _prefs.pageColor,
                   ),
                 ),

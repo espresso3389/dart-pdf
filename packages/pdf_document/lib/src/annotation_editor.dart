@@ -227,6 +227,80 @@ double _distanceToSegment(
   return math.sqrt(ex * ex + ey * ey);
 }
 
+/// Whether [PdfAnnotationEditing.restyleAnnotation] can faithfully
+/// regenerate [annotation]'s appearance — the gate UI style controls
+/// should check before offering to restyle a selection.
+///
+/// True for the subtypes the editor authors (shapes, ink, free text,
+/// the four text markups, notes, stamps) when the dictionary carries
+/// enough style to rebuild the artwork: shapes must not be cloudy
+/// (/BE) or dashed (/BS /D), free text needs a standard-font /DA, ink
+/// needs a usable /InkList, markups need axis-aligned /QuadPoints,
+/// stamps need their caption in /Contents.
+bool pdfCanRestyleAnnotation(PdfAnnotation annotation) {
+  final cos = annotation.document.cos;
+  switch (annotation.subtype) {
+    case 'Square' || 'Circle':
+      if (annotation.normalAppearance == null) return false;
+      if (annotation.dict['BE'] != null) return false;
+      final bs = cos.resolve(annotation.dict['BS']);
+      return bs is! CosDictionary || bs['D'] == null;
+    case 'FreeText':
+      if (annotation.normalAppearance == null) return false;
+      final style = annotation.freeTextStyle;
+      return style != null &&
+          PdfStandardFont.tryFromName(style.fontName) != null;
+    case 'Ink':
+      return annotation.inkList?.isNotEmpty ?? false;
+    case 'Highlight' || 'Underline' || 'StrikeOut' || 'Squiggly':
+      return _axisAlignedQuads(annotation) != null;
+    case 'Text':
+      return annotation.normalAppearance != null;
+    case 'Stamp':
+      return annotation.normalAppearance != null &&
+          (annotation.contents?.isNotEmpty ?? false);
+    default:
+      return false;
+  }
+}
+
+/// The /QuadPoints as one axis-aligned rect per quad, or null when they
+/// are absent, malformed, or rotated (every corner must sit on the
+/// quad's own bounds) — regenerating a markup repaints axis-aligned
+/// rects, so rotated quads can't restyle faithfully.
+List<PdfRect>? _axisAlignedQuads(PdfAnnotation annotation) {
+  final cos = annotation.document.cos;
+  final raw = cos.resolve(annotation.dict['QuadPoints']);
+  if (raw is! CosArray || raw.length == 0 || raw.length % 8 != 0) return null;
+  final values = <double>[];
+  for (var i = 0; i < raw.length; i++) {
+    final n = cos.resolve(raw[i]);
+    if (n is CosInteger) {
+      values.add(n.value.toDouble());
+    } else if (n is CosReal) {
+      values.add(n.value);
+    } else {
+      return null;
+    }
+  }
+  const eps = 0.01;
+  final quads = <PdfRect>[];
+  for (var q = 0; q + 7 < values.length; q += 8) {
+    final xs = [values[q], values[q + 2], values[q + 4], values[q + 6]];
+    final ys = [values[q + 1], values[q + 3], values[q + 5], values[q + 7]];
+    final minX = xs.reduce(math.min), maxX = xs.reduce(math.max);
+    final minY = ys.reduce(math.min), maxY = ys.reduce(math.max);
+    for (final x in xs) {
+      if ((x - minX).abs() > eps && (x - maxX).abs() > eps) return null;
+    }
+    for (final y in ys) {
+      if ((y - minY).abs() > eps && (y - maxY).abs() > eps) return null;
+    }
+    quads.add(PdfRect(minX, minY, maxX, maxY));
+  }
+  return quads;
+}
+
 /// Annotation authoring (§12.5): each method creates an annotation with a
 /// generated appearance stream (/AP → /N), so the result displays the same
 /// in this renderer and in other viewers.
@@ -247,24 +321,9 @@ extension PdfAnnotationEditing on PdfEditor {
     double opacity = 1,
     String? contents,
     String? author,
-  }) {
-    final rect = _boundsOf(quads);
-    final w = ContentWriter()
-      ..extGState('GS0')
-      ..fillColor(color);
-    for (final q in quads) {
-      w.rect(q.left, q.bottom, q.width, q.height);
-    }
-    w.fill();
-    _addAnnotation(
-      pageIndex,
-      _markupDict('Highlight', rect, color, contents, author)
-        ..['QuadPoints'] = _quadPoints(quads),
-      _form(rect, w,
-          resources:
-              _resources(extGState: _alphaState(opacity, multiply: true))),
-    );
-  }
+  }) =>
+      _addTextMarkup(
+          'Highlight', pageIndex, quads, color, opacity, contents, author);
 
   /// Adds an underline beneath each quad in [quads].
   void addUnderline(int pageIndex, List<PdfRect> quads,
@@ -272,9 +331,8 @@ extension PdfAnnotationEditing on PdfEditor {
           double opacity = 1,
           String? contents,
           String? author}) =>
-      _addLineMarkup(
-          'Underline', pageIndex, quads, color, opacity, contents, author,
-          atHeight: 0.08);
+      _addTextMarkup(
+          'Underline', pageIndex, quads, color, opacity, contents, author);
 
   /// Adds a strike-out through each quad in [quads].
   void addStrikeOut(int pageIndex, List<PdfRect> quads,
@@ -282,38 +340,80 @@ extension PdfAnnotationEditing on PdfEditor {
           double opacity = 1,
           String? contents,
           String? author}) =>
-      _addLineMarkup(
-          'StrikeOut', pageIndex, quads, color, opacity, contents, author,
-          atHeight: 0.45);
+      _addTextMarkup(
+          'StrikeOut', pageIndex, quads, color, opacity, contents, author);
 
   /// Adds a squiggly (jagged) underline beneath each quad in [quads].
   void addSquiggly(int pageIndex, List<PdfRect> quads,
-      {int color = 0xD02020,
-      double opacity = 1,
-      String? contents,
-      String? author}) {
+          {int color = 0xD02020,
+          double opacity = 1,
+          String? contents,
+          String? author}) =>
+      _addTextMarkup(
+          'Squiggly', pageIndex, quads, color, opacity, contents, author);
+
+  void _addTextMarkup(String subtype, int pageIndex, List<PdfRect> quads,
+      int color, double opacity, String? contents, String? author) {
     final rect = _boundsOf(quads);
-    final w = ContentWriter()..strokeColor(color);
-    final gs = _alphaState(opacity);
-    if (gs != null) w.extGState('GS0');
-    for (final q in quads) {
-      final amplitude = q.height * 0.1;
-      final period = q.height * 0.3;
-      w.lineWidth((q.height * 0.05).clamp(0.5, 2.0));
-      w.moveTo(q.left, q.bottom + amplitude);
-      var up = true;
-      for (var x = q.left + period / 2; x < q.right; x += period / 2) {
-        w.lineTo(x, q.bottom + (up ? amplitude * 2 : 0));
-        up = !up;
-      }
-      w.stroke();
-    }
+    final (w, gs) = _markupContent(subtype, quads, color, opacity);
     _addAnnotation(
       pageIndex,
-      _markupDict('Squiggly', rect, color, contents, author)
+      _markupDict(subtype, rect, color, contents, author)
         ..['QuadPoints'] = _quadPoints(quads),
       _form(rect, w, resources: _resources(extGState: gs)),
     );
+  }
+
+  /// The text-markup appearance for [quads]: the content and the alpha
+  /// ExtGState (always present for highlights, whose Multiply blending
+  /// rides the same GS0). Shared by the markup creators and
+  /// [restyleAnnotation] so a restyled markup re-renders exactly like a
+  /// fresh one.
+  (ContentWriter, CosDictionary?) _markupContent(
+      String subtype, List<PdfRect> quads, int color, double opacity) {
+    switch (subtype) {
+      case 'Highlight':
+        final w = ContentWriter()
+          ..extGState('GS0')
+          ..fillColor(color);
+        for (final q in quads) {
+          w.rect(q.left, q.bottom, q.width, q.height);
+        }
+        w.fill();
+        return (w, _alphaState(opacity, multiply: true));
+      case 'Squiggly':
+        final w = ContentWriter()..strokeColor(color);
+        final gs = _alphaState(opacity);
+        if (gs != null) w.extGState('GS0');
+        for (final q in quads) {
+          final amplitude = q.height * 0.1;
+          final period = q.height * 0.3;
+          w.lineWidth((q.height * 0.05).clamp(0.5, 2.0));
+          w.moveTo(q.left, q.bottom + amplitude);
+          var up = true;
+          for (var x = q.left + period / 2; x < q.right; x += period / 2) {
+            w.lineTo(x, q.bottom + (up ? amplitude * 2 : 0));
+            up = !up;
+          }
+          w.stroke();
+        }
+        return (w, gs);
+      default: // 'Underline' || 'StrikeOut'
+        final atHeight = subtype == 'Underline' ? 0.08 : 0.45;
+        final w = ContentWriter();
+        final gs = _alphaState(opacity);
+        if (gs != null) w.extGState('GS0');
+        w.strokeColor(color);
+        for (final q in quads) {
+          final y = q.bottom + q.height * atHeight;
+          w
+            ..lineWidth((q.height * 0.06).clamp(0.5, 3.0))
+            ..moveTo(q.left, y)
+            ..lineTo(q.right, y)
+            ..stroke();
+        }
+        return (w, gs);
+    }
   }
 
   /// Adds a freehand ink annotation. Each stroke is a polyline of
@@ -731,6 +831,19 @@ extension PdfAnnotationEditing on PdfEditor {
   }) {
     const size = 20.0;
     final rect = PdfRect(x, y - size, x + size, y);
+    _addAnnotation(
+      pageIndex,
+      _markupDict('Text', rect, color, contents, author)
+        ..['Name'] = const CosName('Comment'),
+      _form(rect, _noteContent(rect, color)),
+    );
+  }
+
+  /// The sticky-note sheet appearance, drawn inside [rect]. Shared by
+  /// [addNote] and [restyleAnnotation].
+  ContentWriter _noteContent(PdfRect rect, int color) {
+    final x = rect.left, y = rect.top;
+    final size = rect.height;
     final w = ContentWriter()
       // note sheet
       ..fillColor(color)
@@ -748,12 +861,7 @@ extension PdfAnnotationEditing on PdfEditor {
         ..lineTo(x + size - 4, lineY)
         ..stroke();
     }
-    _addAnnotation(
-      pageIndex,
-      _markupDict('Text', rect, color, contents, author)
-        ..['Name'] = const CosName('Comment'),
-      _form(rect, w),
-    );
+    return w;
   }
 
   /// Adds a rubber-stamp annotation: [text] centered in bold inside a
@@ -766,6 +874,21 @@ extension PdfAnnotationEditing on PdfEditor {
     double opacity = 1,
     String? author,
   }) {
+    final (w, gs) = _stampContent(rect, text, color, opacity);
+    _addAnnotation(
+      pageIndex,
+      _markupDict('Stamp', rect, color, text, author),
+      _form(rect, w,
+          resources: _resources(
+              extGState: gs, font: _helvetica(bold: true, name: 'HelvB'))),
+    );
+  }
+
+  /// The rubber-stamp appearance: [text] centered in bold inside a
+  /// rounded border, sized to fit [rect]. Shared by [addStamp] and
+  /// [restyleAnnotation].
+  (ContentWriter, CosDictionary?) _stampContent(
+      PdfRect rect, String text, int color, double opacity) {
     const borderWidth = 2.0;
     const pad = 6.0;
     var fontSize = (rect.height - 2 * pad) * 0.72;
@@ -792,14 +915,7 @@ extension PdfAnnotationEditing on PdfEditor {
           rect.bottom + (rect.height - fontSize * 0.718) / 2)
       ..showText(text)
       ..endText();
-
-    _addAnnotation(
-      pageIndex,
-      _markupDict('Stamp', rect, color, text, author),
-      _form(rect, w,
-          resources: _resources(
-              extGState: gs, font: _helvetica(bold: true, name: 'HelvB'))),
-    );
+    return (w, gs);
   }
 
   /// Removes [annotation] from the page, along with its popup, if any.
@@ -1126,7 +1242,11 @@ extension PdfAnnotationEditing on PdfEditor {
   /// path — for other subtypes and for styles it can't reproduce
   /// faithfully: cloudy (/BE) or dashed (/BS /D) borders, free text
   /// whose /DA doesn't name a standard font.
-  bool _regenerateResizedAppearance(PdfAnnotation annotation, PdfRect to) {
+  ///
+  /// [opacity], when given, replaces the alpha the old appearance
+  /// carried — [restyleAnnotation]'s opacity path.
+  bool _regenerateResizedAppearance(PdfAnnotation annotation, PdfRect to,
+      {double? opacity}) {
     final form = annotation.normalAppearance;
     if (form == null) return false;
     final cos = document.cos;
@@ -1140,7 +1260,7 @@ extension PdfAnnotationEditing on PdfEditor {
         final stroke = width > 0 ? annotation.color : null;
         final fill = annotation.interiorColor;
         if (stroke == null && fill == null) return false;
-        final gs = _alphaState(_appearanceOpacity(form));
+        final gs = _alphaState(opacity ?? _appearanceOpacity(form));
         final w = _shapeContent(annotation.subtype, to, stroke, width, fill,
             hasAlpha: gs != null);
         _replaceAppearance(dict, form, to, w,
@@ -1165,6 +1285,206 @@ extension PdfAnnotationEditing on PdfEditor {
         return false;
     }
   }
+
+  /// Restyles [annotation] in place: new colors, stroke width, or
+  /// opacity at its current geometry, with the appearance regenerated —
+  /// same object numbers and /Annots slot, so selection, z-order,
+  /// author, and contents all survive (unlike a remove + re-add).
+  ///
+  /// What each parameter means per subtype:
+  ///
+  /// * [color] — the stroke color of shapes and ink, the markup tint,
+  ///   the note/stamp color, and the *text* color of free text.
+  /// * [fillColor] — the interior of shapes (/IC) and the background of
+  ///   free text (/C); the single-field record distinguishes "set to
+  ///   this" — including `(null,)`, clearing the fill — from an omitted
+  ///   parameter. Ignored elsewhere.
+  /// * [strokeWidth] — shapes and ink. Ignored elsewhere (markup line
+  ///   weights derive from the text size; free-text borders restyle
+  ///   through the text-style path).
+  /// * [opacity] — shapes, ink, markups, stamps. Free text and notes
+  ///   stay opaque, as authored.
+  ///
+  /// Rotation survives: a rotated appearance regenerates in its local
+  /// frame and re-rotates, exactly like [resizeAnnotationLocal].
+  /// Returns false when nothing applies — gate UI with
+  /// [pdfCanRestyleAnnotation].
+  bool restyleAnnotation(
+    int pageIndex,
+    PdfAnnotation annotation, {
+    int? color,
+    (int?,)? fillColor,
+    double? strokeWidth,
+    double? opacity,
+  }) {
+    if (color == null &&
+        fillColor == null &&
+        strokeWidth == null &&
+        opacity == null) {
+      return false;
+    }
+    if (!pdfCanRestyleAnnotation(annotation)) return false;
+    final dict = annotation.dict;
+    switch (annotation.subtype) {
+      case 'Ink':
+        final form = annotation.normalAppearance;
+        final strokes = annotation.inkList!;
+        final oldWidth = annotation.borderWidth ?? 1;
+        final pressures =
+            form == null ? null : _recoverInkPressures(form, strokes, oldWidth);
+        final newColor = color ?? annotation.color ?? 0x000000;
+        final newWidth = strokeWidth ?? oldWidth;
+        final newOpacity =
+            opacity ?? (form == null ? 1.0 : _appearanceOpacity(form));
+        final (rect, w, gs) =
+            _inkAppearance(strokes, pressures, newColor, newWidth, newOpacity);
+        dict['Rect'] = _rectArray(rect);
+        dict['C'] = _colorComponents(newColor);
+        dict['BS'] = _borderStyle(newWidth);
+        if (form != null) {
+          _replaceAppearance(dict, form, rect, w,
+              resources: _resources(extGState: gs));
+        } else {
+          dict['AP'] = CosDictionary({
+            'N': _updater
+                .addObject(_form(rect, w, resources: _resources(extGState: gs))),
+          });
+        }
+        _markAnnotationChanged(pageIndex, dict);
+        return true;
+      case 'Highlight' || 'Underline' || 'StrikeOut' || 'Squiggly':
+        final quads = _axisAlignedQuads(annotation)!;
+        final form = annotation.normalAppearance;
+        final newColor = color ?? annotation.color ?? 0xFFD100;
+        final newOpacity =
+            opacity ?? (form == null ? 1.0 : _appearanceOpacity(form));
+        final rect = _boundsOf(quads);
+        final (w, gs) =
+            _markupContent(annotation.subtype, quads, newColor, newOpacity);
+        dict['C'] = _colorComponents(newColor);
+        dict['Rect'] = _rectArray(rect);
+        if (form != null) {
+          _replaceAppearance(dict, form, rect, w,
+              resources: _resources(extGState: gs));
+        } else {
+          dict['AP'] = CosDictionary({
+            'N': _updater
+                .addObject(_form(rect, w, resources: _resources(extGState: gs))),
+          });
+        }
+        _markAnnotationChanged(pageIndex, dict);
+        return true;
+      case 'Square' || 'Circle':
+        final width = strokeWidth ?? annotation.borderWidth ?? 1;
+        final stroke = color ?? annotation.color;
+        final fill =
+            fillColor != null ? fillColor.$1 : annotation.interiorColor;
+        if ((stroke == null || width <= 0) && fill == null) return false;
+        if (stroke != null) dict['C'] = _colorComponents(stroke);
+        dict['BS'] = _borderStyle(width);
+        if (fill != null) {
+          dict['IC'] = _colorComponents(fill);
+        } else {
+          dict.entries.remove('IC');
+        }
+        return _restyleRegenerate(pageIndex, dict, opacity: opacity);
+      case 'FreeText':
+        final style = annotation.freeTextStyle!;
+        final font = PdfStandardFont.tryFromName(style.fontName)!;
+        final textColor = color ?? style.color;
+        final fill = fillColor != null ? fillColor.$1 : style.fillColor;
+        final border = style.borderColor != null && style.borderWidth > 0
+            ? style.borderColor
+            : null;
+        String rgb(int c) =>
+            ContentWriter.rgbComponents(c).map(ContentWriter.fmt).join(' ');
+        dict['DA'] = CosString.fromText('${rgb(textColor)} rg '
+            '${border != null ? '${rgb(border)} RG ' : ''}'
+            '/${font.resourceName} ${ContentWriter.fmt(style.fontSize)} Tf');
+        // /C is the background — or mirrors the text color when there is
+        // none, the legacy form freeTextStyle reads back as "no fill"
+        dict['C'] = _colorComponents(fill ?? textColor);
+        return _restyleRegenerate(pageIndex, dict);
+      case 'Text':
+        dict['C'] = _colorComponents(color ?? annotation.color ?? 0xFFD100);
+        return _restyleRegenerate(pageIndex, dict);
+      case 'Stamp':
+        dict['C'] = _colorComponents(color ?? annotation.color ?? 0xC03030);
+        return _restyleRegenerate(pageIndex, dict, opacity: opacity);
+    }
+    return false;
+  }
+
+  /// Regenerates an annotation's appearance after its dictionary style
+  /// changed, preserving any rotation the appearance matrix carries:
+  /// unrotated annotations regenerate at their /Rect; rotated ones
+  /// regenerate in their local frame and re-rotate (the
+  /// [resizeAnnotationLocal] shape, at the same size).
+  bool _restyleRegenerate(int pageIndex, CosDictionary dict,
+      {double? opacity}) {
+    // re-wrap: /Rect and style entries are parsed at construction or
+    // lazily, and the dict just changed under the caller's instance
+    final annotation = PdfAnnotation.fromDict(document, dict);
+    final quad = annotation.appearanceQuad;
+    final theta = quad == null ? 0.0 : _quadRotation(quad);
+    if (theta == 0) {
+      if (!_regenerateStyledAppearance(annotation, annotation.rect,
+          opacity: opacity)) {
+        return false;
+      }
+      _markAnnotationChanged(pageIndex, dict);
+      return true;
+    }
+    final (llx, lly) = quad![0];
+    final (lrx, lry) = quad[1];
+    final (urx, ury) = quad[2];
+    final (ulx, uly) = quad[3];
+    final cx = (llx + urx) / 2, cy = (lly + ury) / 2;
+    final w = math.sqrt((lrx - llx) * (lrx - llx) + (lry - lly) * (lry - lly));
+    final h = math.sqrt((ulx - llx) * (ulx - llx) + (uly - lly) * (uly - lly));
+    if (w < 1e-9 || h < 1e-9) return false;
+    final local = PdfRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2);
+    if (!_regenerateStyledAppearance(annotation, local, opacity: opacity)) {
+      return false;
+    }
+    dict['Rect'] = _rectArray(local);
+    rotateAnnotation(pageIndex, PdfAnnotation.fromDict(document, dict),
+        theta * 180 / math.pi);
+    return true;
+  }
+
+  /// [_regenerateResizedAppearance] widened to the restyle-only
+  /// subtypes (stamps, notes), which regenerate at their current size
+  /// but never resize this way.
+  bool _regenerateStyledAppearance(PdfAnnotation annotation, PdfRect to,
+      {double? opacity}) {
+    switch (annotation.subtype) {
+      case 'Square' || 'Circle' || 'FreeText':
+        return _regenerateResizedAppearance(annotation, to, opacity: opacity);
+      case 'Stamp':
+        final form = annotation.normalAppearance;
+        if (form == null) return false;
+        final color = annotation.color ?? 0xC03030;
+        final (w, gs) = _stampContent(to, annotation.contents ?? '', color,
+            opacity ?? _appearanceOpacity(form));
+        _replaceAppearance(annotation.dict, form, to, w,
+            resources: _resources(
+                extGState: gs, font: _helvetica(bold: true, name: 'HelvB')));
+        return true;
+      case 'Text':
+        final form = annotation.normalAppearance;
+        if (form == null) return false;
+        final color = annotation.color ?? 0xFFD100;
+        _replaceAppearance(annotation.dict, form, to, _noteContent(to, color));
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  CosArray _colorComponents(int color) => CosArray([
+        for (final c in ContentWriter.rgbComponents(color)) CosReal(c),
+      ]);
 
   /// The constant alpha an appearance we generated carries: the first
   /// /ca found in its /Resources /ExtGState entries, else opaque. (The
@@ -1459,37 +1779,6 @@ extension PdfAnnotationEditing on PdfEditor {
     final bytes = Uint8List.fromList(text.codeUnits);
     return CosStream(
         CosDictionary({'Length': CosInteger(bytes.length)}), bytes);
-  }
-
-  void _addLineMarkup(
-    String subtype,
-    int pageIndex,
-    List<PdfRect> quads,
-    int color,
-    double opacity,
-    String? contents,
-    String? author, {
-    required double atHeight,
-  }) {
-    final rect = _boundsOf(quads);
-    final w = ContentWriter();
-    final gs = _alphaState(opacity);
-    if (gs != null) w.extGState('GS0');
-    w.strokeColor(color);
-    for (final q in quads) {
-      final y = q.bottom + q.height * atHeight;
-      w
-        ..lineWidth((q.height * 0.06).clamp(0.5, 3.0))
-        ..moveTo(q.left, y)
-        ..lineTo(q.right, y)
-        ..stroke();
-    }
-    _addAnnotation(
-      pageIndex,
-      _markupDict(subtype, rect, color, contents, author)
-        ..['QuadPoints'] = _quadPoints(quads),
-      _form(rect, w, resources: _resources(extGState: gs)),
-    );
   }
 
   void _addShape(

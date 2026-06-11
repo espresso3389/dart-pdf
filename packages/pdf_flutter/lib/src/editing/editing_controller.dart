@@ -1150,6 +1150,172 @@ class PdfEditingController extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------
+  // clipboard
+
+  /// The in-app annotation clipboard: detached snapshots that survive
+  /// edits, undo, and document swaps (PDF annotations don't round-trip
+  /// the OS clipboard). Filled by copy/cut, consumed by
+  /// [pasteAnnotations].
+  List<PdfAnnotationSnapshot> _clipboard = const [];
+  int _clipboardSourcePage = -1;
+
+  /// Pastes since the clipboard was last filled — each one cascades the
+  /// default paste position by another 12pt so copies don't stack.
+  int _pasteCount = 0;
+
+  /// Whether [pasteAnnotations] has anything to paste.
+  bool get hasAnnotationClipboard => _clipboard.isNotEmpty;
+
+  /// Copies the selected annotations to the in-app clipboard as
+  /// detached snapshots. Popups, links, and form widgets never copy
+  /// (they can't be selected either). Returns how many were copied; the
+  /// document is untouched.
+  int copySelectedAnnotations() {
+    final snapshots = <PdfAnnotationSnapshot>[];
+    for (final slot in _selected) {
+      final annotation = _annotationAt(slot);
+      if (annotation == null) continue;
+      final snapshot = PdfAnnotationSnapshot.capture(_document, annotation);
+      if (snapshot != null) snapshots.add(snapshot);
+    }
+    if (snapshots.isEmpty) return 0;
+    _clipboard = snapshots;
+    _clipboardSourcePage = _selected.last.$1;
+    _pasteCount = 0;
+    notifyListeners();
+    return snapshots.length;
+  }
+
+  /// Copy + delete in one gesture (⌘X). The deletion is a single undo
+  /// step; the clipboard itself is not part of document history, so
+  /// undoing a cut leaves the clipboard filled.
+  int cutSelectedAnnotations() {
+    final copied = copySelectedAnnotations();
+    if (copied > 0) deleteSelected();
+    return copied;
+  }
+
+  /// Pastes the clipboard onto [pageIndex] and selects the pasted
+  /// annotations (one revision — one undo removes them all).
+  ///
+  /// With [at] the group centers on that page point (the context menu
+  /// pastes where the right-click landed). Without it the group keeps
+  /// its position, shifted 12pt down-right per repeat paste — and per
+  /// the first paste too when it would sit exactly on the source. The
+  /// group always clamps into the page's crop box. Returns whether
+  /// anything was pasted.
+  bool pasteAnnotations(int pageIndex, {(double, double)? at}) {
+    if (_clipboard.isEmpty) return false;
+    if (pageIndex < 0 || pageIndex >= _document.pageCount) return false;
+    var left = double.infinity, bottom = double.infinity;
+    var right = double.negativeInfinity, top = double.negativeInfinity;
+    for (final snapshot in _clipboard) {
+      final r = snapshot.rect;
+      if (r.left < left) left = r.left;
+      if (r.bottom < bottom) bottom = r.bottom;
+      if (r.right > right) right = r.right;
+      if (r.top > top) top = r.top;
+    }
+    double dx, dy;
+    if (at != null) {
+      dx = at.$1 - (left + right) / 2;
+      dy = at.$2 - (bottom + top) / 2;
+    } else {
+      final cascade = 12.0 *
+          (pageIndex == _clipboardSourcePage ? _pasteCount + 1 : _pasteCount);
+      dx = cascade;
+      dy = -cascade;
+    }
+    final box = _page(pageIndex).cropBox;
+    dx += _clampShift(left + dx, right + dx, box.left, box.right);
+    dy += _clampShift(bottom + dy, top + dy, box.bottom, box.top);
+    final count = _clipboard.length;
+    final pasted = apply((e) {
+      for (final snapshot in _clipboard) {
+        e.pasteAnnotation(pageIndex, snapshot, dx: dx, dy: dy);
+      }
+    }, pages: [pageIndex]);
+    if (!pasted) return false;
+    _pasteCount++;
+    // pasted entries appended to /Annots — select them, like any editor
+    tool = PdfEditTool.select;
+    final total = _page(pageIndex).annotations.length;
+    _selected
+      ..clear()
+      ..addAll([for (var i = total - count; i < total; i++) (pageIndex, i)]);
+    notifyListeners();
+    return true;
+  }
+
+  /// How far to move the interval [lo, hi] so it fits inside
+  /// [min, max]; an oversized interval pins to the low edge.
+  static double _clampShift(double lo, double hi, double min, double max) {
+    if (hi - lo >= max - min || lo < min) return min - lo;
+    if (hi > max) return max - hi;
+    return 0;
+  }
+
+  // ---------------------------------------------------------------------
+  // restyle
+
+  /// Whether [restyleSelected] can recolor everything selected in place
+  /// (see [pdfCanRestyleAnnotation] for the per-subtype conditions).
+  bool get canRestyleSelected =>
+      _selected.isNotEmpty &&
+      _selected.every((slot) {
+        final annotation = _annotationAt(slot);
+        return annotation != null && pdfCanRestyleAnnotation(annotation);
+      });
+
+  /// The primary selected annotation's current style, for style controls
+  /// to display: its main color (the text color for free text), border
+  /// width (null for subtypes without one), and baked-in opacity. Null
+  /// without a selection.
+  ({Color color, double? strokeWidth, double opacity})?
+      get selectedAnnotationStyle {
+    final annotation = selectedAnnotation;
+    if (annotation == null) return null;
+    final rgb = annotation.subtype == 'FreeText'
+        ? annotation.freeTextStyle?.color ?? annotation.color
+        : annotation.color;
+    return (
+      color: Color(0xFF000000 | (rgb ?? 0)),
+      strokeWidth: annotation.borderWidth,
+      opacity: annotation.appearanceOpacity,
+    );
+  }
+
+  /// Restyles every selected annotation in place — one revision, one
+  /// undo, and the selection survives (annotations keep their /Annots
+  /// slots). Parameters follow [PdfEditor.restyleAnnotation]: [color]
+  /// is the stroke/tint (free text's *text* color), [fill] the shape
+  /// interior or text-box background (`(null,)` clears it), and
+  /// parameters a subtype doesn't have are ignored for it. Returns
+  /// whether anything changed.
+  bool restyleSelected(
+      {Color? color, (Color?,)? fill, double? strokeWidth, double? opacity}) {
+    if (color == null && fill == null && strokeWidth == null &&
+        opacity == null) {
+      return false;
+    }
+    if (!canRestyleSelected) return false;
+    final targets = <(int, PdfAnnotation)>[
+      for (final slot in _selected)
+        if (_annotationAt(slot) case final annotation?) (slot.$1, annotation)
+    ];
+    if (targets.isEmpty) return false;
+    return apply((e) {
+      for (final (page, annotation) in targets) {
+        e.restyleAnnotation(page, annotation,
+            color: _rgbOf(color),
+            fillColor: fill == null ? null : (_rgbOf(fill.$1),),
+            strokeWidth: strokeWidth,
+            opacity: opacity);
+      }
+    }, pages: [for (final (page, _) in targets) page]);
+  }
+
+  // ---------------------------------------------------------------------
   // attention flash
 
   ({PdfDocument document, int page, int slot})? _flash;

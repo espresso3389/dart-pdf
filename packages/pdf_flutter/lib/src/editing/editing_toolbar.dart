@@ -60,6 +60,14 @@ class PdfEditingToolbar extends StatelessWidget {
     controller.addMarkup(kind, quadsByPage);
   }
 
+  /// Sets the creation color — and recolors the selected annotations in
+  /// place when the whole selection restyles (Ben-comment #11: "change
+  /// the style of a selected annotation").
+  void _applyColor(Color color) {
+    controller.color = color;
+    if (controller.canRestyleSelected) controller.restyleSelected(color: color);
+  }
+
   void _toggleTool(PdfEditTool value) {
     controller.tool = controller.tool == value ? null : value;
     if (controller.tool != null) viewerController.clearSelection();
@@ -297,7 +305,7 @@ class PdfEditingToolbar extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   child: InkWell(
-                    onTap: () => controller.color = color,
+                    onTap: () => _applyColor(color),
                     customBorder: const CircleBorder(),
                     child: Container(
                       width: 22,
@@ -326,7 +334,7 @@ class PdfEditingToolbar extends StatelessWidget {
                           controller.preferences.colorPickerFormat,
                       onFormatChanged: (format) =>
                           controller.preferences.colorPickerFormat = format);
-                  if (picked != null) controller.color = picked;
+                  if (picked != null) _applyColor(picked);
                 },
               ),
               IconButton(
@@ -382,6 +390,11 @@ class _StyleMenuState extends State<_StyleMenu> {
   /// selected annotation — the annotation only restyles on release (one
   /// revision per gesture), so the thumb needs its own state meanwhile.
   double? _draggingFontSize;
+
+  /// Same, for the stroke-width and opacity sliders restyling a
+  /// selected annotation.
+  double? _draggingStroke;
+  double? _draggingOpacity;
 
   void _setFontFamily(PdfStandardFont font) {
     controller.fontFamily = font; // the new default either way
@@ -493,6 +506,18 @@ class _StyleMenuState extends State<_StyleMenu> {
           listenable: controller,
           builder: (context, _) {
             final selectedStyle = controller.selectedTextStyle;
+            // with a restylable selection the stroke/opacity sliders
+            // show — and change — its style; otherwise the defaults
+            final restylingAnnotation = controller.canRestyleSelected;
+            final annotationStyle = restylingAnnotation
+                ? controller.selectedAnnotationStyle
+                : null;
+            final strokeValue = _draggingStroke ??
+                annotationStyle?.strokeWidth ??
+                controller.strokeWidth;
+            final opacityValue = _draggingOpacity ??
+                annotationStyle?.opacity ??
+                controller.opacity;
             // with a free text selected the rows show its own box style;
             // otherwise the creation defaults
             final restyling = controller.canRestyleSelectedText;
@@ -517,11 +542,21 @@ class _StyleMenuState extends State<_StyleMenu> {
                 children: [
                   _slider(
                     label: 'Stroke width',
-                    value: controller.strokeWidth,
+                    value: strokeValue,
                     min: 0.5,
                     max: 12,
-                    display: '${controller.strokeWidth.toStringAsFixed(1)} pt',
-                    onChanged: (v) => controller.strokeWidth = v,
+                    display: '${strokeValue.toStringAsFixed(1)} pt',
+                    onChanged: (v) {
+                      setState(() => _draggingStroke = v);
+                      if (!restylingAnnotation) controller.strokeWidth = v;
+                    },
+                    onChangeEnd: (v) {
+                      controller.strokeWidth = v;
+                      if (restylingAnnotation) {
+                        controller.restyleSelected(strokeWidth: v);
+                      }
+                      setState(() => _draggingStroke = null);
+                    },
                   ),
                   if (controller.tool == PdfEditTool.eraser)
                     _slider(
@@ -537,11 +572,21 @@ class _StyleMenuState extends State<_StyleMenu> {
                     ),
                   _slider(
                     label: 'Opacity',
-                    value: controller.opacity,
+                    value: opacityValue,
                     min: 0.1,
                     max: 1,
-                    display: '${(controller.opacity * 100).round()}%',
-                    onChanged: (v) => controller.opacity = v,
+                    display: '${(opacityValue * 100).round()}%',
+                    onChanged: (v) {
+                      setState(() => _draggingOpacity = v);
+                      if (!restylingAnnotation) controller.opacity = v;
+                    },
+                    onChangeEnd: (v) {
+                      controller.opacity = v;
+                      if (restylingAnnotation) {
+                        controller.restyleSelected(opacity: v);
+                      }
+                      setState(() => _draggingOpacity = null);
+                    },
                   ),
                   _slider(
                     label: 'Font size',

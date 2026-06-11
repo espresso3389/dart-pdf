@@ -66,40 +66,73 @@ typedef PdfAnnotationMenuBuilder = List<PdfAnnotationMenuItem> Function(
     BuildContext context, PdfAnnotationMenuRequest request);
 
 /// Shows the annotation context menu at [position] (global coordinates)
-/// for [controller]'s current selection: bring to front, send to back,
-/// delete, then whatever [customActions] adds. Resolves when the menu
-/// closes, after the picked action ran.
+/// for [controller]'s current selection: copy/cut/paste, bring to
+/// front, send to back, delete, then whatever [customActions] adds.
+/// Resolves when the menu closes, after the picked action ran.
+///
+/// [pagePoint] is where on the page the menu was opened (page space) —
+/// Paste centers the clipboard there; without it the paste falls back
+/// to [PdfEditingController.pasteAnnotations]' cascade. With nothing
+/// selected the menu still opens when the clipboard has content (the
+/// empty-area right-click), offering Paste alone.
 Future<void> showPdfAnnotationMenu({
   required BuildContext context,
   required Offset position,
   required PdfEditingController controller,
   required int pageIndex,
   PdfAnnotationMenuBuilder? customActions,
+  (double, double)? pagePoint,
 }) async {
   final request = PdfAnnotationMenuRequest._(controller, pageIndex);
-  if (request.annotations.isEmpty) return;
+  final canPaste = controller.hasAnnotationClipboard;
+  final hasSelection = request.annotations.isNotEmpty;
+  if (!hasSelection && !canPaste) return;
   final stock = <PdfAnnotationMenuItem>[
+    if (hasSelection) ...[
+      PdfAnnotationMenuItem(
+        key: const ValueKey('pdf-annot-menu-copy'),
+        label: 'Copy',
+        icon: Icons.copy,
+        onSelected: (request) => request.controller.copySelectedAnnotations(),
+      ),
+      PdfAnnotationMenuItem(
+        key: const ValueKey('pdf-annot-menu-cut'),
+        label: 'Cut',
+        icon: Icons.cut,
+        onSelected: (request) => request.controller.cutSelectedAnnotations(),
+      ),
+    ],
     PdfAnnotationMenuItem(
-      key: const ValueKey('pdf-annot-menu-front'),
-      label: 'Bring to front',
-      icon: Icons.flip_to_front,
-      enabled: controller.canBringSelectedToFront,
-      onSelected: (request) => request.controller.bringSelectedToFront(),
+      key: const ValueKey('pdf-annot-menu-paste'),
+      label: 'Paste',
+      icon: Icons.paste,
+      enabled: canPaste,
+      onSelected: (request) =>
+          request.controller.pasteAnnotations(pageIndex, at: pagePoint),
     ),
-    PdfAnnotationMenuItem(
-      key: const ValueKey('pdf-annot-menu-back'),
-      label: 'Send to back',
-      icon: Icons.flip_to_back,
-      enabled: controller.canSendSelectedToBack,
-      onSelected: (request) => request.controller.sendSelectedToBack(),
-    ),
-    PdfAnnotationMenuItem(
-      key: const ValueKey('pdf-annot-menu-delete'),
-      label: 'Delete',
-      icon: Icons.delete_outline,
-      enabled: true,
-      onSelected: (request) => request.controller.deleteSelected(),
-    ),
+    if (hasSelection) ...[
+      PdfAnnotationMenuItem(
+        key: const ValueKey('pdf-annot-menu-front'),
+        label: 'Bring to front',
+        icon: Icons.flip_to_front,
+        enabled: controller.canBringSelectedToFront,
+        onSelected: (request) => request.controller.bringSelectedToFront(),
+      ),
+      PdfAnnotationMenuItem(
+        key: const ValueKey('pdf-annot-menu-back'),
+        label: 'Send to back',
+        icon: Icons.flip_to_back,
+        enabled: controller.canSendSelectedToBack,
+        onSelected: (request) => request.controller.sendSelectedToBack(),
+      ),
+      PdfAnnotationMenuItem(
+        key: const ValueKey('pdf-annot-menu-delete'),
+        label: 'Delete',
+        icon: Icons.delete_outline,
+        enabled: true,
+        onSelected: (request) => request.controller.deleteSelected(),
+      ),
+    ],
   ];
   final custom = customActions?.call(context, request) ??
       const <PdfAnnotationMenuItem>[];

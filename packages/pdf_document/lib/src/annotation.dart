@@ -249,6 +249,29 @@ class PdfAnnotation {
     return n is CosStream ? n : null;
   }
 
+  /// The constant alpha the normal appearance carries: the first /ca
+  /// among its /Resources /ExtGState entries — where [PdfEditor]-authored
+  /// annotations store their opacity (they deliberately write no dict
+  /// /CA, which conforming viewers would apply *on top* of the alpha
+  /// already baked into the appearance). 1.0 without one.
+  double get appearanceOpacity {
+    final cos = document.cos;
+    final form = normalAppearance;
+    if (form == null) return 1;
+    final resources = cos.resolve(form.dictionary['Resources']);
+    if (resources is! CosDictionary) return 1;
+    final ext = cos.resolve(resources['ExtGState']);
+    if (ext is! CosDictionary) return 1;
+    for (final entry in ext.entries.values) {
+      final gs = cos.resolve(entry);
+      if (gs is! CosDictionary) continue;
+      final ca = cos.resolve(gs['ca']);
+      if (ca is CosInteger) return ca.value.toDouble().clamp(0.0, 1.0);
+      if (ca is CosReal) return ca.value.clamp(0.0, 1.0);
+    }
+    return 1;
+  }
+
   /// The page-space corners of the normal appearance's /BBox after its
   /// /Matrix and the §12.5.5 fit onto [rect], in BBox corner order:
   /// lower-left, lower-right, upper-right, upper-left.

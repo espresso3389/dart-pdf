@@ -962,9 +962,14 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       return;
     }
     final hit = editing.selectableAnnotationAt(page, x, y);
-    if (hit == null) return;
-    if (!editing.isAnnotationSelected(page, hit.$1)) {
-      editing.selectAnnotationAt(page, x, y);
+    if (hit != null) {
+      if (!editing.isAnnotationSelected(page, hit.$1)) {
+        editing.selectAnnotationAt(page, x, y);
+      }
+    } else if (!editing.hasAnnotationClipboard) {
+      // empty page area only carries a menu once there is something to
+      // paste there
+      return;
     }
     await showPdfAnnotationMenu(
       context: context,
@@ -972,6 +977,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       controller: editing,
       pageIndex: page,
       customActions: widget.annotationMenuBuilder,
+      pagePoint: (x, y),
     );
   }
 
@@ -1059,6 +1065,27 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       cursor = SystemMouseCursors.grab;
     }
     if (cursor != _hoverCursor) setState(() => _hoverCursor = cursor);
+  }
+
+  /// ⌘C/Ctrl+C: an annotation selection copies to the editing
+  /// controller's clipboard; otherwise the text selection copies to the
+  /// system clipboard.
+  void _onCopy() {
+    final editing = widget.editing;
+    if (editing != null && editing.hasAnnotationSelection) {
+      if (editing.copySelectedAnnotations() > 0) return;
+    }
+    _controller.copySelection();
+  }
+
+  /// ⌘X/Ctrl+X: cut the selected annotations (copy + delete).
+  void _onCut() => widget.editing?.cutSelectedAnnotations();
+
+  /// ⌘V/Ctrl+V: paste the annotation clipboard onto the current page.
+  void _onPaste() {
+    final editing = widget.editing;
+    if (editing == null || !editing.hasAnnotationClipboard) return;
+    editing.pasteAnnotations(_controller.currentPage);
   }
 
   /// ⌘A/Ctrl+A: with the select tool armed (or an annotation selection
@@ -1810,9 +1837,9 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
             ? const {}
             : {
                 const SingleActivator(LogicalKeyboardKey.keyC, meta: true):
-                    _controller.copySelection,
+                    _onCopy,
                 const SingleActivator(LogicalKeyboardKey.keyC, control: true):
-                    _controller.copySelection,
+                    _onCopy,
                 const SingleActivator(LogicalKeyboardKey.keyA, meta: true):
                     _onSelectAll,
                 const SingleActivator(LogicalKeyboardKey.keyA, control: true):
@@ -1829,6 +1856,14 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                       control: true, shift: true): editing.redo,
                   const SingleActivator(LogicalKeyboardKey.keyY, control: true):
                       editing.redo,
+                  const SingleActivator(LogicalKeyboardKey.keyX, meta: true):
+                      _onCut,
+                  const SingleActivator(LogicalKeyboardKey.keyX, control: true):
+                      _onCut,
+                  const SingleActivator(LogicalKeyboardKey.keyV, meta: true):
+                      _onPaste,
+                  const SingleActivator(LogicalKeyboardKey.keyV, control: true):
+                      _onPaste,
                   const SingleActivator(LogicalKeyboardKey.delete):
                       editing.deleteSelected,
                   const SingleActivator(LogicalKeyboardKey.backspace):

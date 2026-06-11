@@ -235,7 +235,8 @@ flow). And the signature tool shows the signature riding the pointer —
 hover with a mouse, press-and-drag on touch — at exactly the size and
 position a tap or release will stamp.
 Right-clicking an annotation opens a context menu (two-finger tap on a
-trackpad): bring to front, send to back, delete. Z-order edits reorder
+trackpad): copy, cut, paste, bring to front, send to back, delete.
+Z-order edits reorder
 the page's /Annots array — the PDF's painting order — so they stick in
 any viewer; a multi-selection moves as a block keeping its internal
 order, the menu entries disable when they'd change nothing, and the
@@ -244,6 +245,27 @@ menu through `PdfViewer.annotationMenuBuilder`: return
 `PdfAnnotationMenuItem`s and they appear below a divider, each handed
 the selection it acts on (the example app adds "Copy text" for
 annotations that carry any).
+Copy, cut, and paste work the way a vector editor's do — ⌘C/⌘X/⌘V (or
+Ctrl) and the context menu. Copies are deep snapshots of the
+annotation and its appearance, detached from any document, so they
+survive edits, undo, and even switching files: paste onto another
+page, after undoing the original away, or into a different document
+entirely. Pasting from the menu drops the copy centered on the
+right-click point (an empty-area right-click offers paste alone);
+pasting with the keyboard keeps the position, stepping each repeat
+12pt down-right so copies don't stack invisibly — and everything
+clamps to stay on the page. A paste selects what it pasted, and a
+multi-annotation paste is one undo step.
+Any authored annotation restyles in place: with shapes, ink, markups,
+notes, stamps, or text boxes selected, the palette recolors them and
+the stroke-width and opacity sliders show — and change — the
+selection's own values, committing one revision per slider release.
+Restyling regenerates the appearance at the current geometry (ink
+keeps its pressure-variable widths, highlights keep their Multiply
+blending, rotated artwork keeps its turn), and because the rewrite
+keeps object numbers, the selection, z-order, author, and comments
+all survive. Free text maps the palette color to its text color, with
+fill and border still on their own swatch rows.
 Fast scrolling stays smooth on heavy documents: pages flying past
 during a fling defer their first interpretation — the expensive part
 of rendering — until the scroll settles, showing the paper color

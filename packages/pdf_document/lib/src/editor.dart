@@ -14,6 +14,7 @@ import 'image.dart';
 import 'page.dart';
 import 'rect.dart';
 
+part 'annotation_clipboard.dart';
 part 'annotation_editor.dart';
 part 'content_editor.dart';
 part 'form_admin.dart';

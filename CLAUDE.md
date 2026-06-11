@@ -1153,3 +1153,64 @@ search, page-number jump field, slimmer search bar + results panel,
 PDF.js corpus, restyle-any-selected-annotation; crypto comment
 answered (package:crypto is digest-only — AES/RC4/RSA/ECDSA aren't in
 it, no duplication).
+Batch 4, session 2 (clipboard & restyle): two features.
+(1) Copy/cut/paste: `PdfAnnotationSnapshot` (annotation_clipboard.dart,
+new part of editor.dart) — `capture(doc, annotation)` deep-copies the
+dict fully INLINE (references resolve and duplicate, streams keep raw
+bytes with /Filter intact; encrypted sources decrypt-only via
+stopBeforeFilter like _PageImporter), drops P/Popup/Parent/IRT/RT/NM/
+StructParent/OC, refuses Popup/Link/Widget (null). Detached → survives
+undo, revisions, and crosses documents. `PdfEditor.pasteAnnotation(
+page, snapshot, dx:, dy:)` re-materializes per paste (copies never
+share structure), shifts Rect + QuadPoints/L/Vertices/CL/InkList, then
+`_hoistStreams` (children-first: every inline CosStream → addObject
+reference, §7.3.8) and appends to /Annots. Controller: `_clipboard`
+(in-app; PDF annots don't round-trip the OS clipboard),
+copySelectedAnnotations/cutSelectedAnnotations (cut = copy +
+deleteSelected, one undo) / `pasteAnnotations(page, at:)` — at: centers
+the group on the point (menu paste at right-click), else cascade
+12pt·n down-right (n+1 on the source page so paste #1 doesn't cover
+the original; counter resets per copy), `_clampShift` keeps the group
+in the crop box (oversize pins low edge); paste arms select +
+selects the appended slots (last N). Viewer: ⌘C routes annotation
+selection → clipboard, else text copy; ⌘X/⌘V new (bound only when
+editing != null; all disabled while isEditingText). Menu keys
+'pdf-annot-menu-copy'/'-cut'/'-paste' (paste disabled w/o clipboard);
+empty-area right-click now shows the menu IFF clipboard non-empty
+(hasSelection false → paste-only menu; showPdfAnnotationMenu gained
+`pagePoint`). Re-copy after paste copies the PASTED annots (selection
+moved) — test gotcha.
+(2) Restyle any selected annotation (#11): `PdfEditor.restyleAnnotation
+(page, annot, {color, fillColor: (int?,)?, strokeWidth, opacity})` —
+IN PLACE (object numbers + slots survive, vs _rewriteSelected's
+remove+re-add): Ink rewrites /C /BS /Rect + appearance via
+_inkAppearance with `_recoverInkPressures` (pressures survive but
+SMOOTH through the segment→point→segment round trip — [2.6,1.4]@2 →
+×2 base gives [4.6,3.4], not [5.2,2.8]; rect re-pads from the widest
+RECOVERED pressure); markups regenerate from `_axisAlignedQuads`
+(rotated/malformed quads gate to false) via `_markupContent` (factored
+from the four creators — Highlight keeps Multiply+GS0 always);
+Square/Circle update /C /IC /BS then `_restyleRegenerate` →
+`_regenerateStyledAppearance` (= _regenerateResizedAppearance grown an
+`opacity:` override, + Stamp `_stampContent` and Text `_noteContent`
+factored out of their creators); FreeText rebuilds /DA (rg + kept RG)
+and /C = fill ?? textColor (the no-fill mirror convention — leaving
+old /C would conjure a background). Rotated annots: regen at the
+quad-derived local box then rotateAnnotation (resizeAnnotationLocal's
+shape). Gate: top-level `pdfCanRestyleAnnotation(annotation)`
+(exported; no editor needed — PdfAnnotation carries its document).
+`PdfAnnotation.appearanceOpacity` getter (first /ca in /AP /N
+ExtGState, 1.0 default). Controller: `canRestyleSelected` (every
+selected passes the gate), `restyleSelected({color, fill: (Color?,)?,
+strokeWidth, opacity})` (whole selection, one apply, slots/selection
+survive), `selectedAnnotationStyle` (color — freeTextStyle.color for
+FreeText — borderWidth, appearanceOpacity) for the style menu.
+Toolbar: palette tap + 'More colors…' → `_applyColor` (sets default
+AND restyles selection when canRestyleSelected); stroke/opacity
+sliders show the selection's values and restyle on release
+(_draggingStroke/_draggingOpacity mirror the font-size pattern).
+Tests: pdf_document annotation_clipboard_test (7) +
+annotation_restyle_test (8), pdf_flutter editing_clipboard_test (16).
+Remaining batch-4: properties panel, annotation-panel search,
+page-number jump field, slimmer search bar + results panel, PDF.js
+corpus.

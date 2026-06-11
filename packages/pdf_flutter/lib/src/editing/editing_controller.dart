@@ -261,7 +261,22 @@ class PdfEditingController extends ChangeNotifier {
 
   set opacity(double value) => preferences.opacity = value;
 
+  /// The background fill new text boxes get, or null for none (the
+  /// default — a bare text box, like before). Persisted.
+  Color? get textFillColor => preferences.textFillColor;
+
+  set textFillColor(Color? value) => preferences.textFillColor = value;
+
+  /// The border color new text boxes get, or null for none (the
+  /// default). The border is [strokeWidth] points wide. Persisted.
+  Color? get textBorderColor => preferences.textBorderColor;
+
+  set textBorderColor(Color? value) => preferences.textBorderColor = value;
+
   int get _colorValue => preferences.color.toARGB32() & 0xFFFFFF;
+
+  static int? _rgbOf(Color? color) =>
+      color == null ? null : color.toARGB32() & 0xFFFFFF;
 
   /// The author name new annotations carry (/T — shown in
   /// [PdfAnnotationSidebar] and other viewers' comment lists). Null
@@ -513,6 +528,9 @@ class PdfEditingController extends ChangeNotifier {
           fontSize: preferences.fontSize,
           font: preferences.fontFamily,
           color: _colorValue,
+          fillColor: _rgbOf(preferences.textFillColor),
+          borderColor: _rgbOf(preferences.textBorderColor),
+          borderWidth: preferences.strokeWidth,
           author: author), pages: [pageIndex]);
 
   void addStamp(int pageIndex, PdfRect rect, String text, {int? color}) =>
@@ -1052,12 +1070,28 @@ class PdfEditingController extends ChangeNotifier {
   /// Rewrites the selected free-text annotation with a new [font] and/or
   /// [size], keeping its text, place, color, and author. The selection
   /// survives (the annotation keeps its /Annots slot).
-  void restyleSelectedText({PdfStandardFont? font, double? size}) {
+  ///
+  /// [fill] and [border] change the box's background and border color:
+  /// the single-field record distinguishes "set to this RGB" — including
+  /// `(null,)`, removing the fill/border — from an omitted parameter,
+  /// which leaves the annotation's own style alone. A border set without
+  /// [borderWidth] keeps the annotation's width (or 1pt when it had no
+  /// border to keep).
+  void restyleSelectedText(
+      {PdfStandardFont? font,
+      double? size,
+      (int?,)? fill,
+      (int?,)? border,
+      double? borderWidth}) {
     final annotation = selectedAnnotation;
     if (annotation == null || !canRestyleSelectedText) return;
     final style = _freeTextStyleOf(annotation);
     _rewriteSelected(annotation, annotation.contents ?? '',
-        font: font ?? style.font, size: size ?? style.size);
+        font: font ?? style.font,
+        size: size ?? style.size,
+        fill: fill,
+        border: border,
+        borderWidth: borderWidth);
   }
 
   /// Rewrites the selected annotation's text: same place, same style, new
@@ -1070,7 +1104,11 @@ class PdfEditingController extends ChangeNotifier {
   }
 
   void _rewriteSelected(PdfAnnotation annotation, String text,
-      {PdfStandardFont? font, double? size}) {
+      {PdfStandardFont? font,
+      double? size,
+      (int?,)? fill,
+      (int?,)? border,
+      double? borderWidth}) {
     if (_selected.isEmpty) return;
     final page = _selected.last.$1;
     final rect = annotation.rect;
@@ -1083,15 +1121,17 @@ class PdfEditingController extends ChangeNotifier {
         case 'FreeText':
           final style = _freeTextStyleOf(annotation);
           // the parsed style carries what /C alone can't: the text color
-          // (from /DA) plus any background fill and border
+          // (from /DA) plus any background fill and border; a wrapped
+          // [fill]/[border] overrides it (see restyleSelectedText)
           final parsed = annotation.freeTextStyle;
           e.addFreeText(page, rect, text,
               fontSize: size ?? style.size,
               font: font ?? style.font,
               color: parsed?.color ?? color ?? 0x000000,
-              fillColor: parsed?.fillColor,
-              borderColor: parsed?.borderColor,
-              borderWidth: parsed?.borderWidth ?? 1,
+              fillColor: fill != null ? fill.$1 : parsed?.fillColor,
+              borderColor: border != null ? border.$1 : parsed?.borderColor,
+              borderWidth: borderWidth ??
+                  ((parsed?.borderWidth ?? 0) > 0 ? parsed!.borderWidth : 1),
               author: by);
         case 'Stamp':
           e.addStamp(page, rect, text, color: color ?? 0xC03030, author: by);

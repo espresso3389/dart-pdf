@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
@@ -312,6 +313,12 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
 
   final _scroll = ScrollController();
   final _transform = TransformationController();
+
+  /// The transform's scale alone, for the editing overlays: chrome
+  /// (selection outline, handles) divides by it to stay constant-size on
+  /// screen while zoomed. A separate notifier so overlays only rebuild
+  /// when the scale actually changes, not on every zoomed pan tick.
+  final _transformScale = ValueNotifier<double>(1.0);
   late final AnimationController _zoomAnimator;
   Animation<Matrix4>? _zoomAnimation;
   TapDownDetails? _doubleTapDetails;
@@ -521,6 +528,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   /// listener (rather than onInteractionEnd) also catches wheel zoom and
   /// the double-tap animation.
   void _onTransformChanged() {
+    _transformScale.value = _transform.value.getMaxScaleOnAxis();
     _controller._bumpViewport();
     _settleTimer?.cancel();
     _settleTimer = Timer(const Duration(milliseconds: 200), () {
@@ -623,6 +631,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     if (_ownsController) _controller.dispose();
     _scroll.dispose();
     _transform.dispose();
+    _transformScale.dispose();
     _zoomAnimator.dispose();
     _panFlinger.dispose();
     _focusNode.dispose();
@@ -1453,6 +1462,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                 editingTextPrompt:
                     widget.editingTextPrompt ?? showPdfTextPrompt,
                 onPanViewport: _grabPanBy,
+                transformScale: _transformScale,
               ),
             ),
           ),
@@ -1673,6 +1683,7 @@ class _PdfViewerPage extends StatefulWidget {
     required this.editing,
     required this.editingTextPrompt,
     required this.onPanViewport,
+    required this.transformScale,
   });
 
   final PdfPage page;
@@ -1687,6 +1698,10 @@ class _PdfViewerPage extends StatefulWidget {
   final PdfEditingController? editing;
   final PdfTextPrompt editingTextPrompt;
   final void Function(Offset delta) onPanViewport;
+
+  /// The viewer transform's scale — the editing overlay's chrome divides
+  /// by it to stay constant-size on screen while zoomed.
+  final ValueListenable<double> transformScale;
 
   @override
   State<_PdfViewerPage> createState() => _PdfViewerPageState();
@@ -1762,14 +1777,18 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
                           editing.pendingFlash == null
                       ? const SizedBox.shrink()
                       : Positioned.fill(
-                          child: EditingPageOverlay(
-                            controller: editing,
-                            pageIndex: widget.index,
-                            geometry: geometry,
-                            textPrompt: widget.editingTextPrompt,
-                            pageColor: widget.pageColor,
-                            onPanViewport: widget.onPanViewport,
-                            rasterCurrent: _rastered,
+                          child: ValueListenableBuilder<double>(
+                            valueListenable: widget.transformScale,
+                            builder: (context, zoom, _) => EditingPageOverlay(
+                              controller: editing,
+                              pageIndex: widget.index,
+                              geometry: geometry,
+                              textPrompt: widget.editingTextPrompt,
+                              pageColor: widget.pageColor,
+                              onPanViewport: widget.onPanViewport,
+                              rasterCurrent: _rastered,
+                              zoom: zoom,
+                            ),
                           ),
                         ),
                 ),

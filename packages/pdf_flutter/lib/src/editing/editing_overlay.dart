@@ -31,6 +31,7 @@ class EditingPageOverlay extends StatefulWidget {
     this.pageColor = const Color(0xFFFFFFFF),
     this.onPanViewport,
     this.rasterCurrent = true,
+    this.zoom = 1,
   });
 
   final PdfEditingController controller;
@@ -53,6 +54,13 @@ class EditingPageOverlay extends StatefulWidget {
   /// re-render is in flight), the overlay keeps painting the committed
   /// edit's preview — its afterimage — so the edit never blinks out.
   final bool rasterCurrent;
+
+  /// Screen pixels per overlay pixel — the viewer's transform zoom. The
+  /// overlay paints inside that transform, so selection chrome (outline,
+  /// handles, the rotate knob) divides its sizes and hit radii by this
+  /// to stay constant-size on screen at any zoom. Page-content previews
+  /// (ink, shapes, the drag ghost) scale with the page on purpose.
+  final double zoom;
 
   @override
   State<EditingPageOverlay> createState() => _EditingPageOverlayState();
@@ -126,6 +134,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   PdfStandardFont _textEditFont = PdfStandardFont.helvetica;
   double _textEditSize = 14; // pt
   Color _textEditColor = const Color(0xFF000000);
+  Color? _textEditFill; // the box background the commit will paint
 
   // select-tool drags. A rotated selection resizes in its local frame:
   // _resizeFrom/_resizeRect are then the chrome's local box (the rect
@@ -175,6 +184,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     PdfStandardFont font,
     double size,
     Color color,
+    Color? fill,
     bool washed,
   })? _afterText;
   _InkPaint? _afterSignature;
@@ -206,6 +216,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
 
   PdfEditingController get _controller => widget.controller;
   PdfPageGeometry get _geometry => widget.geometry;
+
+  /// Overlay pixels per intended screen pixel for chrome metrics — the
+  /// inverse of the viewer's transform zoom (see [EditingPageOverlay.zoom]).
+  double get _chromeScale {
+    final zoom = widget.zoom;
+    return zoom.isFinite && zoom > 0 ? 1 / zoom : 1.0;
+  }
 
   /// Null while the eyedropper is armed without a tool, or while a
   /// default-mode (mouse click) selection exists without one.
@@ -432,7 +449,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     if (!_controller.canResizeSelected) return null;
     for (final handle in _handles) {
       if ((position - _handleCenter(rect, handle)).distance <=
-          _handleHitRadius) {
+          _handleHitRadius * _chromeScale) {
         return handle;
       }
     }
@@ -442,7 +459,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   /// The rotate knob's view position: above the chrome box's top edge,
   /// riding the annotation's resting [rotation] about the box center.
   Offset _rotateHandleCenter(Rect rect, double rotation) => _rotatePoint(
-        Offset(rect.center.dx, rect.top - _rotateHandleDistance),
+        Offset(rect.center.dx,
+            rect.top - _rotateHandleDistance * _chromeScale),
         rect.center,
         rotation,
       );
@@ -452,7 +470,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   bool _hitsRotateHandle(Rect rect, double rotation, Offset position) =>
       _controller.canRotateSelected &&
       (position - _rotateHandleCenter(rect, rotation)).distance <=
-          _handleHitRadius;
+          _handleHitRadius * _chromeScale;
 
   /// The drag's rotation delta for the pointer at [position]: the angle
   /// swept about the selection center. The *total* rotation (resting +
@@ -474,6 +492,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   }
 
   Rect _resizedRect(Rect from, _Handle handle, Offset delta) {
+    final minSize = _minSizeView * _chromeScale;
     var left = from.left, top = from.top;
     var right = from.right, bottom = from.bottom;
     if (handle.dx < 0) left += delta.dx;
@@ -481,18 +500,18 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     if (handle.dy < 0) top += delta.dy;
     if (handle.dy > 0) bottom += delta.dy;
     // never collapse or invert: the dragged side stops at the minimum
-    if (right - left < _minSizeView) {
+    if (right - left < minSize) {
       if (handle.dx < 0) {
-        left = right - _minSizeView;
+        left = right - minSize;
       } else {
-        right = left + _minSizeView;
+        right = left + minSize;
       }
     }
-    if (bottom - top < _minSizeView) {
+    if (bottom - top < minSize) {
       if (handle.dy < 0) {
-        top = bottom - _minSizeView;
+        top = bottom - minSize;
       } else {
-        bottom = top + _minSizeView;
+        bottom = top + minSize;
       }
     }
     return Rect.fromLTRB(left, top, right, bottom);
@@ -509,7 +528,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     final style = existing ? _controller.selectedTextStyle : null;
     // /DA carries the text color; /C is the box background for free text
     final annotation = existing ? _controller.selectedAnnotation : null;
-    final annotationColor = annotation?.freeTextStyle?.color ?? annotation?.color;
+    final parsed = annotation?.freeTextStyle;
+    final annotationColor = parsed?.color ?? annotation?.color;
     _textEditText.text = existing ? (_controller.selectedText ?? '') : '';
     setState(() {
       _textEditRect = viewRect;
@@ -520,8 +540,20 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       _textEditColor = annotationColor != null
           ? Color(0xFF000000 | annotationColor)
           : _controller.color;
+      _textEditFill = existing
+          ? (parsed?.fillColor != null
+              ? Color(0xFF000000 | parsed!.fillColor!)
+              : null)
+          : _controller.textFillColor;
     });
     _controller.setEditingText(true);
+    // the field's autofocus is ignored: the creating gesture's
+    // pointer-down put primary focus on the viewer's own node, and
+    // autofocus only fires into an unfocused scope — claim it so typing
+    // lands in the fresh box without clicking into it first
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _textEditRect != null) _textEditFocus.requestFocus();
+    });
   }
 
   /// Commits the editor's text: a new free-text annotation, or the
@@ -534,6 +566,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     final font = _textEditFont;
     final size = _textEditSize;
     final color = _textEditColor;
+    final fill = _textEditFill;
     _closeTextEditor();
     final before = _controller.document;
     if (existing) {
@@ -554,6 +587,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       font: font,
       size: size,
       color: color,
+      fill: fill,
       washed: existing,
     );
     _afterDocument = _controller.document;
@@ -1191,6 +1225,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
               child: CustomPaint(
                 painter: _EditingPreviewPainter(
                   theme: PdfViewerTheme.of(context),
+                  chromeScale: _chromeScale,
                   tool: _tool,
                   color: _controller.color,
                   strokeWidth: _controller.strokeWidth * _geometry.scale,
@@ -1261,9 +1296,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                 rect: after.rect,
                 child: IgnorePointer(
                   child: Container(
-                    color: after.washed
-                        ? widget.pageColor.withValues(alpha: 0.92)
-                        : null,
+                    color: after.fill ??
+                        (after.washed
+                            ? widget.pageColor.withValues(alpha: 0.92)
+                            : null),
                     padding: EdgeInsets.all(3 * _geometry.scale),
                     alignment: Alignment.topLeft,
                     child: Text(
@@ -1300,16 +1336,18 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                   },
                   child: Container(
                     decoration: BoxDecoration(
-                      // wash the paper color over what's underneath: faint
-                      // for a fresh box, near-opaque when editing existing
-                      // text so the old rendering doesn't show through
-                      color: widget.pageColor
-                          .withValues(alpha: _textEditExisting ? 0.92 : 0.3),
+                      // the box's own fill when it has one; otherwise wash
+                      // the paper color over what's underneath: faint for a
+                      // fresh box, near-opaque when editing existing text
+                      // so the old rendering doesn't show through
+                      color: _textEditFill ??
+                          widget.pageColor
+                              .withValues(alpha: _textEditExisting ? 0.92 : 0.3),
                       border: Border.all(
                           color: PdfViewerTheme.of(context)
                                   .annotationChromeColor ??
                               const Color(0xFF1E88E5),
-                          width: 1.5),
+                          width: 1.5 * _chromeScale),
                     ),
                     child: TextField(
                       key: const ValueKey('pdf-freetext-editor'),
@@ -1386,6 +1424,7 @@ class _EyedropperChip extends StatelessWidget {
 class _EditingPreviewPainter extends CustomPainter {
   _EditingPreviewPainter({
     required this.theme,
+    this.chromeScale = 1,
     required this.tool,
     required this.color,
     required this.strokeWidth,
@@ -1487,6 +1526,11 @@ class _EditingPreviewPainter extends CustomPainter {
   final double flashProgress;
 
   final PdfViewerThemeData theme;
+
+  /// Overlay pixels per intended screen pixel — chrome (selection boxes,
+  /// handles, marquee, flash ring) multiplies its sizes by this so it
+  /// stays constant-size on screen while the viewer is zoomed in.
+  final double chromeScale;
 
   Color get _chrome =>
       theme.annotationChromeColor ?? const Color(0xFF1E88E5);
@@ -1604,14 +1648,14 @@ class _EditingPreviewPainter extends CustomPainter {
     }
 
     for (final rect in extraSelectionRects) {
-      final box = rect.inflate(2);
+      final box = rect.inflate(2 * chromeScale);
       canvas.drawRect(box, Paint()..color = _chrome.withAlpha(0x1A));
       canvas.drawRect(
           box,
           Paint()
             ..color = _chrome
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.5);
+            ..strokeWidth = 1.5 * chromeScale);
     }
 
     final marquee = marqueeRect;
@@ -1622,7 +1666,7 @@ class _EditingPreviewPainter extends CustomPainter {
           Paint()
             ..color = _chrome
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 1);
+            ..strokeWidth = 1 * chromeScale);
     }
 
     final committed = afterGhost;
@@ -1659,54 +1703,54 @@ class _EditingPreviewPainter extends CustomPainter {
         canvas.rotate(rotation);
         canvas.translate(-selection.center.dx, -selection.center.dy);
       }
-      final box = selection.inflate(2);
+      final box = selection.inflate(2 * chromeScale);
+      final stroke = Paint()
+        ..color = _chrome
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5 * chromeScale;
       canvas.drawRect(box, Paint()..color = _chrome.withAlpha(0x1A));
-      canvas.drawRect(
-          box,
-          Paint()
-            ..color = _chrome
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.5);
+      canvas.drawRect(box, stroke);
+      // the knob's connector line first, so the top-center resize handle
+      // paints over it instead of being crossed out
+      final rotateKnob = showRotateHandle
+          ? Offset(box.center.dx,
+              box.top - (_rotateHandleDistance - 2) * chromeScale)
+          : null;
+      if (rotateKnob != null) {
+        canvas.drawLine(box.topCenter, rotateKnob, stroke);
+      }
       if (showHandles) {
         final fill = Paint()..color = const Color(0xFFFFFFFF);
-        final stroke = Paint()
-          ..color = _chrome
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5;
         for (final handle in _handles) {
           final center = Offset(
             box.center.dx + handle.dx * box.width / 2,
             box.center.dy + handle.dy * box.height / 2,
           );
-          final knob = Rect.fromCircle(center: center, radius: _handleSize / 2);
+          final knob = Rect.fromCircle(
+              center: center, radius: _handleSize / 2 * chromeScale);
           canvas.drawRect(knob, fill);
           canvas.drawRect(knob, stroke);
         }
       }
-      if (showRotateHandle) {
-        final stroke = Paint()
-          ..color = _chrome
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.5;
-        final knob = Offset(box.center.dx, box.top - _rotateHandleDistance + 2);
-        canvas.drawLine(box.topCenter, knob, stroke);
-        canvas.drawCircle(knob, _handleSize / 2 + 1,
+      if (rotateKnob != null) {
+        canvas.drawCircle(rotateKnob, (_handleSize / 2 + 1) * chromeScale,
             Paint()..color = const Color(0xFFFFFFFF));
-        canvas.drawCircle(knob, _handleSize / 2 + 1, stroke);
+        canvas.drawCircle(
+            rotateKnob, (_handleSize / 2 + 1) * chromeScale, stroke);
       }
       canvas.restore();
     }
 
     final element = elementRect;
     if (element != null) {
-      final box = element.inflate(2);
+      final box = element.inflate(2 * chromeScale);
       canvas.drawRect(box, Paint()..color = _elementChrome.withAlpha(0x1A));
       canvas.drawRect(
           box,
           Paint()
             ..color = _elementChrome
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.5);
+            ..strokeWidth = 1.5 * chromeScale);
     }
 
     final flash = flashRect;
@@ -1716,7 +1760,8 @@ class _EditingPreviewPainter extends CustomPainter {
       final settle =
           Curves.easeOutCubic.transform((flashProgress * 3).clamp(0.0, 1.0));
       final ring = RRect.fromRectAndRadius(
-          flash.inflate(4 + 26 * (1 - settle)), const Radius.circular(6));
+          flash.inflate((4 + 26 * (1 - settle)) * chromeScale),
+          Radius.circular(6 * chromeScale));
       canvas.drawRRect(
           ring, Paint()..color = _flash.withValues(alpha: 0.20 * fade));
       canvas.drawRRect(
@@ -1724,7 +1769,7 @@ class _EditingPreviewPainter extends CustomPainter {
           Paint()
             ..color = _flash.withValues(alpha: 0.9 * fade)
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 3);
+            ..strokeWidth = 3 * chromeScale);
     }
   }
 
@@ -1752,6 +1797,7 @@ class _EditingPreviewPainter extends CustomPainter {
   @override
   bool shouldRepaint(_EditingPreviewPainter oldDelegate) =>
       oldDelegate.theme != theme ||
+      oldDelegate.chromeScale != chromeScale ||
       oldDelegate.tool != tool ||
       oldDelegate.color != color ||
       oldDelegate.strokeWidth != strokeWidth ||

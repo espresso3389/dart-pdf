@@ -293,7 +293,7 @@ class PdfEditingToolbar extends StatelessWidget {
                     ? controller.cancelColorPick()
                     : controller.startColorPick(),
               ),
-              _StyleMenu(controller: controller),
+              _StyleMenu(controller: controller, palette: palette),
               const VerticalDivider(width: 16),
               IconButton(
                 icon: const Icon(Icons.layers),
@@ -315,13 +315,17 @@ class PdfEditingToolbar extends StatelessWidget {
 }
 
 /// The style popup: sliders for stroke width, opacity, and font size,
-/// and the font family for free text. With a free-text annotation
-/// selected, the font controls show — and change — that annotation's
-/// style; otherwise they set the style new text is created with.
+/// the font family for free text, and the text box's fill and border
+/// colors. With a free-text annotation selected, the text controls show
+/// — and change — that annotation's style; otherwise they set the style
+/// new text is created with.
 class _StyleMenu extends StatefulWidget {
-  const _StyleMenu({required this.controller});
+  const _StyleMenu({required this.controller, required this.palette});
 
   final PdfEditingController controller;
+
+  /// The colors offered as fill/border swatches (the toolbar's palette).
+  final List<Color> palette;
 
   @override
   State<_StyleMenu> createState() => _StyleMenuState();
@@ -342,6 +346,99 @@ class _StyleMenuState extends State<_StyleMenu> {
     }
   }
 
+  static int? _rgb(Color? color) =>
+      color == null ? null : color.toARGB32() & 0xFFFFFF;
+
+  void _setTextFill(Color? color) {
+    controller.textFillColor = color; // the new default either way
+    if (controller.canRestyleSelectedText) {
+      controller.restyleSelectedText(fill: (_rgb(color),));
+    }
+  }
+
+  void _setTextBorder(Color? color) {
+    controller.textBorderColor = color;
+    if (controller.canRestyleSelectedText) {
+      controller.restyleSelectedText(
+          border: (_rgb(color),),
+          // setting a border gives it the current stroke width; clearing
+          // one leaves the width field alone
+          borderWidth: color == null ? null : controller.strokeWidth);
+    }
+  }
+
+  /// One text-box color row: a "none" swatch, the palette, and a custom
+  /// picker. [onChanged] receives the chosen color, or null for none.
+  Widget _boxColorRow({
+    required BuildContext context,
+    required String label,
+    required String keyPrefix,
+    required Color? value,
+    required ValueChanged<Color?> onChanged,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    Widget swatch(
+            {required Key key,
+            required Color? color,
+            required bool selected,
+            required VoidCallback onTap}) =>
+        Padding(
+          // 1px keeps six swatches + the picker inside the menu's 268px
+          padding: const EdgeInsets.symmetric(horizontal: 1),
+          child: InkWell(
+            key: key,
+            onTap: onTap,
+            customBorder: const CircleBorder(),
+            child: Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: color ?? const Color(0xFFFFFFFF),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected ? scheme.primary : scheme.outline,
+                  width: selected ? 3 : 1,
+                ),
+              ),
+              child: color == null
+                  ? const CustomPaint(painter: _NoneSlashPainter())
+                  : null,
+            ),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(children: [
+        SizedBox(width: 86, child: Text(label)),
+        swatch(
+          key: ValueKey('$keyPrefix-none'),
+          color: null,
+          selected: value == null,
+          onTap: () => onChanged(null),
+        ),
+        for (var i = 0; i < widget.palette.length; i++)
+          swatch(
+            key: ValueKey('$keyPrefix-$i'),
+            color: widget.palette[i],
+            selected: value != null &&
+                (value.toARGB32() & 0xFFFFFF) ==
+                    (widget.palette[i].toARGB32() & 0xFFFFFF),
+            onTap: () => onChanged(widget.palette[i]),
+          ),
+        IconButton(
+          icon: const Icon(Icons.palette_outlined, size: 18),
+          tooltip: 'More colors…',
+          visualDensity: VisualDensity.compact,
+          onPressed: () async {
+            final picked = await showPdfColorPicker(context,
+                initial: value ?? const Color(0xFFFFFFFF));
+            if (picked != null) onChanged(picked);
+          },
+        ),
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return MenuAnchor(
@@ -352,6 +449,21 @@ class _StyleMenuState extends State<_StyleMenu> {
           listenable: controller,
           builder: (context, _) {
             final selectedStyle = controller.selectedTextStyle;
+            // with a free text selected the rows show its own box style;
+            // otherwise the creation defaults
+            final restyling = controller.canRestyleSelectedText;
+            final boxStyle =
+                restyling ? controller.selectedAnnotation?.freeTextStyle : null;
+            final fillValue = restyling
+                ? (boxStyle?.fillColor != null
+                    ? Color(0xFF000000 | boxStyle!.fillColor!)
+                    : null)
+                : controller.textFillColor;
+            final borderValue = restyling
+                ? (boxStyle?.borderColor != null && (boxStyle?.borderWidth ?? 0) > 0
+                    ? Color(0xFF000000 | boxStyle!.borderColor!)
+                    : null)
+                : controller.textBorderColor;
             return Container(
               width: 300,
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -431,6 +543,20 @@ class _StyleMenuState extends State<_StyleMenu> {
                       ),
                     ]),
                   ),
+                  _boxColorRow(
+                    context: context,
+                    label: 'Text fill',
+                    keyPrefix: 'pdf-text-fill',
+                    value: fillValue,
+                    onChanged: _setTextFill,
+                  ),
+                  _boxColorRow(
+                    context: context,
+                    label: 'Text border',
+                    keyPrefix: 'pdf-text-border',
+                    value: borderValue,
+                    onChanged: _setTextBorder,
+                  ),
                 ],
               ),
             );
@@ -468,4 +594,23 @@ class _StyleMenuState extends State<_StyleMenu> {
       SizedBox(width: 44, child: Text(display, textAlign: TextAlign.end)),
     ]);
   }
+}
+
+/// The "no color" swatch's red diagonal slash.
+class _NoneSlashPainter extends CustomPainter {
+  const _NoneSlashPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawLine(
+        Offset(3, size.height - 3),
+        Offset(size.width - 3, 3),
+        Paint()
+          ..color = const Color(0xFFE53935)
+          ..strokeWidth = 1.5
+          ..strokeCap = StrokeCap.round);
+  }
+
+  @override
+  bool shouldRepaint(_NoneSlashPainter oldDelegate) => false;
 }

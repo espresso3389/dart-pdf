@@ -47,6 +47,70 @@ void main() {
       expect(annotation.defaultAppearance, contains('/Cour 18 Tf'));
     });
 
+    test('text fill and border preferences flow into new free text', () {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..strokeWidth = 3
+        ..textFillColor = const Color(0xFFFFF59D)
+        ..textBorderColor = const Color(0xFF1E88E5)
+        ..addFreeText(0, const PdfRect(100, 600, 300, 660), 'Boxed');
+
+      final style =
+          editing.document.page(0).annotations.single.freeTextStyle!;
+      expect(style.fillColor, 0xFFF59D);
+      expect(style.borderColor, 0x1E88E5);
+      expect(style.borderWidth, 3);
+    });
+
+    test('restyleSelectedText sets, keeps, and clears fill and border', () {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..addFreeText(0, const PdfRect(100, 600, 300, 660), 'Plain');
+      expect(editing.selectAnnotation(0, 0), isTrue);
+
+      PdfFreeTextStyle style() =>
+          editing.document.page(0).annotations.single.freeTextStyle!;
+
+      editing.restyleSelectedText(
+          fill: (0x43A047,), border: (0xE53935,), borderWidth: 2);
+      expect(style().fillColor, 0x43A047);
+      expect(style().borderColor, 0xE53935);
+      expect(style().borderWidth, 2);
+
+      // omitted box params survive an unrelated restyle
+      editing.restyleSelectedText(font: PdfStandardFont.times);
+      expect(style().fillColor, 0x43A047);
+      expect(style().borderColor, 0xE53935);
+      expect(style().borderWidth, 2);
+
+      // the wrapped null clears, unlike the omitted parameter
+      editing.restyleSelectedText(fill: (null,), border: (null,));
+      expect(style().fillColor, isNull);
+      expect(style().borderColor, isNull);
+      expect(style().borderWidth, 0);
+    });
+
+    test('text fill and border persist as preferences', () async {
+      SharedPreferences.setMockInitialValues({});
+      final a = PdfEditingPreferences();
+      await a.ready;
+      expect(a.textFillColor, isNull);
+      expect(a.textBorderColor, isNull);
+      a.textFillColor = const Color(0xFFFFF59D);
+      a.textBorderColor = const Color(0xFF1E88E5);
+      await pumpEventQueue();
+
+      final b = PdfEditingPreferences();
+      await b.ready;
+      expect(b.textFillColor, const Color(0xFFFFF59D));
+      expect(b.textBorderColor, const Color(0xFF1E88E5));
+
+      b.textFillColor = null;
+      await pumpEventQueue();
+      final c = PdfEditingPreferences();
+      await c.ready;
+      expect(c.textFillColor, isNull);
+      expect(c.textBorderColor, const Color(0xFF1E88E5));
+    });
+
     test('the font family persists as a preference', () async {
       SharedPreferences.setMockInitialValues({});
       final a = PdfEditingPreferences();
@@ -135,6 +199,26 @@ void main() {
       final annotation = editing.document.page(0).annotations.single;
       expect(annotation.subtype, 'FreeText');
       expect(annotation.contents, 'Hello in place');
+      await settle(tester);
+    });
+
+    testWidgets('a fresh text box is focused for typing immediately',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing.tool = PdfEditTool.freeText;
+      await tester.pump();
+
+      await drag(tester, view(100, 700), view(300, 640));
+      await tester.pump();
+
+      // the drag's pointer-down put focus on the viewer's own node, so
+      // the field's autofocus alone is ignored — typing must still land
+      // in the editor without clicking into it first
+      final field = tester.widget<TextField>(find.byKey(editorKey));
+      expect(field.focusNode!.hasFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
       await settle(tester);
     });
 
@@ -232,6 +316,103 @@ void main() {
       await tester.tap(find.text('Mono'));
       await tester.pump();
       expect(editing.fontFamily, PdfStandardFont.courier);
+    });
+
+    testWidgets('the style menu sets text fill and border defaults',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: const SizedBox.expand(),
+          bottomNavigationBar: PdfEditingToolbar(
+            controller: editing,
+            viewerController: viewer,
+          ),
+        ),
+      ));
+
+      await tester.scrollUntilVisible(
+          find.byTooltip('Stroke, opacity, font'), 100);
+      await tester.tap(find.byTooltip('Stroke, opacity, font'));
+      await tester.pumpAndSettle();
+
+      // marker yellow is palette slot 1, blue is slot 3
+      await tester.tap(find.byKey(const ValueKey('pdf-text-fill-1')));
+      await tester.pump();
+      expect(editing.textFillColor, PdfEditingToolbar.defaultPalette[1]);
+
+      await tester.tap(find.byKey(const ValueKey('pdf-text-border-3')));
+      await tester.pump();
+      expect(editing.textBorderColor, PdfEditingToolbar.defaultPalette[3]);
+
+      await tester.tap(find.byKey(const ValueKey('pdf-text-fill-none')));
+      await tester.pump();
+      expect(editing.textFillColor, isNull);
+      expect(editing.textBorderColor, PdfEditingToolbar.defaultPalette[3]);
+    });
+
+    testWidgets('the style menu restyles the selected text box',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..strokeWidth = 2.5
+        ..addFreeText(0, const PdfRect(100, 600, 300, 660), 'Boxed');
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      editing.selectAnnotation(0, 0);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: const SizedBox.expand(),
+          bottomNavigationBar: PdfEditingToolbar(
+            controller: editing,
+            viewerController: viewer,
+          ),
+        ),
+      ));
+      expect(editing.canRestyleSelectedText, isTrue);
+
+      await tester.scrollUntilVisible(
+          find.byTooltip('Stroke, opacity, font'), 100);
+      await tester.tap(find.byTooltip('Stroke, opacity, font'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('pdf-text-fill-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('pdf-text-border-0')));
+      await tester.pumpAndSettle();
+
+      final style =
+          editing.document.page(0).annotations.single.freeTextStyle!;
+      expect(style.fillColor, 0xFFD100);
+      expect(style.borderColor, 0xE53935);
+      expect(style.borderWidth, 2.5);
+      expect(
+          editing.document.page(0).annotations.single.contents, 'Boxed');
+    });
+
+    testWidgets('the inline editor previews the fill of a fresh box',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing
+        ..textFillColor = const Color(0xFFFFF59D)
+        ..tool = PdfEditTool.freeText;
+      await tester.pump();
+
+      await drag(tester, view(100, 700), view(300, 640));
+      await tester.pump();
+
+      final box = tester.widget<Container>(find
+          .ancestor(of: find.byKey(editorKey), matching: find.byType(Container))
+          .first);
+      expect((box.decoration! as BoxDecoration).color,
+          const Color(0xFFFFF59D));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await settle(tester);
     });
   });
 }

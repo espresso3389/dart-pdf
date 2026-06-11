@@ -59,6 +59,8 @@ class PdfEditingPreferences extends ChangeNotifier {
   Color _pageColor = const Color(0xFFFFFFFF);
   double? _thumbnailSidebarWidth;
   double? _annotationSidebarWidth;
+  Color? _textFillColor;
+  Color? _textBorderColor;
 
   Future<void> _load() async {
     final SharedPreferences store;
@@ -106,6 +108,10 @@ class PdfEditingPreferences extends ChangeNotifier {
       _annotationSidebarWidth =
           store.getDouble('${_prefix}annotationSidebarWidth') ??
               _annotationSidebarWidth;
+      final textFill = store.getInt('${_prefix}textFillColor');
+      if (textFill != null) _textFillColor = Color(textFill);
+      final textBorder = store.getInt('${_prefix}textBorderColor');
+      if (textBorder != null) _textBorderColor = Color(textBorder);
       final stamps = store.getStringList('${_prefix}customStamps');
       if (stamps != null) {
         _customStamps = List.unmodifiable([
@@ -293,6 +299,32 @@ class PdfEditingPreferences extends ChangeNotifier {
     _write((s) => value == null
         ? s.remove('${_prefix}annotationSidebarWidth')
         : s.setDouble('${_prefix}annotationSidebarWidth', value));
+    notifyListeners();
+  }
+
+  /// The background fill new free-text boxes are created with, or null
+  /// (the default) for no fill.
+  Color? get textFillColor => _textFillColor;
+
+  set textFillColor(Color? value) {
+    if (value == _textFillColor) return;
+    _textFillColor = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}textFillColor')
+        : s.setInt('${_prefix}textFillColor', value.toARGB32()));
+    notifyListeners();
+  }
+
+  /// The border color new free-text boxes are created with, or null
+  /// (the default) for no border. The border width follows [strokeWidth].
+  Color? get textBorderColor => _textBorderColor;
+
+  set textBorderColor(Color? value) {
+    if (value == _textBorderColor) return;
+    _textBorderColor = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}textBorderColor')
+        : s.setInt('${_prefix}textBorderColor', value.toARGB32()));
     notifyListeners();
   }
 

@@ -719,3 +719,43 @@ exact-valued mapped coordinates serialize as CosInteger, so resolve
 point arrays as num, never cast CosReal; the local-frame drag test
 derives handle positions by spinning chrome corners by the resting
 angle (view angle = −page angle).
+Batch 3, session 2 (selection chrome & text box UX): four features.
+(1) Zoom-invariant chrome: the overlay paints inside the
+InteractiveViewer transform, so chrome used to scale with zoom. The
+viewer owns `_transformScale` (ValueNotifier, set in
+_onTransformChanged = matrix getMaxScaleOnAxis — a separate notifier so
+overlays don't rebuild on zoomed pan ticks), threaded through
+_PdfViewerPage → ValueListenableBuilder → `EditingPageOverlay.zoom`.
+The state's `_chromeScale` (= 1/zoom) multiplies hit radii, the knob
+distance, `_minSizeView`, and the inline editor's border; the painter's
+`chromeScale` multiplies every chrome metric (selection inflate/stroke,
+handle size, knob distance/radius, marquee, element box, flash ring).
+Layout zoom (≤1) shrinks the page layout, transform identity — chrome
+is constant there for free. (2) Rotate-knob connector z-order: the
+painter draws the line first, resize handles next, knob circle last
+(`rotateKnob` hoisted; box.top − (distance−2)·s keeps the state/painter
+positions consistent at any scale). (3) Text-box auto-focus: TextField
+autofocus only fires into an unfocused scope, and the creating drag's
+pointer-down put primary focus on the viewer's node — _openTextEditor
+explicitly requestFocus()es the editor's node post-frame. (4) Text-box
+fill/border UI: preferences `textFillColor`/`textBorderColor` (Color?,
+remove-key = none), controller proxies + addFreeText passes them with
+borderWidth = strokeWidth; `restyleSelectedText` gained record-sentinel
+params `(int?,)? fill/border` — `(null,)` clears, omitted keeps the
+parsed style (same convention in _rewriteSelected); _StyleMenu (takes
+the toolbar `palette` now) shows 'Text fill'/'Text border' swatch rows
+(none slash + palette + custom picker; keys 'pdf-text-fill-none',
+'pdf-text-fill-N', same for -border) that set defaults and restyle a
+selected box (border restyle passes borderWidth: strokeWidth); the
+inline editor + _afterText preview the fill (`_textEditFill` replaces
+the pageColor wash when set). Tests: editing_chrome_test.dart (painter
+chromeScale via dynamic cast, knob drag at the scaled distance, stale
+distance no longer hits — compare document identity, NOT isModified
+(the setup's addRectangle already set it); pinch then expect
+chromeScale ≈ 1/viewer.zoom; knob-line pixel test scans a ±2px column
+patch — the 1.5px line lands between pixel columns) and
+editing_text_edit_test.dart additions. Gotchas: the style menu is
+300px wide with 16px side padding — 86 label + 6 swatches + compact
+IconButton needs 1px swatch padding (2px overflowed by 2); a bare
+EditingPageOverlay mounts fine in a SizedBox for unit-style overlay
+tests (geometry built by hand, textPrompt: showPdfTextPrompt).

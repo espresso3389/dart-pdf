@@ -176,7 +176,11 @@ snaps the *total* angle to 45° steps, so a rotated annotation clicks
 back to square. Rotated annotations resize too: the handles ride the
 spun chrome and drag along the annotation's own axes (the live preview
 scaling with them), so rotated artwork grows and shrinks without ever
-shearing. Edits never flash: when a commit lands, the overlay
+shearing. The chrome itself is zoom-invariant: outline, handles, and
+the rotate knob stay the same size on screen however far in you zoom,
+like any desktop editor's selection handles (and the knob's connector
+line tucks under the top handle instead of crossing it out).
+Edits never flash: when a commit lands, the overlay
 keeps the committed preview painted (the moved annotation's artwork at
 its new place, the just-drawn ink, the typed text) until the page's
 re-render actually reaches the screen, so nothing blinks out for a few
@@ -201,15 +205,21 @@ time instead of bursting on first layout, and scrolling the viewer
 repaints only the little viewport indicators — never the page images.
 Text boxes are written and edited in place, like a desktop editor:
 dragging out the free-text tool opens an inline editor right on the
-page — same font, size, and color the committed annotation will have —
-and tapping an already-selected text box reopens it with its text.
+page — same font, size, color, and background the committed annotation
+will have, focused and ready to type the moment it opens — and tapping
+an already-selected text box reopens it with its text.
 A tap outside (or switching tools) commits; Escape cancels. The font
 itself is selectable: Helvetica, Times, or Courier — the classic PDF
 standard fonts, written with proper AFM metrics and `/Widths` so every
 viewer lays the text out identically — next to the font-size slider in
 the style popup, and with a text box selected those controls restyle
 it directly (font and size changes re-render the annotation while
-keeping its text, position, color, and author). Still
+keeping its text, position, color, and author). Text boxes also take a
+background fill and a border, right from the style popup: two swatch
+rows (none / palette / custom color) set the defaults new boxes are
+created with — persisted with the other preferences — and restyle the
+selected box in place; the border's weight follows the stroke-width
+slider. Still
 open: richer text editing (reflow),
 RSASSA-PSS signatures, JBIG2 Huffman/refinement variants, and JPX
 subsampling/PCRL-CPRL progressions.

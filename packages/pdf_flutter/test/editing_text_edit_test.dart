@@ -407,10 +407,92 @@ void main() {
       final box = tester.widget<Container>(find
           .ancestor(of: find.byKey(editorKey), matching: find.byType(Container))
           .first);
-      expect((box.decoration! as BoxDecoration).color,
-          const Color(0xFFFFF59D));
+      expect(box.color, const Color(0xFFFFF59D));
 
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await settle(tester);
+    });
+
+    testWidgets('the inline editor opens without shifting the text',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing.addFreeText(0, const PdfRect(100, 600, 300, 660), 'Steady');
+      await tester.pump();
+      editing.tool = PdfEditTool.select;
+      await tester.pump();
+
+      await tap(tester, view(200, 630)); // select
+      await tap(tester, view(200, 630)); // edit
+
+      // the TextField's content area must sit exactly on the annotation
+      // box — the chrome border lives in the inflate(2) gutter outside.
+      // (It used to start 2px up-left, so the text jumped on open.)
+      expect(tester.getTopLeft(find.byKey(editorKey)),
+          offsetMoreOrLessEquals(view(100, 660), epsilon: 0.1));
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      await settle(tester);
+    });
+
+    testWidgets('resizing a text box previews re-wrapping, not scaled glyphs',
+        (tester) async {
+      const previewKey = ValueKey('pdf-text-resize-preview');
+      final (editing, _) = await pumpEditor(tester);
+      editing
+        ..fontSize = 16
+        ..addFreeText(0, const PdfRect(100, 600, 300, 650), 'Wrap me please')
+        ..tool = PdfEditTool.select;
+      expect(editing.selectAnnotation(0, 0), isTrue);
+      await tester.pump();
+
+      // grab the bottom-right handle and pull it inward
+      final gesture = await tester.startGesture(view(300, 600));
+      await gesture.moveTo(view(260, 580));
+      await gesture.moveTo(view(220, 560));
+      await tester.pump();
+
+      // mid-drag: the wrapped-text preview rides the dragged box, with
+      // the glyphs at their committed size — not stretched
+      expect(find.byKey(previewKey), findsOneWidget);
+      final text = tester.widget<Text>(find.descendant(
+          of: find.byKey(previewKey), matching: find.byType(Text)));
+      expect(text.data, 'Wrap me please');
+      expect(text.style!.fontSize, closeTo(16 * scale, 0.01));
+
+      await gesture.up();
+      await tester.pump();
+
+      // committed: the box shrank and the appearance kept its font size
+      final annotation = editing.document.page(0).annotations.single;
+      expect(annotation.rect.left, closeTo(100, 0.5));
+      expect(annotation.rect.right, closeTo(220, 0.5));
+      expect(annotation.defaultAppearance, contains('16 Tf'));
+      // the afterimage keeps the wrapped text painted until the raster
+      // lands — the live preview itself is gone with the drag
+      expect(find.byKey(previewKey), findsNothing);
+      expect(find.text('Wrap me please'), findsOneWidget);
+      await settle(tester);
+    });
+
+    testWidgets('a shape resize still previews with the stretch ghost',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing
+        ..addRectangle(0, const PdfRect(100, 600, 300, 700))
+        ..tool = PdfEditTool.select;
+      expect(editing.selectAnnotation(0, 0), isTrue);
+      await tester.pump();
+
+      final gesture = await tester.startGesture(view(300, 600));
+      await gesture.moveTo(view(330, 580));
+      await gesture.moveTo(view(360, 560));
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('pdf-text-resize-preview')),
+          findsNothing);
+      await gesture.up();
       await tester.pump();
       await settle(tester);
     });

@@ -208,14 +208,18 @@ boxes regenerate their appearance at the new size, so a stretched
 rectangle keeps its line weight and a widened text box re-wraps its
 text at the same font size (free text round-trips its background fill
 and border through the dictionary for the same reason — text edits
-keep them too). The selection chrome
+keep them too). A text box's resize *preview* re-wraps live as well:
+the drag shows the text re-flowing at its committed size, never
+stretched glyphs. The selection chrome
 follows a rotated annotation — box, knob, and all spin with the artwork
 instead of boxing its axis-aligned bounds, and the next rotate drag
 snaps the *total* angle to 45° steps, so a rotated annotation clicks
 back to square. Rotated annotations resize too: the handles ride the
 spun chrome and drag along the annotation's own axes (the live preview
 scaling with them), so rotated artwork grows and shrinks without ever
-shearing. The chrome itself is zoom-invariant: outline, handles, and
+shearing — and the resize is anchored like any vector editor's: the
+geometry opposite the drag stays planted on screen and the dragged
+handle tracks the pointer exactly, whatever the rotation. The chrome itself is zoom-invariant: outline, handles, and
 the rotate knob stay the same size on screen however far in you zoom,
 like any desktop editor's selection handles (and the knob's connector
 line tucks under the top handle instead of crossing it out).
@@ -277,8 +281,10 @@ or the named action.
 Text boxes are written and edited in place, like a desktop editor:
 dragging out the free-text tool opens an inline editor right on the
 page — same font, size, color, and background the committed annotation
-will have, focused and ready to type the moment it opens — and tapping
-an already-selected text box reopens it with its text.
+will have, its content area pixel-aligned with the box so the text
+doesn't shift when editing starts, focused and ready to type the
+moment it opens — and tapping an already-selected text box reopens it
+with its text.
 A tap outside (or switching tools) commits; Escape cancels. The font
 itself is selectable: Helvetica, Times, or Courier — the classic PDF
 standard fonts, written with proper AFM metrics and `/Widths` so every

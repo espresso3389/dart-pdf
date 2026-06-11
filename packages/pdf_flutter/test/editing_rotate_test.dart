@@ -231,14 +231,22 @@ void main() {
       await gesture.up();
       await tester.pumpAndSettle(const Duration(milliseconds: 350));
 
-      // local box 150×100 → 200×100 (center moves to (200,700) in local
-      // space), re-rotated 90°: page rect 100×200 about (200,700)
+      // local box 150×100 → 200×100, and the resize is ANCHORED: the
+      // un-dragged local left edge stays put on screen, so the whole
+      // 50pt of growth extends past the dragged handle. Page space:
+      // 100×200 about (175,725) — not about the naive (200,700), which
+      // would drift the anchored edge by Δ − R(Δ) = (25,-25)
       final annotation = editing.document.page(0).annotations.single;
       final rect = annotation.rect;
-      expect(rect.left, closeTo(150, 0.5));
-      expect(rect.bottom, closeTo(600, 0.5));
-      expect(rect.right, closeTo(250, 0.5));
-      expect(rect.top, closeTo(800, 0.5));
+      expect(rect.left, closeTo(125, 0.5));
+      expect(rect.bottom, closeTo(625, 0.5));
+      expect(rect.right, closeTo(225, 0.5));
+      expect(rect.top, closeTo(825, 0.5));
+      // the local ll corner sat at page (225,625) before the drag and
+      // must still be there: quad order is ll lr ur ul
+      final quad = annotation.appearanceQuad!;
+      expect(quad[0].$1, closeTo(225, 0.5));
+      expect(quad[0].$2, closeTo(625, 0.5));
       // still a pure 90° turn — no shear in the matrix
       expect(matrixEntry(editing.document, annotation, 0), closeTo(0, 1e-6));
       expect(matrixEntry(editing.document, annotation, 1), closeTo(1, 1e-6));

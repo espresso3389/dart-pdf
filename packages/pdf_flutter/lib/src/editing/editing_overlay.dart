@@ -242,6 +242,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     Color color,
     Color? fill,
     bool washed,
+    double rotation,
   })? _afterText;
   _InkPaint? _afterSignature;
 
@@ -657,6 +658,33 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterDocument = _controller.document;
   }
 
+  /// The selection's text style when a resize commit will RE-WRAP it at
+  /// a constant font size — the editor's FreeText regenerate path:
+  /// an /AP to replace and a /DA naming a standard font. Null means the
+  /// commit stretches the appearance and the ghost previews faithfully.
+  ({String text, PdfStandardFont font, double size, Color color, Color? fill})?
+      get _textResizeStyle {
+    final annotation = _controller.selectedAnnotation;
+    if (annotation == null ||
+        annotation.subtype != 'FreeText' ||
+        annotation.normalAppearance == null) {
+      return null;
+    }
+    final parsed = annotation.freeTextStyle;
+    final font =
+        parsed == null ? null : PdfStandardFont.tryFromName(parsed.fontName);
+    if (parsed == null || font == null) return null;
+    return (
+      text: annotation.contents ?? '',
+      font: font,
+      size: parsed.fontSize,
+      color: Color(0xFF000000 | parsed.color),
+      fill: parsed.fillColor != null
+          ? Color(0xFF000000 | parsed.fillColor!)
+          : null,
+    );
+  }
+
   /// The selected content element's view rect when it lives on this page.
   Rect? get _selectedElementViewRect {
     if (_controller.selectedElementPage != widget.pageIndex) return null;
@@ -762,6 +790,18 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     return (total - snapped).abs() <= _rotateSnapRadians
         ? snapped - _rotateResting
         : delta;
+  }
+
+  /// The committed annotation re-rotates about the *new* local box's
+  /// center, so a resize that moves the center would translate every
+  /// un-dragged point by Δ − R(Δ). Shifting the local box by R(Δ) − Δ
+  /// cancels that: the geometry opposite the drag stays anchored on
+  /// screen and the dragged handle rides the pointer.
+  Rect _anchorResized(Rect resized) {
+    if (_resizeAngle == 0) return resized;
+    final delta = resized.center - _resizeFrom!.center;
+    return resized
+        .shift(_rotatePoint(delta, Offset.zero, _resizeAngle) - delta);
   }
 
   Rect _resizedRect(Rect from, _Handle handle, Offset delta) {
@@ -885,6 +925,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         color: const Color(0xFF000000),
         fill: null,
         washed: true, // cover the old value until the raster lands
+        rotation: 0,
       );
       _afterDocument = _controller.document;
       return;
@@ -917,6 +958,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       color: color,
       fill: fill,
       washed: existing,
+      rotation: 0,
     );
     _afterDocument = _controller.document;
   }
@@ -1112,12 +1154,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         // a rotated selection's handles move along its own axes, so the
         // pointer delta rotates into the local frame
         final delta = position - _moveStart!;
-        _resizeRect = _resizedRect(
+        _resizeRect = _anchorResized(_resizedRect(
             _resizeFrom!,
             _resizeHandle!,
             _resizeAngle == 0
                 ? delta
-                : _rotatePoint(delta, Offset.zero, -_resizeAngle));
+                : _rotatePoint(delta, Offset.zero, -_resizeAngle)));
       });
     } else if (_moveStart != null) {
       setState(() => _moveCurrent = position);
@@ -1195,18 +1237,36 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           to: _selectedViewRect,
           rotation: rotateDelta);
     } else if (resizeRect != null) {
-      if (resizeAngle == 0) {
-        _commitWithGhost(
-            () => _controller.resizeSelected(_geometry.toPageRect(resizeRect)),
-            to: resizeRect);
+      final wrapStyle = _textResizeStyle;
+      void commit() => resizeAngle == 0
+          ? _controller.resizeSelected(_geometry.toPageRect(resizeRect))
+          : _controller.resizeSelectedLocal(_geometry.toPageRect(resizeRect));
+      if (wrapStyle != null) {
+        // the commit re-wraps the text at constant size — a stretched
+        // ghost afterimage would show scaled glyphs, so freeze the same
+        // wrapped-text preview the drag showed instead
+        final before = _controller.document;
+        commit();
+        if (!identical(before, _controller.document)) {
+          _clearAfterimage();
+          _afterText = (
+            rect: resizeRect,
+            text: wrapStyle.text,
+            font: wrapStyle.font,
+            size: wrapStyle.size,
+            color: wrapStyle.color,
+            fill: wrapStyle.fill,
+            washed: true,
+            rotation: resizeAngle,
+          );
+          _afterDocument = _controller.document;
+        }
+      } else if (resizeAngle == 0) {
+        _commitWithGhost(commit, to: resizeRect);
       } else {
         // the dragged rect is the local box; the editor re-applies the
         // resting rotation about its center
-        _commitWithGhost(
-            () => _controller
-                .resizeSelectedLocal(_geometry.toPageRect(resizeRect)),
-            to: resizeRect,
-            localAngle: resizeAngle);
+        _commitWithGhost(commit, to: resizeRect, localAngle: resizeAngle);
       }
     } else if (moveStart != null && moveCurrent != null) {
       if ((moveCurrent - moveStart).distance < 2) return; // a click
@@ -1614,6 +1674,44 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     );
   }
 
+  /// A wrapped-text box mirroring a committed free-text appearance —
+  /// the live resize preview and the post-commit afterimage share it.
+  /// [rotation] spins the box about its center (a rotated annotation's
+  /// resting angle, view convention).
+  Widget _wrappedTextBox({
+    Key? key,
+    required Rect rect,
+    required String text,
+    required PdfStandardFont font,
+    required double size,
+    required Color color,
+    required Color? background,
+    required double rotation,
+  }) {
+    final box = Container(
+      key: key,
+      color: background,
+      padding: EdgeInsets.all(3 * _geometry.scale),
+      alignment: Alignment.topLeft,
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: size * _geometry.scale,
+          height: 1.2,
+          fontFamily: _uiFamily(font),
+        ),
+      ),
+    );
+    return Positioned.fromRect(
+      rect: rect,
+      child: IgnorePointer(
+        child:
+            rotation == 0 ? box : Transform.rotate(angle: rotation, child: box),
+      ),
+    );
+  }
+
   /// The Flutter font family that visually matches [font] — the same
   /// substitution the renderer uses for non-embedded base-14 fonts.
   static String _uiFamily(PdfStandardFont font) => switch (font) {
@@ -1659,6 +1757,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     final rotating = _rotateStartAngle != null;
     final dragging =
         _resizeHandle != null || moveDelta != Offset.zero || rotating;
+    // a free-text resize re-wraps at constant font size — preview the
+    // wrapping live instead of the ghost's stretched glyphs
+    final wrapResize =
+        _resizeHandle != null && _resizeRect != null ? _textResizeStyle : null;
     // strokes beyond the pending ink: the committed-ink afterimage (held
     // until the new raster lands) and the signature tool's live preview
     final committedInk = widget.rasterCurrent
@@ -1788,7 +1890,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                   marqueeRect: _marqueeStart != null && _marqueeCurrent != null
                       ? Rect.fromPoints(_marqueeStart!, _marqueeCurrent!)
                       : null,
-                  ghost: _ghost,
+                  ghost: wrapResize == null ? _ghost : null,
                   ghostFrom: _resizeHandle != null && _resizeAngle != 0
                       ? _resizeFrom
                       : selected,
@@ -1838,31 +1940,36 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                 size: Size.infinite,
               ),
             ),
+            // a free-text resize in flight: the text re-wrapped to the
+            // dragged box at its committed size, over a wash hiding the
+            // old rendering — never the ghost's stretched glyphs
+            if (wrapResize != null)
+              _wrappedTextBox(
+                key: const ValueKey('pdf-text-resize-preview'),
+                rect: _resizeRect!,
+                text: wrapResize.text,
+                font: wrapResize.font,
+                size: wrapResize.size,
+                color: wrapResize.color,
+                background: wrapResize.fill ??
+                    widget.pageColor.withValues(alpha: 0.92),
+                rotation: _resizeAngle,
+              ),
             // a just-committed text edit, frozen until the page raster
             // catches up (same wash the inline editor painted over old
             // renderings, so nothing shows through meanwhile)
             if (_afterText case final after?)
-              Positioned.fromRect(
+              _wrappedTextBox(
                 rect: after.rect,
-                child: IgnorePointer(
-                  child: Container(
-                    color: after.fill ??
-                        (after.washed
-                            ? widget.pageColor.withValues(alpha: 0.92)
-                            : null),
-                    padding: EdgeInsets.all(3 * _geometry.scale),
-                    alignment: Alignment.topLeft,
-                    child: Text(
-                      after.text,
-                      style: TextStyle(
-                        color: after.color,
-                        fontSize: after.size * _geometry.scale,
-                        height: 1.2,
-                        fontFamily: _uiFamily(after.font),
-                      ),
-                    ),
-                  ),
-                ),
+                text: after.text,
+                font: after.font,
+                size: after.size,
+                color: after.color,
+                background: after.fill ??
+                    (after.washed
+                        ? widget.pageColor.withValues(alpha: 0.92)
+                        : null),
+                rotation: after.rotation,
               ),
             if (preview != null)
               Positioned(
@@ -1885,14 +1992,20 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                         control: true): _commitTextEdit,
                   },
                   child: Container(
-                    decoration: BoxDecoration(
-                      // the box's own fill when it has one; otherwise wash
-                      // the paper color over what's underneath: faint for a
-                      // fresh box, near-opaque when editing existing text
-                      // so the old rendering doesn't show through
-                      color: _textEditFill ??
-                          widget.pageColor
-                              .withValues(alpha: _textEditExisting ? 0.92 : 0.3),
+                    // the chrome border lives in the inflate(2) gutter
+                    // and paints as a FOREGROUND decoration: a regular
+                    // decoration border adds itself to the padding, and
+                    // any net inset shifts the text when the editor
+                    // opens — content must sit exactly on the box
+                    padding: const EdgeInsets.all(2),
+                    // the box's own fill when it has one; otherwise wash
+                    // the paper color over what's underneath: faint for a
+                    // fresh box, near-opaque when editing existing text
+                    // so the old rendering doesn't show through
+                    color: _textEditFill ??
+                        widget.pageColor
+                            .withValues(alpha: _textEditExisting ? 0.92 : 0.3),
+                    foregroundDecoration: BoxDecoration(
                       border: Border.all(
                           color: PdfViewerTheme.of(context)
                                   .annotationChromeColor ??

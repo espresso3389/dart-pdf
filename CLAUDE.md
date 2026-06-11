@@ -1108,3 +1108,48 @@ cut bounds ±0.5pt through the full pointer→commit chain). Gotcha: an
 eraser tap is a single-point path — sliceInk/pdfSliceInkStrokes treat
 path.length == 1 as a degenerate capsule (a circle stamp), don't skip
 it.
+Batch 4, session 1 (resize & text-box correctness, from Ben's comment
+batch): three fixes. (1) Rotated-resize anchoring: the committed
+annotation re-rotates about the NEW local box's center
+(resizeAnnotationLocal places localTo rotated about localTo's center),
+so any handle drag that moved the center translated the whole
+annotation by Δ − R(Δ) — and the dragged handle didn't track the
+pointer. Fix is one overlay-side shift (`_anchorResized` in
+editing_overlay.dart): shift the dragged local box by R(Δ) − Δ
+(Δ = center delta, R = resting view angle); that cancels the drift for
+EVERY fixed local point, so the geometry opposite the drag stays
+planted and the handle rides the pointer exactly — both provable from
+the same identity, and the correction survives the view→page y-flip
+(M R_λ M⁻¹ = R_θ). Compute Δ from the UNSHIFTED resized rect. The
+ghost preview needed no change (its toC shift composes identically).
+editing_rotate_test's local-frame test now asserts the anchored rect
+AND the fixed quad ll corner — the old expectations encoded the bug.
+(2) Free-text resize previews wrapping: a FreeText resize commit
+re-wraps at constant font size, but the drag ghost stretched the
+glyphs. `_textResizeStyle` (overlay) mirrors the editor's regenerate
+gate exactly (subtype FreeText + normalAppearance + freeTextStyle
+parses + PdfStandardFont.tryFromName succeeds); while a resize drag is
+live it suppresses the ghost and mounts `_wrappedTextBox` (key
+'pdf-text-resize-preview', shared with the _afterText afterimage) at
+_resizeRect — text at committed size over fill-or-pageColor@0.92 wash,
+Transform.rotate for rotated boxes (_afterText record gained
+`rotation`). The commit path freezes the same wrapped preview as the
+afterimage instead of _commitWithGhost. Non-regen free text (embedded
+fonts) falls back to the stretch ghost — preview must always match
+the commit. (3) Text-edit layout shift: the inline editor sat at
+rect.inflate(2) and its border was a regular BoxDecoration — Container
+folds decoration.padding (= border width) into the child inset, so the
+TextField content sat off the box by 2 − 1.5·chromeScale px and the
+text jumped on open/commit. Fix: padding EdgeInsets.all(2) (the
+inflate gutter) + the border moved to foregroundDecoration (paints
+over, contributes NO padding) + fill via Container.color — content now
+sits exactly on the annotation rect. Test gotchas: asserting editor
+position uses tester.getTopLeft(editorKey) == view(rect tl) — fails by
+(1.5,1.5) if the border ever moves back into `decoration:`; the fill
+preview test reads Container.color now, NOT decoration.color (a
+color-only Container has no decoration). Batch-4 comments remaining:
+copy/cut/paste of annotations, properties panel, annotation-panel
+search, page-number jump field, slimmer search bar + results panel,
+PDF.js corpus, restyle-any-selected-annotation; crypto comment
+answered (package:crypto is digest-only — AES/RC4/RSA/ECDSA aren't in
+it, no duplication).

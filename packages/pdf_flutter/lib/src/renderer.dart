@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
@@ -111,25 +112,44 @@ class PdfPageRenderer {
 
   /// Samples the rendered color of [page] at [point] — page raster space,
   /// i.e. post-rotation points with y down (view coordinates divided by
-  /// the view scale). Averages a 3×3-point patch so anti-aliased strokes
-  /// still read as their color. Returns null off the page.
-  static Future<ui.Color?> sampleColor(PdfPage page, ui.Offset point) async {
-    final picture = await renderPicture(page);
+  /// the view scale). One-shot; for repeated samples (an eyedropper's
+  /// live preview) build a [PdfPageColorSampler] once instead.
+  static Future<ui.Color?> sampleColor(PdfPage page, ui.Offset point) async =>
+      (await PdfPageColorSampler.of(page)).colorAt(point);
+
+  /// Page size in points after applying /Rotate.
+  static Size pageSize(PdfPage page) {
+    final box = page.cropBox;
+    final swap = page.rotation == 90 || page.rotation == 270;
+    return swap ? Size(box.height, box.width) : Size(box.width, box.height);
+  }
+}
+
+/// Pixel access to a page rendered once, for repeated color sampling —
+/// the eyedropper's live preview follows the pointer, and re-rendering
+/// per event would be far too slow.
+///
+/// Points are page raster space: post-rotation points with y down, the
+/// view position divided by the view scale.
+class PdfPageColorSampler {
+  PdfPageColorSampler._(this._pixels, this._width, this._height);
+
+  final ByteData _pixels;
+  final int _width;
+  final int _height;
+
+  /// Renders and rasterizes [page] at 1 px per point.
+  static Future<PdfPageColorSampler> of(PdfPage page) async {
+    final picture = await PdfPageRenderer.renderPicture(page);
     try {
-      final image = await rasterizeRegion(
-          picture, Rect.fromCenter(center: point, width: 3, height: 3), 1);
+      final image = await PdfPageRenderer.rasterize(
+          picture, PdfPageRenderer.pageSize(page), 1);
       try {
         final data = await image.toByteData();
-        if (data == null) return null;
-        var r = 0, g = 0, b = 0, n = 0;
-        for (var i = 0; i + 3 < data.lengthInBytes; i += 4) {
-          if (data.getUint8(i + 3) == 0) continue; // past the page edge
-          r += data.getUint8(i);
-          g += data.getUint8(i + 1);
-          b += data.getUint8(i + 2);
-          n++;
+        if (data == null) {
+          throw StateError('page raster yielded no pixels');
         }
-        return n == 0 ? null : ui.Color.fromARGB(255, r ~/ n, g ~/ n, b ~/ n);
+        return PdfPageColorSampler._(data, image.width, image.height);
       } finally {
         image.dispose();
       }
@@ -138,10 +158,22 @@ class PdfPageRenderer {
     }
   }
 
-  /// Page size in points after applying /Rotate.
-  static Size pageSize(PdfPage page) {
-    final box = page.cropBox;
-    final swap = page.rotation == 90 || page.rotation == 270;
-    return swap ? Size(box.height, box.width) : Size(box.width, box.height);
+  /// The color at [point], averaged over a 3×3-point patch so
+  /// anti-aliased strokes still read as their color. Null off the page.
+  ui.Color? colorAt(ui.Offset point) {
+    final cx = point.dx.round(), cy = point.dy.round();
+    var r = 0, g = 0, b = 0, n = 0;
+    for (var y = cy - 1; y <= cy + 1; y++) {
+      for (var x = cx - 1; x <= cx + 1; x++) {
+        if (x < 0 || y < 0 || x >= _width || y >= _height) continue;
+        final i = (y * _width + x) * 4;
+        if (_pixels.getUint8(i + 3) == 0) continue; // past the page edge
+        r += _pixels.getUint8(i);
+        g += _pixels.getUint8(i + 1);
+        b += _pixels.getUint8(i + 2);
+        n++;
+      }
+    }
+    return n == 0 ? null : ui.Color.fromARGB(255, r ~/ n, g ~/ n, b ~/ n);
   }
 }

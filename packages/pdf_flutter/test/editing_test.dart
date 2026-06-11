@@ -479,11 +479,29 @@ void main() {
 
       editing.startColorPick();
       await tester.pump();
+
+      // hovering shows a live preview chip with the color under the
+      // pointer; the page raster builds on the real event loop, so poll
+      // with hover jitters until the sample lands
+      final mouse =
+          await tester.createGesture(kind: PointerDeviceKind.mouse, pointer: 9);
+      await mouse.addPointer(location: view(300, 600));
+      addTearDown(mouse.removePointer);
+      await tester.pump();
+      var shown = false;
+      for (var i = 0; i < 40 && !shown; i++) {
+        await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 50)));
+        await mouse.moveTo(view(300, i.isEven ? 600 : 601));
+        await tester.pump();
+        shown = find.text('#00A040').evaluate().isNotEmpty;
+      }
+      expect(shown, isTrue, reason: 'hover previews the sampled color');
+      expect(editing.isPickingColor, isTrue, reason: 'preview does not pick');
+
+      // releasing a tap picks the color
       await tester.tapAt(view(300, 600));
       await settle(tester);
-
-      // sampling rasterizes through toImage, which only completes on the
-      // real event loop
       await tester.runAsync(() async {
         for (var i = 0; i < 40 && editing.isPickingColor; i++) {
           await Future<void>.delayed(const Duration(milliseconds: 50));
@@ -493,6 +511,8 @@ void main() {
 
       expect(editing.isPickingColor, isFalse);
       expect(editing.color, const Color(0xFF00A040));
+      expect(find.text('#00A040'), findsNothing,
+          reason: 'the chip leaves with the eyedropper');
       await settle(tester);
     });
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:pdf_document/pdf_document.dart';
@@ -56,6 +58,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   Offset? _dragStart;
   Offset? _dragCurrent;
 
+  // eyedropper: one page raster serves every preview sample
+  PdfPageColorSampler? _sampler;
+  PdfDocument? _samplerDocument;
+  Future<PdfPageColorSampler>? _samplerFuture;
+  Offset? _pickPosition;
+  Color? _pickPreview;
+
   // ink
   List<(double, double)>? _activeStroke;
   List<double>? _activeStrokePressures;
@@ -89,6 +98,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   /// stream, and stylus detection for palm rejection.
   void _onPointerDown(PointerDownEvent event) {
     _pointerPressure = _normalizedPressure(event);
+    if (_controller.isPickingColor) {
+      _updatePickPreview(event.localPosition);
+      return;
+    }
     if (_tool == PdfEditTool.ink &&
         _controller.fingerDrawsInk &&
         (event.kind == PointerDeviceKind.stylus ||
@@ -102,6 +115,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   void _onPointerMove(PointerMoveEvent event) {
     final pressure = _normalizedPressure(event);
     if (pressure != null) _pointerPressure = pressure;
+    if (_controller.isPickingColor) _updatePickPreview(event.localPosition);
   }
 
   /// The selected annotation's view rect when it lives on this page.
@@ -281,21 +295,60 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     }
   }
 
-  /// Samples the rendered page color under the eyedropper tap. The page
-  /// raster at scale 1 shares the view's orientation, so view → raster is
-  /// just the geometry scale.
-  Future<void> _pickColor(Offset position) async {
-    final page = _controller.document.page(widget.pageIndex);
-    final color =
-        await PdfPageRenderer.sampleColor(page, position / _geometry.scale);
+  /// Rasterizes this page once for the eyedropper, keyed on document
+  /// identity (it changes every revision). The page raster at scale 1
+  /// shares the view's orientation, so view → raster is just the
+  /// geometry scale.
+  Future<PdfPageColorSampler> _ensureSampler() {
+    final document = _controller.document;
+    if (!identical(document, _samplerDocument)) {
+      _samplerDocument = document;
+      _sampler = null;
+      _samplerFuture =
+          PdfPageColorSampler.of(document.page(widget.pageIndex)).then((s) {
+        // resolve the preview that was waiting on the raster
+        if (mounted && identical(_samplerDocument, document)) {
+          setState(() {
+            _sampler = s;
+            final position = _pickPosition;
+            if (position != null) {
+              _pickPreview = s.colorAt(position / _geometry.scale);
+            }
+          });
+        }
+        return s;
+      });
+    }
+    return _samplerFuture!;
+  }
+
+  void _updatePickPreview(Offset position) {
+    unawaited(_ensureSampler());
+    setState(() {
+      _pickPosition = position;
+      _pickPreview = _sampler?.colorAt(position / _geometry.scale);
+    });
+  }
+
+  /// Releasing the pointer picks the previewed color — so both a plain
+  /// tap and press-drag-release (watching the preview) work. A raw
+  /// listener, so it fires regardless of the gesture arena.
+  Future<void> _onPointerUp(PointerUpEvent event) async {
+    if (!_controller.isPickingColor) return;
+    final document = _controller.document;
+    final sampler = await _ensureSampler();
+    if (!mounted || !identical(document, _controller.document)) return;
+    setState(() {
+      _pickPosition = null;
+      _pickPreview = null;
+    });
+    final color = sampler.colorAt(event.localPosition / _geometry.scale);
     if (color != null) _controller.finishColorPick(color);
   }
 
   Future<void> _onTapUp(TapUpDetails details) async {
-    if (_controller.isPickingColor) {
-      await _pickColor(details.localPosition);
-      return;
-    }
+    // the eyedropper commits from the raw pointer-up instead
+    if (_controller.isPickingColor) return;
     final (x, y) = _geometry.toPagePoint(details.localPosition);
     switch (_tool) {
       case null:
@@ -317,6 +370,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   void _onHover(PointerHoverEvent event) {
     final MouseCursor cursor;
     if (_controller.isPickingColor) {
+      _updatePickPreview(event.localPosition);
       cursor = SystemMouseCursors.precise;
     } else if (_tool == PdfEditTool.select) {
       final selected = _selectedViewRect;
@@ -355,11 +409,16 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
         _resizeHandle == null && _moveStart != null && _moveCurrent != null
             ? _moveCurrent! - _moveStart!
             : Offset.zero;
+    // warm the eyedropper's raster so the first preview is instant-ish
+    if (_controller.isPickingColor) unawaited(_ensureSampler());
+    final preview = _controller.isPickingColor ? _pickPosition : null;
     return Listener(
       // raw events carry what pan callbacks drop: pressure and the
-      // device kind (for Apple Pencil palm rejection)
+      // device kind (for Apple Pencil palm rejection); pointer-up is
+      // also the eyedropper's commit
       onPointerDown: _onPointerDown,
       onPointerMove: _onPointerMove,
+      onPointerUp: _onPointerUp,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         // with finger drawing off, touch falls through to the scroll
@@ -383,34 +442,92 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
         child: MouseRegion(
           cursor: _cursor,
           onHover: _onHover,
-          child: CustomPaint(
-            painter: _EditingPreviewPainter(
-              tool: _tool,
-              color: _controller.color,
-              strokeWidth: _controller.strokeWidth * _geometry.scale,
-              geometry: _geometry,
-              strokes: [
-                ..._controller.strokesOn(widget.pageIndex),
-                if (_activeStroke != null) _activeStroke!,
-              ],
-              pressures: [
-                ..._controller.strokePressuresOn(widget.pageIndex),
-                if (_activeStroke != null) _activeStrokePressures,
-              ],
-              dragRect: _dragStart != null && _dragCurrent != null
-                  ? Rect.fromPoints(_dragStart!, _dragCurrent!)
-                  : null,
-              selectionRect: _resizeHandle != null
-                  ? _resizeRect
-                  : selected?.shift(moveDelta),
-              showHandles: selected != null &&
-                  _controller.canResizeSelected &&
-                  _moveStart == null,
-              elementRect: _selectedElementViewRect,
+          onExit: (_) {
+            if (_pickPosition == null) return;
+            setState(() {
+              _pickPosition = null;
+              _pickPreview = null;
+            });
+          },
+          child: Stack(children: [
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _EditingPreviewPainter(
+                  tool: _tool,
+                  color: _controller.color,
+                  strokeWidth: _controller.strokeWidth * _geometry.scale,
+                  geometry: _geometry,
+                  strokes: [
+                    ..._controller.strokesOn(widget.pageIndex),
+                    if (_activeStroke != null) _activeStroke!,
+                  ],
+                  pressures: [
+                    ..._controller.strokePressuresOn(widget.pageIndex),
+                    if (_activeStroke != null) _activeStrokePressures,
+                  ],
+                  dragRect: _dragStart != null && _dragCurrent != null
+                      ? Rect.fromPoints(_dragStart!, _dragCurrent!)
+                      : null,
+                  selectionRect: _resizeHandle != null
+                      ? _resizeRect
+                      : selected?.shift(moveDelta),
+                  showHandles: selected != null &&
+                      _controller.canResizeSelected &&
+                      _moveStart == null,
+                  elementRect: _selectedElementViewRect,
+                ),
+                size: Size.infinite,
+              ),
             ),
-            size: Size.infinite,
-          ),
+            if (preview != null)
+              Positioned(
+                left: preview.dx + 14,
+                top: preview.dy - 38,
+                child: IgnorePointer(
+                  child: _EyedropperChip(color: _pickPreview),
+                ),
+              ),
+          ]),
         ),
+      ),
+    );
+  }
+}
+
+/// The eyedropper's floating preview: the color under the pointer and
+/// its hex value, riding beside the cursor.
+class _EyedropperChip extends StatelessWidget {
+  const _EyedropperChip({required this.color});
+
+  /// Null while the page raster is still being built (or off the page).
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = this.color;
+    return Material(
+      elevation: 3,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 18,
+            height: 18,
+            decoration: BoxDecoration(
+              color: color ?? Colors.transparent,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.black26),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            color == null
+                ? '…'
+                : '#${(color.toARGB32() & 0xFFFFFF).toRadixString(16).toUpperCase().padLeft(6, '0')}',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+        ]),
       ),
     );
   }

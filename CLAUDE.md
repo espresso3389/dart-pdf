@@ -146,3 +146,13 @@ button toggles back). Test gotchas: TestGesture can't set pressure —
 dispatch raw PointerDown/Move/Up via tester.binding.handlePointerEvent
 (supply delta); the eyedropper's toImage needs `tester.runAsync` after
 the tap (poll isPickingColor with real delays).
+Eyedropper preview (from Ben's feedback): `PdfPageColorSampler`
+(renderer.dart) rasterizes a page once (1px/pt) and answers `colorAt`
+lookups from the cached ByteData — per-event re-rendering would be far
+too slow; `sampleColor` is now the one-shot wrapper. The overlay keys
+the sampler on document identity, previews on hover (mouse) and
+down/move (touch/pencil) via a floating swatch+hex chip
+(`_EyedropperChip`, cleared on MouseRegion exit), and commits from the
+raw pointer-up (so tap and press-drag-release both pick; the tap
+handler no-ops while picking). dart:typed_data must be imported
+explicitly for ByteData (flutter/painting doesn't re-export it).

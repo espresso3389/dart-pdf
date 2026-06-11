@@ -81,7 +81,8 @@ width, opacity, font size), an annotation list sidebar
 (`PdfAnnotationSidebar`), a page thumbnail sidebar
 (`PdfThumbnailSidebar` — tap to jump, drag to reorder pages, delete,
 with a live viewport indicator), a full-spectrum color picker with an
-eyedropper that samples colors from the rendered page
+eyedropper that samples colors from the rendered page — with a live
+swatch-and-hex preview riding beside the pointer
 (`PdfColorPicker`), and a ready-made `PdfEditingToolbar`.
 Apple Pencil (and any stylus) is first-class for ink: strokes record
 pressure and render with variable width, and the first pen contact

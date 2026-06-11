@@ -71,8 +71,7 @@ class PdfEditingToolbar extends StatelessWidget {
       controller.tool = null;
       return;
     }
-    if (controller.signature == null &&
-        !await _drawSignature(context)) {
+    if (controller.signature == null && !await _drawSignature(context)) {
       return;
     }
     _toggleTool(PdfEditTool.signature);
@@ -257,9 +256,10 @@ class PdfEditingToolbar extends StatelessWidget {
                         color: color,
                         shape: BoxShape.circle,
                         border: Border.all(
+                          // theme outline: visible on light and dark chrome
                           color: controller.color == color
                               ? Theme.of(context).colorScheme.primary
-                              : Colors.black26,
+                              : Theme.of(context).colorScheme.outline,
                           width: controller.color == color ? 3 : 1,
                         ),
                       ),

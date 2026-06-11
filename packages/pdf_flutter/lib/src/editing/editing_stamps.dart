@@ -203,7 +203,7 @@ class _PdfStampEditorDialogState extends State<PdfStampEditorDialog> {
                       border: Border.all(
                         color: _color == ink
                             ? Theme.of(context).colorScheme.primary
-                            : Colors.black26,
+                            : Theme.of(context).colorScheme.outline,
                         width: _color == ink ? 3 : 1,
                       ),
                     ),

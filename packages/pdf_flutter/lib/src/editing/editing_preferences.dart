@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter/painting.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -50,6 +51,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   String? _author;
   PdfInkSignature? _signature;
   List<PdfCustomStamp> _customStamps = const [];
+  ThemeMode _themeMode = ThemeMode.system;
 
   Future<void> _load() async {
     final SharedPreferences store;
@@ -67,15 +69,18 @@ class PdfEditingPreferences extends ChangeNotifier {
       _opacity = store.getDouble('${_prefix}opacity') ?? _opacity;
       _fingerDrawsInk =
           store.getBool('${_prefix}fingerDrawsInk') ?? _fingerDrawsInk;
-      _showThumbnailSidebar =
-          store.getBool('${_prefix}showThumbnailSidebar') ??
-              _showThumbnailSidebar;
+      _showThumbnailSidebar = store.getBool('${_prefix}showThumbnailSidebar') ??
+          _showThumbnailSidebar;
       _showAnnotationSidebar =
           store.getBool('${_prefix}showAnnotationSidebar') ??
               _showAnnotationSidebar;
       _author = store.getString('${_prefix}author') ?? _author;
       final signature = store.getString('${_prefix}signature');
       if (signature != null) _signature = PdfInkSignature.decode(signature);
+      final themeMode = store.getString('${_prefix}themeMode');
+      if (themeMode != null) {
+        _themeMode = ThemeMode.values.asNameMap()[themeMode] ?? _themeMode;
+      }
       final stamps = store.getStringList('${_prefix}customStamps');
       if (stamps != null) {
         _customStamps = List.unmodifiable([
@@ -176,8 +181,8 @@ class PdfEditingPreferences extends ChangeNotifier {
   set customStamps(List<PdfCustomStamp> value) {
     if (listEquals(value, _customStamps)) return;
     _customStamps = List.unmodifiable(value);
-    _write((s) => s.setStringList('${_prefix}customStamps',
-        [for (final stamp in value) stamp.encode()]));
+    _write((s) => s.setStringList(
+        '${_prefix}customStamps', [for (final stamp in value) stamp.encode()]));
     notifyListeners();
   }
 
@@ -191,6 +196,18 @@ class PdfEditingPreferences extends ChangeNotifier {
     _write((s) => value == null
         ? s.remove('${_prefix}author')
         : s.setString('${_prefix}author', value));
+    notifyListeners();
+  }
+
+  /// The app theme the host runs the viewer UI in. The viewer and the
+  /// stock chrome all follow the ambient [Theme]; this just remembers
+  /// the user's choice for the host's `MaterialApp.themeMode`.
+  ThemeMode get themeMode => _themeMode;
+
+  set themeMode(ThemeMode value) {
+    if (value == _themeMode) return;
+    _themeMode = value;
+    _write((s) => s.setString('${_prefix}themeMode', value.name));
     notifyListeners();
   }
 

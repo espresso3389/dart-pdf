@@ -91,9 +91,7 @@ class PdfInkSignature {
       ];
       final pressures = [
         for (final p in map['pressures'] as List)
-          p == null
-              ? null
-              : [for (final v in p as List) (v as num).toDouble()]
+          p == null ? null : [for (final v in p as List) (v as num).toDouble()]
       ];
       if (strokes.length != pressures.length) return null;
       return PdfInkSignature(
@@ -127,7 +125,11 @@ class PdfSignatureDialog extends StatefulWidget {
 }
 
 class _PdfSignatureDialogState extends State<PdfSignatureDialog> {
-  static const _inks = [Color(0xFF000000), Color(0xFF1A3E8C), Color(0xFFB71C1C)];
+  static const _inks = [
+    Color(0xFF000000),
+    Color(0xFF1A3E8C),
+    Color(0xFFB71C1C)
+  ];
 
   final List<List<Offset>> _strokes = [];
   final List<List<double>?> _pressures = [];
@@ -185,8 +187,10 @@ class _PdfSignatureDialogState extends State<PdfSignatureDialog> {
             width: 360,
             height: 180,
             decoration: BoxDecoration(
+              // the pad is always paper-white, like the page the
+              // signature will land on — only its border follows the theme
               color: Colors.white,
-              border: Border.all(color: Colors.black26),
+              border: Border.all(color: Theme.of(context).colorScheme.outline),
               borderRadius: BorderRadius.circular(8),
             ),
             child: ClipRRect(
@@ -232,7 +236,7 @@ class _PdfSignatureDialogState extends State<PdfSignatureDialog> {
                       border: Border.all(
                         color: _ink == ink
                             ? Theme.of(context).colorScheme.primary
-                            : Colors.black26,
+                            : Theme.of(context).colorScheme.outline,
                         width: _ink == ink ? 3 : 1,
                       ),
                     ),
@@ -319,7 +323,8 @@ class _SignaturePadPainter extends CustomPainter {
           ..strokeCap = StrokeCap.round
           ..style = PaintingStyle.stroke;
         if (stroke.length == 1) {
-          canvas.drawCircle(stroke.single,
+          canvas.drawCircle(
+              stroke.single,
               pdfInkStrokeWidth(_baseWidth, pressure.first) / 2,
               Paint()..color = color);
           continue;

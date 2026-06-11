@@ -239,6 +239,7 @@ class PdfViewer extends StatefulWidget {
     this.minZoom = 0.25,
     this.maxZoom = 6,
     this.doubleTapZoom = 2.5,
+    this.backgroundColor,
   });
 
   final PdfDocument document;
@@ -285,6 +286,11 @@ class PdfViewer extends StatefulWidget {
   final double minZoom;
   final double maxZoom;
   final double doubleTapZoom;
+
+  /// The canvas color around and between the pages. Defaults to a
+  /// theme-aware grey: the familiar desktop-viewer slate in light themes
+  /// and a deeper shade in dark themes.
+  final Color? backgroundColor;
 
   @override
   State<PdfViewer> createState() => _PdfViewerState();
@@ -1213,6 +1219,10 @@ class _PdfViewerState extends State<PdfViewer>
         'viewer with editing.document whenever the controller notifies '
         '(e.g. wrap it in a ListenableBuilder on the controller).');
     final editing = widget.editing;
+    final canvasColor = widget.backgroundColor ??
+        (Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xFF202124)
+            : const Color(0xFF404347));
     return LayoutBuilder(builder: (context, constraints) {
       _viewWidth = constraints.maxWidth;
       _viewHeight = constraints.maxHeight;
@@ -1316,7 +1326,7 @@ class _PdfViewerState extends State<PdfViewer>
             child: ColoredBox(
               // the canvas color behind the page: visible as margins when
               // zoomed out past fit-width
-              color: const Color(0xFF404347),
+              color: canvasColor,
               child: Stack(children: [
                 InteractiveViewer(
                   transformationController: _transform,
@@ -1399,7 +1409,7 @@ class _PdfViewerState extends State<PdfViewer>
                             onPanStart: _onSelectionStart,
                             onPanUpdate: _onSelectionUpdate,
                             child: ColoredBox(
-                              color: const Color(0xFF404347),
+                              color: canvasColor,
                               // with ctrl/cmd held the list stops claiming wheel
                               // events, so they reach the InteractiveViewer, which
                               // zooms around the pointer

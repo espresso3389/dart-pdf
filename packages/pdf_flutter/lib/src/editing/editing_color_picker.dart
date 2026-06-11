@@ -72,7 +72,8 @@ class _PdfColorPickerState extends State<PdfColorPicker> {
               decoration: BoxDecoration(
                 color: _color,
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.black26),
+                border:
+                    Border.all(color: Theme.of(context).colorScheme.outline),
               ),
             ),
             const SizedBox(width: 12),

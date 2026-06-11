@@ -216,8 +216,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   /// The drag's rotation delta for the pointer at [position]: the angle
   /// swept about the selection center, snapped near 45° multiples.
   double _rotationDelta(Rect selected, Offset position) {
-    var delta =
-        (position - selected.center).direction - _rotateStartAngle!;
+    var delta = (position - selected.center).direction - _rotateStartAngle!;
     while (delta > math.pi) {
       delta -= 2 * math.pi;
     }
@@ -639,7 +638,7 @@ class _EyedropperChip extends StatelessWidget {
             decoration: BoxDecoration(
               color: color ?? Colors.transparent,
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.black26),
+              border: Border.all(color: Theme.of(context).colorScheme.outline),
             ),
           ),
           const SizedBox(width: 6),
@@ -831,11 +830,10 @@ class _EditingPreviewPainter extends CustomPainter {
           ..color = _chrome
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.5;
-        final knob = Offset(
-            box.center.dx, box.top - _rotateHandleDistance + 2);
+        final knob = Offset(box.center.dx, box.top - _rotateHandleDistance + 2);
         canvas.drawLine(box.topCenter, knob, stroke);
-        canvas.drawCircle(
-            knob, _handleSize / 2 + 1, Paint()..color = const Color(0xFFFFFFFF));
+        canvas.drawCircle(knob, _handleSize / 2 + 1,
+            Paint()..color = const Color(0xFFFFFFFF));
         canvas.drawCircle(knob, _handleSize / 2 + 1, stroke);
       }
       canvas.restore();

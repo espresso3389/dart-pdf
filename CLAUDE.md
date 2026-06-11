@@ -300,3 +300,18 @@ estimate that drifts as items build (tolerances, not exact math);
 tester.drag eats touch slop (use startGesture+moveBy); touch taps on
 the bar resolve only after the viewer's double-tap timeout (pump
 400ms); end drag tests with a 300ms pump for the scroll-settle timer.
+Dark mode: all chrome follows the ambient Material theme. The viewer
+canvas is theme-aware — `PdfViewer.backgroundColor` overrides; default
+is 0xFF404347 (light themes, the historical slate) or 0xFF202124
+(dark), resolved in build before the LayoutBuilder. Swatch/preview
+borders that were Colors.black26 (toolbar palette, signature pad +
+inks, stamp inks, color-picker preview, eyedropper chip) now use
+colorScheme.outline so they read on dark surfaces; pads/pages stay
+paper-white on purpose. `PdfEditingPreferences.themeMode` (ThemeMode,
+key `themeMode`, stored by name) is a persisted host-chrome pref; the
+example app's MaterialApp listens to the prefs for themeMode (ViewerApp
+is now stateful and owns the prefs instance, passing it to
+ViewerScreen) with an AppBar button cycling system→light→dark. Test
+gotcha (dark_mode_test.dart): re-pumping MaterialApp with a new theme
+animates via AnimatedTheme — a single pump still reads the old
+brightness, so assert light and dark in separate tests.

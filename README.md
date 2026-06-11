@@ -115,7 +115,13 @@ high-contrast, outside the zoom transform so it never scales away, with
 a draggable thumb and tap-to-jump track; zooming in adds a horizontal
 bar for panning the zoom window, and both bars reach the document's
 very ends even while zoomed (motion spills from the scroll extents into
-the zoom window, like trackpad scrolling). Still
+the zoom window, like trackpad scrolling).
+Dark mode is supported throughout: every widget follows the ambient
+Material theme, the canvas around the pages deepens automatically under
+a dark theme (override it with `PdfViewer.backgroundColor`), and the
+chosen theme mode persists on the device like the other UI preferences
+(`PdfEditingPreferences.themeMode`) — the example app has a
+system/light/dark toggle in its app bar. Still
 open: richer text editing (reflow),
 RSASSA-PSS signatures, JBIG2 Huffman/refinement variants, and JPX
 subsampling/PCRL-CPRL progressions.

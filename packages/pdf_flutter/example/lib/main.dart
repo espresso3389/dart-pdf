@@ -11,21 +11,49 @@ import 'demo_document.dart';
 
 void main() => runApp(const ViewerApp());
 
-class ViewerApp extends StatelessWidget {
+class ViewerApp extends StatefulWidget {
   const ViewerApp({super.key});
 
   @override
+  State<ViewerApp> createState() => _ViewerAppState();
+}
+
+class _ViewerAppState extends State<ViewerApp> {
+  /// UI preferences saved on this device — tool styles, which panels
+  /// are open, and the theme mode. Owned here so the MaterialApp can
+  /// follow the persisted light/dark choice; the screen below shares
+  /// the same instance with every editing session.
+  final _prefs = PdfEditingPreferences();
+
+  @override
+  void dispose() {
+    _prefs.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'dart-pdf viewer',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
-      home: const ViewerScreen(),
+    return ListenableBuilder(
+      listenable: _prefs,
+      builder: (context, _) => MaterialApp(
+        title: 'dart-pdf viewer',
+        theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+        darkTheme: ThemeData(
+          colorSchemeSeed: Colors.indigo,
+          brightness: Brightness.dark,
+          useMaterial3: true,
+        ),
+        themeMode: _prefs.themeMode,
+        home: ViewerScreen(prefs: _prefs),
+      ),
     );
   }
 }
 
 class ViewerScreen extends StatefulWidget {
-  const ViewerScreen({super.key});
+  const ViewerScreen({super.key, required this.prefs});
+
+  final PdfEditingPreferences prefs;
 
   @override
   State<ViewerScreen> createState() => _ViewerScreenState();
@@ -36,10 +64,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
   final _searchField = TextEditingController();
   final _searchFocus = FocusNode();
 
-  /// UI preferences saved on this device — tool styles and which panels
-  /// are open. Shared with every editing session so they persist across
-  /// documents and app restarts.
-  final _prefs = PdfEditingPreferences();
+  PdfEditingPreferences get _prefs => widget.prefs;
 
   /// The open document's editing session: owns the bytes, the document
   /// revisions, undo/redo, and the editing tool state.
@@ -184,8 +209,8 @@ class _ViewerScreenState extends State<ViewerScreen> {
   /// ⌘F / Ctrl+F: jump to the search field, ready to overtype.
   void _focusSearch() {
     _searchFocus.requestFocus();
-    _searchField.selection = TextSelection(
-        baseOffset: 0, extentOffset: _searchField.text.length);
+    _searchField.selection =
+        TextSelection(baseOffset: 0, extentOffset: _searchField.text.length);
   }
 
   @override
@@ -244,147 +269,164 @@ class _ViewerScreenState extends State<ViewerScreen> {
             _focusSearch,
       },
       child: Scaffold(
-      appBar: AppBar(
-        title: Text(_title.isEmpty ? 'dart-pdf viewer' : _title,
-            overflow: TextOverflow.ellipsis),
-        actions: [
-          ListenableBuilder(
-            listenable: _controller,
-            builder: (context, _) => _controller.pageCount == 0
-                ? const SizedBox.shrink()
-                : Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Center(
-                      child: Text(
-                        '${_controller.currentPage + 1} / '
-                        '${_controller.pageCount}',
-                        style: Theme.of(context).textTheme.titleMedium,
+        appBar: AppBar(
+          title: Text(_title.isEmpty ? 'dart-pdf viewer' : _title,
+              overflow: TextOverflow.ellipsis),
+          actions: [
+            ListenableBuilder(
+              listenable: _controller,
+              builder: (context, _) => _controller.pageCount == 0
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Center(
+                        child: Text(
+                          '${_controller.currentPage + 1} / '
+                          '${_controller.pageCount}',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
                       ),
                     ),
-                  ),
-          ),
-          ListenableBuilder(
-            listenable: _controller,
-            builder: (context, _) => !_controller.hasSelection
-                ? const SizedBox.shrink()
-                : IconButton(
-                    icon: const Icon(Icons.copy),
-                    tooltip: 'Copy selected text (⌘C)',
-                    onPressed: () async {
-                      await _controller.copySelection();
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Copied to clipboard'),
-                          duration: Duration(seconds: 1),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          if (editing != null) ...[
-            IconButton(
-              icon: const Icon(Icons.grid_view),
-              tooltip: 'Pages',
-              isSelected: _prefs.showThumbnailSidebar,
-              onPressed: () =>
-                  _prefs.showThumbnailSidebar = !_prefs.showThumbnailSidebar,
             ),
-            IconButton(
-              icon: const Icon(Icons.list_alt),
-              tooltip: 'Annotations',
-              isSelected: _prefs.showAnnotationSidebar,
-              onPressed: () =>
-                  _prefs.showAnnotationSidebar = !_prefs.showAnnotationSidebar,
+            ListenableBuilder(
+              listenable: _controller,
+              builder: (context, _) => !_controller.hasSelection
+                  ? const SizedBox.shrink()
+                  : IconButton(
+                      icon: const Icon(Icons.copy),
+                      tooltip: 'Copy selected text (⌘C)',
+                      onPressed: () async {
+                        await _controller.copySelection();
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Copied to clipboard'),
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                    ),
             ),
+            if (editing != null) ...[
+              IconButton(
+                icon: const Icon(Icons.grid_view),
+                tooltip: 'Pages',
+                isSelected: _prefs.showThumbnailSidebar,
+                onPressed: () =>
+                    _prefs.showThumbnailSidebar = !_prefs.showThumbnailSidebar,
+              ),
+              IconButton(
+                icon: const Icon(Icons.list_alt),
+                tooltip: 'Annotations',
+                isSelected: _prefs.showAnnotationSidebar,
+                onPressed: () => _prefs.showAnnotationSidebar =
+                    !_prefs.showAnnotationSidebar,
+              ),
+              IconButton(
+                icon: const Icon(Icons.person_outline),
+                tooltip: 'Author name',
+                onPressed: () async {
+                  final name = await showPdfTextPrompt(context,
+                      title: 'Author name', initial: editing.author ?? '');
+                  if (name == null) return;
+                  editing.author = name.trim().isEmpty ? null : name.trim();
+                },
+              ),
+            ],
             IconButton(
-              icon: const Icon(Icons.person_outline),
-              tooltip: 'Author name',
-              onPressed: () async {
-                final name = await showPdfTextPrompt(context,
-                    title: 'Author name', initial: editing.author ?? '');
-                if (name == null) return;
-                editing.author = name.trim().isEmpty ? null : name.trim();
+              icon: Icon(switch (_prefs.themeMode) {
+                ThemeMode.system => Icons.brightness_auto,
+                ThemeMode.light => Icons.light_mode,
+                ThemeMode.dark => Icons.dark_mode,
+              }),
+              tooltip: switch (_prefs.themeMode) {
+                ThemeMode.system => 'Theme: system — tap for light',
+                ThemeMode.light => 'Theme: light — tap for dark',
+                ThemeMode.dark => 'Theme: dark — tap for system',
+              },
+              onPressed: () => _prefs.themeMode = switch (_prefs.themeMode) {
+                ThemeMode.system => ThemeMode.light,
+                ThemeMode.light => ThemeMode.dark,
+                ThemeMode.dark => ThemeMode.system,
               },
             ),
+            IconButton(
+              icon: const Icon(Icons.auto_awesome),
+              tooltip: 'Open the interactive demo',
+              onPressed: _openDemo,
+            ),
+            IconButton(
+              icon: const Icon(Icons.folder_open),
+              tooltip: 'Open PDF',
+              onPressed: _pickFile,
+            ),
           ],
-          IconButton(
-            icon: const Icon(Icons.auto_awesome),
-            tooltip: 'Open the interactive demo',
-            onPressed: _openDemo,
-          ),
-          IconButton(
-            icon: const Icon(Icons.folder_open),
-            tooltip: 'Open PDF',
-            onPressed: _pickFile,
-          ),
-        ],
-        bottom: editing == null
-            ? null
-            : PreferredSize(
-                preferredSize: const Size.fromHeight(56),
-                child: _SearchBar(
+          bottom: editing == null
+              ? null
+              : PreferredSize(
+                  preferredSize: const Size.fromHeight(56),
+                  child: _SearchBar(
+                      controller: _controller,
+                      field: _searchField,
+                      focusNode: _searchFocus),
+                ),
+        ),
+        body: switch ((editing, _error)) {
+          (_, final String error) => Center(
+              child: Text(error, textAlign: TextAlign.center),
+            ),
+          (null, _) => Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FilledButton.icon(
+                    onPressed: _pickFile,
+                    icon: const Icon(Icons.folder_open),
+                    label: const Text('Open a PDF'),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: _openDemo,
+                    icon: const Icon(Icons.auto_awesome),
+                    label: const Text('Try the interactive demo'),
+                  ),
+                ],
+              ),
+            ),
+          // the editing controller owns the document revisions: rebuild the
+          // viewer with the current one whenever the controller notifies
+          (final PdfEditingController session, _) => Row(children: [
+              if (_prefs.showThumbnailSidebar)
+                PdfThumbnailSidebar(
+                  controller: session,
+                  viewerController: _controller,
+                ),
+              Expanded(
+                child: ListenableBuilder(
+                  listenable: session,
+                  builder: (context, _) => PdfViewer(
+                    document: session.document,
                     controller: _controller,
-                    field: _searchField,
-                    focusNode: _searchFocus),
+                    onAction: _onAction,
+                    pageOverlayBuilder: _isDemo ? _demoOverlays : null,
+                    editing: session,
+                  ),
+                ),
               ),
-      ),
-      body: switch ((editing, _error)) {
-        (_, final String error) => Center(
-            child: Text(error, textAlign: TextAlign.center),
-          ),
-        (null, _) => Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FilledButton.icon(
-                  onPressed: _pickFile,
-                  icon: const Icon(Icons.folder_open),
-                  label: const Text('Open a PDF'),
+              if (_prefs.showAnnotationSidebar)
+                PdfAnnotationSidebar(
+                  controller: session,
+                  viewerController: _controller,
                 ),
-                const SizedBox(height: 12),
-                FilledButton.tonalIcon(
-                  onPressed: _openDemo,
-                  icon: const Icon(Icons.auto_awesome),
-                  label: const Text('Try the interactive demo'),
-                ),
-              ],
-            ),
-          ),
-        // the editing controller owns the document revisions: rebuild the
-        // viewer with the current one whenever the controller notifies
-        (final PdfEditingController session, _) => Row(children: [
-            if (_prefs.showThumbnailSidebar)
-              PdfThumbnailSidebar(
-                controller: session,
+            ]),
+        },
+        bottomNavigationBar: editing == null
+            ? null
+            : PdfEditingToolbar(
+                controller: editing,
                 viewerController: _controller,
+                onSave: (bytes) => unawaited(_saveAs(bytes)),
               ),
-            Expanded(
-              child: ListenableBuilder(
-                listenable: session,
-                builder: (context, _) => PdfViewer(
-                  document: session.document,
-                  controller: _controller,
-                  onAction: _onAction,
-                  pageOverlayBuilder: _isDemo ? _demoOverlays : null,
-                  editing: session,
-                ),
-              ),
-            ),
-            if (_prefs.showAnnotationSidebar)
-              PdfAnnotationSidebar(
-                controller: session,
-                viewerController: _controller,
-              ),
-          ]),
-      },
-      bottomNavigationBar: editing == null
-          ? null
-          : PdfEditingToolbar(
-              controller: editing,
-              viewerController: _controller,
-              onSave: (bytes) => unawaited(_saveAs(bytes)),
-            ),
       ),
     );
   }
@@ -430,8 +472,7 @@ class _ClockTileState extends State<_ClockTile> {
   @override
   void initState() {
     super.initState();
-    _timer =
-        Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
   }
 
   @override

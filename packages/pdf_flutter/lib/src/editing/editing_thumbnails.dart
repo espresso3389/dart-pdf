@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -105,10 +106,9 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
 
   PdfEditingPreferences get _preferences => widget.controller.preferences;
 
-  double get _width => (_dragWidth ??
-          _preferences.thumbnailSidebarWidth ??
-          widget.width)
-      .clamp(widget.minWidth, widget.maxWidth);
+  double get _width =>
+      (_dragWidth ?? _preferences.thumbnailSidebarWidth ?? widget.width)
+          .clamp(widget.minWidth, widget.maxWidth);
 
   @override
   void initState() {
@@ -161,8 +161,8 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
   void _revealPage(int index) {
     if (_ensureTileVisible(index)) return;
     if (!_scroll.hasClients) return;
-    _scroll.jumpTo(_estimateOffset(index)
-        .clamp(0.0, _scroll.position.maxScrollExtent));
+    _scroll.jumpTo(
+        _estimateOffset(index).clamp(0.0, _scroll.position.maxScrollExtent));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _ensureTileVisible(index);
     });
@@ -199,8 +199,7 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
   }
 
   void _onResizeDelta(double delta) => setState(() {
-        _dragWidth =
-            (_width + delta).clamp(widget.minWidth, widget.maxWidth);
+        _dragWidth = (_width + delta).clamp(widget.minWidth, widget.maxWidth);
       });
 
   void _onResizeEnd() {
@@ -313,9 +312,23 @@ class _PageTile extends StatelessWidget {
   final _ThumbnailCache cache;
   final double tileWidth;
 
+  /// WCAG-style contrast ratio between two opaque colors.
+  static double _contrast(Color a, Color b) {
+    final la = a.computeLuminance();
+    final lb = b.computeLuminance();
+    return (math.max(la, lb) + 0.05) / (math.min(la, lb) + 0.05);
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // the viewport mark paints over the paper, not the app surface: a
+    // dark theme's light primary vanishes on a white thumbnail, so pick
+    // whichever accent actually contrasts with the page color
+    final indicator = _contrast(scheme.primary, pageColor) >=
+            _contrast(scheme.inversePrimary, pageColor)
+        ? scheme.primary
+        : scheme.inversePrimary;
     final document = controller.document;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
@@ -357,7 +370,7 @@ class _PageTile extends StatelessWidget {
                     if (viewport != null)
                       Positioned.fill(
                         child: CustomPaint(
-                          painter: _ViewportPainter(viewport, scheme.primary),
+                          painter: _ViewportPainter(viewport, indicator),
                         ),
                       ),
                   ]),
@@ -498,9 +511,8 @@ class _PageThumbnailState extends State<_PageThumbnail> {
     }
     // while a re-render is in flight the previous raster keeps showing
     return AspectRatio(
-      aspectRatio: size.width <= 0 || size.height <= 0
-          ? 1
-          : size.width / size.height,
+      aspectRatio:
+          size.width <= 0 || size.height <= 0 ? 1 : size.width / size.height,
       child: _image == null
           ? ColoredBox(color: widget.pageColor)
           : RawImage(image: _image, fit: BoxFit.contain),

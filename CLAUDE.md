@@ -551,3 +551,14 @@ queue yield via Future.delayed(zero) leaves stray fake timers, so the
 thumbnail render queue serializes on the rasterize awaits alone; never
 chain async work through a STATIC Future in widget-tested code — each
 test's FakeAsync zone dies with the test and the chain dies with it.
+Viewport indicator contrast (Ben: "I still don't see the viewport
+preview"): the strip's viewport mark painted in colorScheme.primary —
+in a dark M3 theme that's light lavender over the (white) thumbnail,
+~1.7:1, invisible; the feature predates dark mode and was only ever
+seen against light-theme primary. The mark paints over the PAPER, not
+the app surface, so _PageTile now picks whichever of primary/
+inversePrimary has the higher WCAG contrast against pageColor (works
+for recolored paper too). Contrast tests live in
+editing_panels_test.dart (read the private painter's color via a
+dynamic cast; light and dark asserted in separate tests per the
+AnimatedTheme gotcha).

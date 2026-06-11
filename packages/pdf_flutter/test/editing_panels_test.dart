@@ -88,8 +88,7 @@ void main() {
       expect(PdfThumbnailSidebar.debugRasterizations, target);
     }
 
-    testWidgets('an edit re-renders only the page it touched',
-        (tester) async {
+    testWidgets('an edit re-renders only the page it touched', (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(3));
       final viewer = PdfViewerController();
       addTearDown(editing.dispose);
@@ -149,6 +148,62 @@ void main() {
     });
   });
 
+  group('viewport indicator contrast', () {
+    Future<Color> indicatorColor(WidgetTester tester, ThemeData theme) async {
+      final editing = PdfEditingController(buildMultiPagePdf(2));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        theme: theme,
+        home: Scaffold(
+          body: Row(children: [
+            PdfThumbnailSidebar(controller: editing, viewerController: viewer),
+            Expanded(
+              child: PdfViewer(
+                initialFit: PdfViewerFit.width,
+                document: editing.document,
+                controller: viewer,
+                editing: editing,
+              ),
+            ),
+          ]),
+        ),
+      ));
+      await tester.pump();
+      final paint = tester
+          .widgetList<CustomPaint>(find.byWidgetPredicate((w) =>
+              w is CustomPaint &&
+              w.painter.runtimeType.toString() == '_ViewportPainter'))
+          .first;
+      // ignore: avoid_dynamic_calls
+      return (paint.painter as dynamic).color as Color;
+    }
+
+    double contrast(Color a, Color b) {
+      final la = a.computeLuminance();
+      final lb = b.computeLuminance();
+      final hi = la > lb ? la : lb;
+      final lo = la > lb ? lb : la;
+      return (hi + 0.05) / (lo + 0.05);
+    }
+
+    // the dark-mode AnimatedTheme gotcha: assert the two themes in
+    // separate tests, never by re-pumping one tree
+
+    testWidgets('reads on white paper under a dark theme', (tester) async {
+      final color = await indicatorColor(tester, ThemeData.dark());
+      // a dark theme's primary is light — near-invisible on white paper
+      expect(contrast(color, const Color(0xFFFFFFFF)), greaterThan(3));
+    });
+
+    testWidgets('stays the primary accent under a light theme', (tester) async {
+      final theme = ThemeData.light();
+      final color = await indicatorColor(tester, theme);
+      expect(color, theme.colorScheme.primary);
+    });
+  });
+
   group('resizable sidebars', () {
     testWidgets('the thumbnail grip drags the panel wider and persists',
         (tester) async {
@@ -183,8 +238,7 @@ void main() {
       expect(editing.preferences.thumbnailSidebarWidth, after);
     });
 
-    testWidgets(
-        'the annotation grip grows leftward, clamps, and persists',
+    testWidgets('the annotation grip grows leftward, clamps, and persists',
         (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(1));
       final viewer = PdfViewerController();
@@ -311,8 +365,7 @@ void main() {
     Future<ByteData> capture(WidgetTester tester, Key key) async {
       final boundary =
           tester.renderObject<RenderRepaintBoundary>(find.byKey(key));
-      final ui.Image image =
-          (await tester.runAsync(() => boundary.toImage()))!;
+      final ui.Image image = (await tester.runAsync(() => boundary.toImage()))!;
       final pixels = (await tester.runAsync(() => image.toByteData()))!;
       addTearDown(image.dispose);
       return pixels;
@@ -357,8 +410,8 @@ void main() {
 
       // mid-pulse: the amber ring is on screen
       await tester.pump(const Duration(milliseconds: 120));
-      final boundary = tester
-          .renderObject<RenderRepaintBoundary>(find.byKey(boundaryKey));
+      final boundary =
+          tester.renderObject<RenderRepaintBoundary>(find.byKey(boundaryKey));
       final size = boundary.size;
       var pixels = await capture(tester, boundaryKey);
       expect(hasAmber(pixels, size.width.round(), size.height.round()), isTrue,
@@ -367,8 +420,7 @@ void main() {
       // the animation ends, then the pending flash expires on its timer
       await tester.pump(const Duration(milliseconds: 1200));
       pixels = await capture(tester, boundaryKey);
-      expect(
-          hasAmber(pixels, size.width.round(), size.height.round()), isFalse,
+      expect(hasAmber(pixels, size.width.round(), size.height.round()), isFalse,
           reason: 'the flash should be gone once the pulse ends');
       await tester.pump(const Duration(milliseconds: 600));
       expect(editing.pendingFlash, isNull);

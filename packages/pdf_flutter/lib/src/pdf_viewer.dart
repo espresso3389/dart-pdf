@@ -1174,6 +1174,35 @@ class _PdfViewerState extends State<PdfViewer>
     return matrix;
   }
 
+  /// Scrollbar motion, in list-space pixels: the scroll extents absorb
+  /// what they can and the leftover pans the zoom window — the same
+  /// spillover as trackpad scrolling, so the document's very ends stay
+  /// reachable from the bar while zoomed in.
+  void _scrollbarScrollBy(double delta) {
+    if (!_scroll.hasClients) return;
+    final position = _scroll.position;
+    final target = position.pixels + delta;
+    final clamped =
+        target.clamp(position.minScrollExtent, position.maxScrollExtent);
+    if (clamped != position.pixels) position.jumpTo(clamped);
+    final matrix = _transform.value.clone();
+    final scale = matrix.getMaxScaleOnAxis();
+    if (scale > 1.01) {
+      matrix.storage[13] += (clamped - target) * scale;
+      _transform.value = _clampedTransform(matrix);
+    }
+  }
+
+  /// Horizontal scrollbar motion, in list-space pixels. Sideways overflow
+  /// exists only inside the zoom window, so this pans the transform.
+  void _scrollbarPanBy(double delta) {
+    final matrix = _transform.value.clone();
+    final scale = matrix.getMaxScaleOnAxis();
+    if (scale <= 1.01) return;
+    matrix.storage[12] -= delta * scale;
+    _transform.value = _clampedTransform(matrix);
+  }
+
   @override
   Widget build(BuildContext context) {
     assert(
@@ -1195,6 +1224,10 @@ class _PdfViewerState extends State<PdfViewer>
                     .clamp(widget.minZoom, 1.0)
                 : 1.0;
       }
+      // no implicit desktop scrollbar: it would attach here, inside the
+      // zoom transform — thin, low-contrast, and scaled or translated out
+      // of view when zoomed. The viewer paints its own bar outside the
+      // transform instead (_PdfScrollbar below).
       final list = ListView.builder(
         controller: _scroll,
         // with a tool armed, touch drags belong to the editing overlay —
@@ -1229,6 +1262,10 @@ class _PdfViewerState extends State<PdfViewer>
             ),
           ),
         ),
+      );
+      final scrollable = ScrollConfiguration(
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+        child: list,
       );
       return CallbackShortcuts(
         bindings: {
@@ -1280,93 +1317,96 @@ class _PdfViewerState extends State<PdfViewer>
               // the canvas color behind the page: visible as margins when
               // zoomed out past fit-width
               color: const Color(0xFF404347),
-              child: InteractiveViewer(
-                transformationController: _transform,
-                maxScale: widget.maxZoom,
-                // wheel zoom is handled in _onPointerSignal; e^(-dy/∞) = 1
-                // disables InteractiveViewer's own (modifier-blind) version
-                scaleFactor: double.maxFinite,
-                minScale: widget.minZoom,
-                // scaling below "cover" needs a free boundary; our own
-                // clamping replaces InteractiveViewer's (live for wheel and
-                // trackpad, on gesture end for touch)
-                boundaryMargin: const EdgeInsets.all(double.infinity),
-                // vertical drags scroll the list; horizontal panning engages
-                // once zoomed in
-                panEnabled: _zoomed,
-                onInteractionEnd: (_) {
-                  // touch pinches run on the transform mid-gesture; settle
-                  // them into the layout/transform regime split
-                  final total =
-                      _transform.value.getMaxScaleOnAxis() * _layoutZoom;
-                  if (total <= 1) {
-                    _transform.value = Matrix4.identity();
-                    _setLayoutZoom(total);
-                  } else if (_layoutZoom < 1) {
-                    // fold the layout factor into the transform zoom
-                    final fold = _layoutZoom;
-                    _setLayoutZoom(1);
-                    final matrix = _transform.value.clone()
-                      ..translateByDouble(_viewWidth / 2, _viewHeight / 2, 0, 1)
-                      ..scaleByDouble(fold, fold, fold, 1)
-                      ..translateByDouble(
-                          -_viewWidth / 2, -_viewHeight / 2, 0, 1);
-                    _transform.value = _clampedTransform(matrix);
-                  } else {
-                    _transform.value =
-                        _clampedTransform(_transform.value.clone());
-                  }
-                  final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
-                  if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
-                },
-                // all trackpad pan-zoom gestures are handled here, never by
-                // the list's drag recognizer (whose iOS-style velocity
-                // tracker asserts on macOS trackpad timestamps) nor by
-                // InteractiveViewer (which would pan only within the zoom
-                // window). Innermost recognizers win the arena, and this one
-                // accepts eagerly.
-                child: RawGestureDetector(
-                  gestures: <Type, GestureRecognizerFactory>{
-                    _TrackpadPanRecognizer:
-                        GestureRecognizerFactoryWithHandlers<
-                            _TrackpadPanRecognizer>(
-                      () => _TrackpadPanRecognizer(debugOwner: this),
-                      (recognizer) => recognizer
-                        ..onStart = _onTrackpadPanZoomStart
-                        ..onUpdate = _onTrackpadPanZoomUpdate
-                        ..onEnd = _onTrackpadPanZoomEnd,
-                    ),
+              child: Stack(children: [
+                InteractiveViewer(
+                  transformationController: _transform,
+                  maxScale: widget.maxZoom,
+                  // wheel zoom is handled in _onPointerSignal; e^(-dy/∞) = 1
+                  // disables InteractiveViewer's own (modifier-blind) version
+                  scaleFactor: double.maxFinite,
+                  minScale: widget.minZoom,
+                  // scaling below "cover" needs a free boundary; our own
+                  // clamping replaces InteractiveViewer's (live for wheel and
+                  // trackpad, on gesture end for touch)
+                  boundaryMargin: const EdgeInsets.all(double.infinity),
+                  // vertical drags scroll the list; horizontal panning engages
+                  // once zoomed in
+                  panEnabled: _zoomed,
+                  onInteractionEnd: (_) {
+                    // touch pinches run on the transform mid-gesture; settle
+                    // them into the layout/transform regime split
+                    final total =
+                        _transform.value.getMaxScaleOnAxis() * _layoutZoom;
+                    if (total <= 1) {
+                      _transform.value = Matrix4.identity();
+                      _setLayoutZoom(total);
+                    } else if (_layoutZoom < 1) {
+                      // fold the layout factor into the transform zoom
+                      final fold = _layoutZoom;
+                      _setLayoutZoom(1);
+                      final matrix = _transform.value.clone()
+                        ..translateByDouble(
+                            _viewWidth / 2, _viewHeight / 2, 0, 1)
+                        ..scaleByDouble(fold, fold, fold, 1)
+                        ..translateByDouble(
+                            -_viewWidth / 2, -_viewHeight / 2, 0, 1);
+                      _transform.value = _clampedTransform(matrix);
+                    } else {
+                      _transform.value =
+                          _clampedTransform(_transform.value.clone());
+                    }
+                    final zoomed = _transform.value.getMaxScaleOnAxis() > 1.01;
+                    if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
                   },
-                  // plain wheel events the list can't use (at its extents)
-                  // must not fall through to InteractiveViewer's wheel-zoom
-                  child: Listener(
-                    onPointerSignal: _onPointerSignal,
-                    // selection drags: scroll wheels and touch scrolling go to
-                    // the list (its drag recognizers win the arena for touch);
-                    // mouse drags fall through to this detector
-                    child: MouseRegion(
-                      cursor: _hoverCursor,
-                      onHover: _onHover,
-                      onExit: (_) {
-                        if (_hoverCursor != MouseCursor.defer) {
-                          setState(() => _hoverCursor = MouseCursor.defer);
-                        }
-                      },
-                      child: Listener(
-                        onPointerDown: _onPointerDown,
-                        onPointerUp: _onPointerUp,
-                        child: GestureDetector(
-                          onTapUp: _onTapUp,
-                          onPanStart: _onSelectionStart,
-                          onPanUpdate: _onSelectionUpdate,
-                          child: ColoredBox(
-                            color: const Color(0xFF404347),
-                            // with ctrl/cmd held the list stops claiming wheel
-                            // events, so they reach the InteractiveViewer, which
-                            // zooms around the pointer
-                            child: IgnorePointer(
-                              ignoring: _zoomModifierDown,
-                              child: list,
+                  // all trackpad pan-zoom gestures are handled here, never by
+                  // the list's drag recognizer (whose iOS-style velocity
+                  // tracker asserts on macOS trackpad timestamps) nor by
+                  // InteractiveViewer (which would pan only within the zoom
+                  // window). Innermost recognizers win the arena, and this one
+                  // accepts eagerly.
+                  child: RawGestureDetector(
+                    gestures: <Type, GestureRecognizerFactory>{
+                      _TrackpadPanRecognizer:
+                          GestureRecognizerFactoryWithHandlers<
+                              _TrackpadPanRecognizer>(
+                        () => _TrackpadPanRecognizer(debugOwner: this),
+                        (recognizer) => recognizer
+                          ..onStart = _onTrackpadPanZoomStart
+                          ..onUpdate = _onTrackpadPanZoomUpdate
+                          ..onEnd = _onTrackpadPanZoomEnd,
+                      ),
+                    },
+                    // plain wheel events the list can't use (at its extents)
+                    // must not fall through to InteractiveViewer's wheel-zoom
+                    child: Listener(
+                      onPointerSignal: _onPointerSignal,
+                      // selection drags: scroll wheels and touch scrolling go to
+                      // the list (its drag recognizers win the arena for touch);
+                      // mouse drags fall through to this detector
+                      child: MouseRegion(
+                        cursor: _hoverCursor,
+                        onHover: _onHover,
+                        onExit: (_) {
+                          if (_hoverCursor != MouseCursor.defer) {
+                            setState(() => _hoverCursor = MouseCursor.defer);
+                          }
+                        },
+                        child: Listener(
+                          onPointerDown: _onPointerDown,
+                          onPointerUp: _onPointerUp,
+                          child: GestureDetector(
+                            onTapUp: _onTapUp,
+                            onPanStart: _onSelectionStart,
+                            onPanUpdate: _onSelectionUpdate,
+                            child: ColoredBox(
+                              color: const Color(0xFF404347),
+                              // with ctrl/cmd held the list stops claiming wheel
+                              // events, so they reach the InteractiveViewer, which
+                              // zooms around the pointer
+                              child: IgnorePointer(
+                                ignoring: _zoomModifierDown,
+                                child: scrollable,
+                              ),
                             ),
                           ),
                         ),
@@ -1374,7 +1414,34 @@ class _PdfViewerState extends State<PdfViewer>
                     ),
                   ),
                 ),
-              ),
+                // outside the zoom transform, so they keep their place
+                // and size at any zoom
+                Positioned(
+                  top: 0,
+                  bottom: 0,
+                  right: 0,
+                  child: _PdfScrollbar(
+                    axis: Axis.vertical,
+                    scroll: _scroll,
+                    transform: _transform,
+                    minOverflow: widget.pageSpacing,
+                    onScrollBy: _scrollbarScrollBy,
+                  ),
+                ),
+                // appears only while zoomed in (the only sideways
+                // overflow); inset so the corner stays the vertical bar's
+                Positioned(
+                  left: 0,
+                  right: _PdfScrollbar.hitExtent,
+                  bottom: 0,
+                  child: _PdfScrollbar(
+                    axis: Axis.horizontal,
+                    transform: _transform,
+                    viewExtent: _viewWidth,
+                    onScrollBy: _scrollbarPanBy,
+                  ),
+                ),
+              ]),
             ),
           ),
         ),
@@ -1500,6 +1567,225 @@ class _HighlightPainter extends CustomPainter {
       oldDelegate.matches != matches ||
       oldDelegate.currentMatch != currentMatch ||
       oldDelegate.selection != selection;
+}
+
+/// The viewer's own scrollbar, painted outside the zoom transform so it
+/// keeps its place and size at any zoom (the framework's implicit bar
+/// would attach inside the InteractiveViewer: thin, low-contrast, and
+/// scaled out of view when zoomed). Always visible while the document
+/// overflows — a light thumb with a dark outline reads against both the
+/// dark canvas and white pages. The thumb drags, the track jumps on
+/// tap, and while zoomed in the thumb tracks the combined
+/// scroll-plus-pan position, with motion spilling into the zoom window
+/// at the scroll extents like trackpad scrolling.
+class _PdfScrollbar extends StatefulWidget {
+  const _PdfScrollbar({
+    required this.axis,
+    this.scroll,
+    required this.transform,
+    this.minOverflow = 0,
+    this.viewExtent,
+    required this.onScrollBy,
+  }) : assert(axis == Axis.vertical ? scroll != null : viewExtent != null);
+
+  /// How much room bars reserve: the horizontal bar is inset by this on
+  /// the right so the two never overlap in the corner.
+  static const hitExtent = 14.0;
+
+  final Axis axis;
+
+  /// Vertical only: the list's controller (vertical position is scroll
+  /// plus zoom-window pan).
+  final ScrollController? scroll;
+  final TransformationController transform;
+
+  /// Hide while the scrollable range is at most this (the list pads its
+  /// bottom by the page spacing, so a fully visible document still has
+  /// that much nominal slack — no bar for just a margin).
+  final double minOverflow;
+
+  /// Horizontal only: the viewer's full width — the laid-out content
+  /// width in list space (the bar's own track is inset for the corner,
+  /// so it can't measure this itself).
+  final double? viewExtent;
+
+  /// Moves the view by a delta in list-space pixels
+  /// (_PdfViewerState._scrollbarScrollBy / _scrollbarPanBy).
+  final void Function(double delta) onScrollBy;
+
+  @override
+  State<_PdfScrollbar> createState() => _PdfScrollbarState();
+}
+
+class _PdfScrollbarState extends State<_PdfScrollbar> {
+  static const _minThumb = 36.0;
+
+  bool _hovered = false;
+  bool _dragging = false;
+
+  bool get _vertical => widget.axis == Axis.vertical;
+
+  /// (laid-out extent, visible extent) along the axis, in list-space
+  /// pixels, or null while there are no metrics yet.
+  (double, double)? _extents() {
+    final scale = widget.transform.value.getMaxScaleOnAxis();
+    if (_vertical) {
+      final scroll = widget.scroll!;
+      if (!scroll.hasClients) return null;
+      final position = scroll.position;
+      if (!position.hasContentDimensions) return null;
+      final total = position.maxScrollExtent + position.viewportDimension;
+      return (total, position.viewportDimension / scale);
+    }
+    // horizontally the pages always lay out at the viewer width; overflow
+    // exists only inside the zoom window
+    final total = widget.viewExtent!;
+    return (total, total / scale);
+  }
+
+  /// The visible window's leading edge in list space: the viewport
+  /// unprojects through the transform as (p - t) / s, riding on the
+  /// scroll offset vertically (see _visibleFractionOf).
+  double _offset() {
+    final m = widget.transform.value;
+    final scale = m.getMaxScaleOnAxis();
+    return _vertical
+        ? -m.storage[13] / scale + widget.scroll!.position.pixels
+        : -m.storage[12] / scale;
+  }
+
+  /// (thumb position, thumb extent) in track pixels, or null when the
+  /// whole document is visible along this axis and the bar should hide.
+  (double, double)? _thumb(double trackExtent) {
+    if (trackExtent <= 0) return null;
+    final extents = _extents();
+    if (extents == null) return null;
+    final (total, visible) = extents;
+    if (total <= visible + widget.minOverflow + 0.5) return null;
+    final thumbExtent = (trackExtent * visible / total)
+        .clamp(math.min(_minThumb, trackExtent), trackExtent)
+        .toDouble();
+    final fraction = (_offset() / (total - visible)).clamp(0.0, 1.0);
+    return (fraction * (trackExtent - thumbExtent), thumbExtent);
+  }
+
+  /// One thumb-track pixel in list-space pixels.
+  double _listPixelsPerTrackPixel(double trackExtent, double thumbExtent) {
+    final extents = _extents();
+    if (extents == null) return 0;
+    final (total, visible) = extents;
+    final track = trackExtent - thumbExtent;
+    return track <= 0 ? 0 : (total - visible) / track;
+  }
+
+  /// Centers the visible window on track position [tapAt].
+  void _jumpTo(double tapAt, double trackExtent) {
+    final thumb = _thumb(trackExtent);
+    if (thumb == null) return;
+    final (thumbPos, thumbExtent) = thumb;
+    final perPixel = _listPixelsPerTrackPixel(trackExtent, thumbExtent);
+    widget.onScrollBy((tapAt - thumbExtent / 2 - thumbPos) * perPixel);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge(
+          [if (widget.scroll != null) widget.scroll!, widget.transform]),
+      builder: (context, _) => LayoutBuilder(builder: (context, constraints) {
+        final trackExtent =
+            _vertical ? constraints.maxHeight : constraints.maxWidth;
+        final thumb = _thumb(trackExtent);
+        if (thumb == null) return const SizedBox.shrink();
+        final (thumbPos, thumbExtent) = thumb;
+        final active = _hovered || _dragging;
+        void dragStart(DragStartDetails details) {
+          final at =
+              _vertical ? details.localPosition.dy : details.localPosition.dx;
+          // grabbing the track brings the thumb under the pointer first;
+          // then the drag is relative, like grabbing the thumb
+          if (at < thumbPos || at > thumbPos + thumbExtent) {
+            _jumpTo(at, trackExtent);
+          }
+          setState(() => _dragging = true);
+        }
+
+        void dragUpdate(DragUpdateDetails details) {
+          final thumb = _thumb(trackExtent);
+          if (thumb == null) return;
+          final perPixel = _listPixelsPerTrackPixel(trackExtent, thumb.$2);
+          widget.onScrollBy(
+              (_vertical ? details.delta.dy : details.delta.dx) * perPixel);
+        }
+
+        void dragStop() => setState(() => _dragging = false);
+
+        return MouseRegion(
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            // deltas from the press point: the thumb tracks the pointer
+            // from the very first pixel
+            dragStartBehavior: DragStartBehavior.down,
+            onTapUp: (details) {
+              final at = _vertical
+                  ? details.localPosition.dy
+                  : details.localPosition.dx;
+              // a tap on the thumb itself is not a jump
+              if (at < thumbPos || at > thumbPos + thumbExtent) {
+                _jumpTo(at, trackExtent);
+              }
+            },
+            onVerticalDragStart: _vertical ? dragStart : null,
+            onVerticalDragUpdate: _vertical ? dragUpdate : null,
+            onVerticalDragEnd: _vertical ? (_) => dragStop() : null,
+            onVerticalDragCancel: _vertical ? dragStop : null,
+            onHorizontalDragStart: _vertical ? null : dragStart,
+            onHorizontalDragUpdate: _vertical ? null : dragUpdate,
+            onHorizontalDragEnd: _vertical ? null : (_) => dragStop(),
+            onHorizontalDragCancel: _vertical ? null : dragStop,
+            child: SizedBox(
+              width: _vertical ? _PdfScrollbar.hitExtent : trackExtent,
+              height: _vertical ? trackExtent : _PdfScrollbar.hitExtent,
+              child: Stack(children: [
+                // a faint track scrim so the bar reads as a control over
+                // white pages too
+                Positioned.fill(
+                  child: ColoredBox(
+                      color: active
+                          ? const Color(0x2E000000)
+                          : const Color(0x14000000)),
+                ),
+                Positioned(
+                  top: _vertical ? thumbPos : null,
+                  left: _vertical ? null : thumbPos,
+                  right: _vertical ? 2 : null,
+                  bottom: _vertical ? null : 2,
+                  width: _vertical ? (active ? 10 : 8) : thumbExtent,
+                  height: _vertical ? thumbExtent : (active ? 10 : 8),
+                  child: Container(
+                    key: _vertical
+                        ? const ValueKey('pdf-scrollbar-thumb')
+                        : const ValueKey('pdf-hscrollbar-thumb'),
+                    decoration: BoxDecoration(
+                      // light fill + dark outline: visible on the dark
+                      // canvas and on white pages alike
+                      color: active
+                          ? const Color(0xFFF5F6F8)
+                          : const Color(0xD9E8EAED),
+                      borderRadius: BorderRadius.circular(5),
+                      border: Border.all(color: const Color(0x59000000)),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        );
+      }),
+    );
+  }
 }
 
 /// Claims every trackpad pan-zoom gesture, eagerly. The viewer drives

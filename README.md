@@ -110,7 +110,12 @@ written as Bézier curves in the appearance stream, so fast strokes
 stay rounded instead of showing polyline corners — in this viewer and
 any other.
 The viewer opens fitted to the whole page like desktop browser viewers
-(`PdfViewer.initialFit`). Still
+(`PdfViewer.initialFit`), and draws its own always-visible scrollbar —
+high-contrast, outside the zoom transform so it never scales away, with
+a draggable thumb and tap-to-jump track; zooming in adds a horizontal
+bar for panning the zoom window, and both bars reach the document's
+very ends even while zoomed (motion spills from the scroll extents into
+the zoom window, like trackpad scrolling). Still
 open: richer text editing (reflow),
 RSASSA-PSS signatures, JBIG2 Huffman/refinement variants, and JPX
 subsampling/PCRL-CPRL progressions.

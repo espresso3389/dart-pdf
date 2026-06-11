@@ -279,3 +279,24 @@ overshoot" test). The same helper drives the live previews so drawn ==
 committed: overlay `_EditingPreviewPainter` (cubicTo; controls computed
 in page space then mapped — affine, order irrelevant) and the signature
 pad painter. /InkList still stores the raw samples per spec.
+Scrollbars (Ben: "very hard to see"): the implicit desktop bar lived
+inside the InteractiveViewer (thin, scaled away when zoomed) — now
+suppressed via ScrollConfiguration(scrollbars: false). `_PdfScrollbar`
+(pdf_viewer.dart, axis-generic) paints outside the transform in the
+canvas Stack: light thumb + dark outline (reads on dark canvas and
+white pages), faint track scrim, hover/drag widens 8→10px, min thumb
+36px, DragStartBehavior.down, track tap/track-grab jumps then drags.
+Vertical position = scroll.pixels − t_y/s (the transform unprojection);
+motion goes through `_scrollbarScrollBy`, which spills what the scroll
+extents can't absorb into the zoom window (trackpad-style) so the ends
+stay reachable zoomed. Hidden while range ≤ pageSpacing (the list's
+bottom padding is nominal slack). Horizontal bar appears only zoomed
+(sideways overflow lives in the transform; `_scrollbarPanBy` pans
+m[12]), inset right by hitExtent(14) so corners don't collide; needs
+`viewExtent: _viewWidth` since its own track is inset. Thumb keys:
+'pdf-scrollbar-thumb' / 'pdf-hscrollbar-thumb'. Test gotchas
+(pdf_scrollbar_test.dart): lazy-ListView maxScrollExtent is an
+estimate that drifts as items build (tolerances, not exact math);
+tester.drag eats touch slop (use startGesture+moveBy); touch taps on
+the bar resolve only after the viewer's double-tap timeout (pump
+400ms); end drag tests with a 300ms pump for the scroll-settle timer.

@@ -2,7 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:pdf_document/pdf_document.dart' show pdfInkStrokeWidth;
+import 'package:pdf_document/pdf_document.dart'
+    show pdfInkCurveControls, pdfInkStrokeWidth;
 
 /// A hand-drawn signature, stored device-side and stamped onto pages as
 /// an Ink annotation ([PdfEditingController.placeSignature]).
@@ -301,10 +302,14 @@ class _SignaturePadPainter extends CustomPainter {
       final stroke = strokes[i];
       final pressure = i < pressures.length ? pressures[i] : null;
       if (stroke.isEmpty) continue;
+      // same Catmull-Rom smoothing as the committed ink appearance
+      final controls =
+          pdfInkCurveControls([for (final p in stroke) (p.dx, p.dy)]);
       if (pressure == null) {
         final path = Path()..moveTo(stroke.first.dx, stroke.first.dy);
-        for (final p in stroke.skip(1)) {
-          path.lineTo(p.dx, p.dy);
+        for (var j = 0; j + 1 < stroke.length; j++) {
+          final ((c1x, c1y), (c2x, c2y)) = controls[j];
+          path.cubicTo(c1x, c1y, c2x, c2y, stroke[j + 1].dx, stroke[j + 1].dy);
         }
         canvas.drawPath(path, paint);
       } else {
@@ -322,7 +327,13 @@ class _SignaturePadPainter extends CustomPainter {
         for (var j = 0; j + 1 < stroke.length; j++) {
           final avg = (pressure[j] + pressure[j + 1]) / 2;
           segment.strokeWidth = pdfInkStrokeWidth(_baseWidth, avg);
-          canvas.drawLine(stroke[j], stroke[j + 1], segment);
+          final ((c1x, c1y), (c2x, c2y)) = controls[j];
+          canvas.drawPath(
+              Path()
+                ..moveTo(stroke[j].dx, stroke[j].dy)
+                ..cubicTo(
+                    c1x, c1y, c2x, c2y, stroke[j + 1].dx, stroke[j + 1].dy),
+              segment);
         }
       }
     }

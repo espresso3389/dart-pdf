@@ -104,7 +104,11 @@ stroke width, opacity, font size, the stylus/finger mode, and panel
 visibility all come back the way the user left them.
 Apple Pencil (and any stylus) is first-class for ink: strokes record
 pressure and render with variable width, and the first pen contact
-turns on palm rejection — fingers scroll while the pen draws.
+turns on palm rejection — fingers scroll while the pen draws. Ink
+strokes are smoothed: the sampled points become a Catmull-Rom spline
+written as Bézier curves in the appearance stream, so fast strokes
+stay rounded instead of showing polyline corners — in this viewer and
+any other.
 The viewer opens fitted to the whole page like desktop browser viewers
 (`PdfViewer.initialFit`). Still
 open: richer text editing (reflow),

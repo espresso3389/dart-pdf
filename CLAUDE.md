@@ -266,3 +266,16 @@ ten creation paths and is preserved across setSelectedText's
 remove+re-add. Tile subtitle is 'author — contents'. Example app:
 person_outline AppBar button prompts for the name. Tests:
 editing_sidebar_test.dart.
+Ink smoothing (Ben: "curves looked chunked"): points are sampled once
+per frame, so fast strokes left long straight `l` segments.
+`pdfInkCurveControls(points)` (annotation_editor.dart, exported beside
+pdfInkStrokeWidth) converts a polyline to Catmull-Rom cubic controls —
+c1 = pᵢ + (pᵢ₊₁−pᵢ₋₁)/6, c2 = pᵢ₊₁ − (pᵢ₊₂−pᵢ)/6, neighbors clamped at
+the ends; two points degenerate to a straight chord. `addInk` writes
+`c` ops (per-pair moveTo+curveTo for pressured strokes), and the rect
+bounds include the control points (a spline can overshoot its samples;
+the Bézier hull makes the pad rigorous — covered by the "spline
+overshoot" test). The same helper drives the live previews so drawn ==
+committed: overlay `_EditingPreviewPainter` (cubicTo; controls computed
+in page space then mapped — affine, order irrelevant) and the signature
+pad painter. /InkList still stores the raw samples per spec.

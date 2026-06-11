@@ -122,6 +122,51 @@ void main() {
     expect(pdfInkStrokeWidth(4, 1), closeTo(6.4, 1e-9));
   });
 
+  test('ink appearances smooth the polyline into Bézier curves', () {
+    final doc = roundTrip((e) => e.addInk(0, [
+          [(100, 100), (150, 130), (200, 100)],
+        ]));
+    final content = appearanceText(doc, doc.page(0).annotations.single);
+    // curve segments instead of straight l segments between samples
+    expect(content, contains(' c'));
+    expect(content, isNot(contains(' l')));
+
+    // the Catmull-Rom controls: endpoints clamp, interior tangents are
+    // (next − previous) / 6
+    final controls =
+        pdfInkCurveControls([(100, 100), (150, 130), (200, 100)]);
+    expect(controls, hasLength(2));
+    expect(controls[0].$1.$1, closeTo(100 + 50 / 6, 1e-9));
+    expect(controls[0].$1.$2, closeTo(105, 1e-9));
+    expect(controls[0].$2.$1, closeTo(150 - 100 / 6, 1e-9));
+    expect(controls[0].$2.$2, closeTo(130, 1e-9));
+    expect(controls[1].$1.$1, closeTo(150 + 100 / 6, 1e-9));
+    expect(controls[1].$1.$2, closeTo(130, 1e-9));
+    expect(controls[1].$2.$1, closeTo(200 - 50 / 6, 1e-9));
+    expect(controls[1].$2.$2, closeTo(105, 1e-9));
+
+    // a two-point stroke degenerates to a straight segment: collinear
+    // controls on the chord
+    final straight = pdfInkCurveControls([(0, 0), (60, 30)]);
+    expect(straight.single.$1.$1, closeTo(10, 1e-9));
+    expect(straight.single.$1.$2, closeTo(5, 1e-9));
+    expect(straight.single.$2.$1, closeTo(50, 1e-9));
+    expect(straight.single.$2.$2, closeTo(25, 1e-9));
+  });
+
+  test('ink rect covers spline overshoot past the sampled points', () {
+    // an asymmetric apex: the spline's control points poke above and
+    // left of the samples, and the rect must still contain the curve
+    final doc = roundTrip((e) => e.addInk(0, [
+          [(50, 0), (60, 100), (150, 90)],
+        ], strokeWidth: 2));
+    final ink = doc.page(0).annotations.single;
+    // seg 1's c1 = p1 + (p2 − p0)/6 = (76.67, 115); pad = w/2 + 1 = 2
+    expect(ink.rect.top, closeTo(115 + 2, 1e-4));
+    // seg 0's c2 = p1 − (p2 − p0)/6 = (43.33, 85) — left of every sample
+    expect(ink.rect.left, closeTo(60 - 100 / 6 - 2, 1e-4));
+  });
+
   test('mismatched ink pressures are rejected', () {
     final editor = PdfEditor(PdfDocument.open(buildClassicPdf()));
     expect(

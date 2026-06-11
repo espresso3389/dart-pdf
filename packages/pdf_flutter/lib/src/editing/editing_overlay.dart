@@ -728,28 +728,41 @@ class _EditingPreviewPainter extends CustomPainter {
         canvas.drawCircle(p, width / 2, Paint()..color = color);
         continue;
       }
+      // the same Catmull-Rom smoothing the committed appearance uses
+      final controls = pdfInkCurveControls(stroke);
       if (pressure != null) {
-        // matches the committed appearance: a stroked segment per point
-        // pair at its own pressure-mapped width, round caps as the seams
+        // matches the committed appearance: a stroked spline segment per
+        // point pair at its own pressure-mapped width, round caps as the
+        // seams
         final segment = Paint()
           ..color = color
           ..style = PaintingStyle.stroke
           ..strokeCap = StrokeCap.round;
         for (var i = 0; i < stroke.length - 1; i++) {
           final (xa, ya) = stroke[i];
-          final (xb, yb) = stroke[i + 1];
+          final ((c1x, c1y), (c2x, c2y)) = controls[i];
+          final a = geometry.toViewOffset(xa, ya);
+          final c1 = geometry.toViewOffset(c1x, c1y);
+          final c2 = geometry.toViewOffset(c2x, c2y);
+          final b = geometry.toViewOffset(stroke[i + 1].$1, stroke[i + 1].$2);
           segment.strokeWidth = pdfInkStrokeWidth(
               strokeWidth, (pressure[i] + pressure[i + 1]) / 2);
-          canvas.drawLine(geometry.toViewOffset(xa, ya),
-              geometry.toViewOffset(xb, yb), segment);
+          canvas.drawPath(
+              Path()
+                ..moveTo(a.dx, a.dy)
+                ..cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, b.dx, b.dy),
+              segment);
         }
         continue;
       }
-      final path = Path();
-      for (var i = 0; i < stroke.length; i++) {
-        final (x, y) = stroke[i];
-        final p = geometry.toViewOffset(x, y);
-        i == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
+      final start = geometry.toViewOffset(stroke.first.$1, stroke.first.$2);
+      final path = Path()..moveTo(start.dx, start.dy);
+      for (var i = 0; i < stroke.length - 1; i++) {
+        final ((c1x, c1y), (c2x, c2y)) = controls[i];
+        final c1 = geometry.toViewOffset(c1x, c1y);
+        final c2 = geometry.toViewOffset(c2x, c2y);
+        final p = geometry.toViewOffset(stroke[i + 1].$1, stroke[i + 1].$2);
+        path.cubicTo(c1.dx, c1.dy, c2.dx, c2.dy, p.dx, p.dy);
       }
       canvas.drawPath(path, paint);
     }

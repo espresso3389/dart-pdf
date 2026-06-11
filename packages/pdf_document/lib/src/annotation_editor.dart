@@ -7,6 +7,32 @@ part of 'editor.dart';
 double pdfInkStrokeWidth(double strokeWidth, double pressure) =>
     strokeWidth * (0.4 + 1.2 * pressure.clamp(0.0, 1.0));
 
+/// Cubic Bézier control points that smooth a captured polyline into a
+/// Catmull-Rom spline through its points: `result[i]` is the `(c1, c2)`
+/// pair for the segment `points[i] → points[i+1]`. Pointer events sample
+/// a stroke once per frame, so a fast stroke leaves long straight
+/// segments with visible corners; the spline rounds them while still
+/// passing through every sample. Shared by [PdfAnnotationEditing.addInk]
+/// appearances and the live stroke previews so committed ink matches
+/// what was drawn.
+List<((double, double), (double, double))> pdfInkCurveControls(
+    List<(double, double)> points) {
+  return [
+    for (var i = 0; i < points.length - 1; i++)
+      () {
+        // neighbors clamp to the endpoints, the standard open-spline rule
+        final (x0, y0) = points[i == 0 ? 0 : i - 1];
+        final (x1, y1) = points[i];
+        final (x2, y2) = points[i + 1];
+        final (x3, y3) = points[math.min(i + 2, points.length - 1)];
+        return (
+          (x1 + (x2 - x0) / 6, y1 + (y2 - y0) / 6),
+          (x2 - (x3 - x1) / 6, y2 - (y3 - y1) / 6),
+        );
+      }(),
+  ];
+}
+
 /// Annotation authoring (§12.5): each method creates an annotation with a
 /// generated appearance stream (/AP → /N), so the result displays the same
 /// in this renderer and in other viewers.
@@ -139,10 +165,16 @@ extension PdfAnnotationEditing on PdfEditor {
         }
       }
     }
+    final controls = [
+      for (final stroke in strokes) pdfInkCurveControls(stroke),
+    ];
     var minX = double.infinity, minY = double.infinity;
     var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
-    for (final stroke in strokes) {
-      for (final (x, y) in stroke) {
+    // a Bézier stays inside its control points' hull, so including the
+    // controls makes the rect cover any spline overshoot past the samples
+    for (var s = 0; s < strokes.length; s++) {
+      for (final (x, y) in strokes[s]
+          .followedBy(controls[s].expand((c) => [c.$1, c.$2]))) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -169,8 +201,10 @@ extension PdfAnnotationEditing on PdfEditor {
           // a dot: zero-length segment with round caps paints a circle
           w.lineTo(x0, y0);
         }
-        for (final (x, y) in stroke.skip(1)) {
-          w.lineTo(x, y);
+        for (var i = 0; i < stroke.length - 1; i++) {
+          final ((c1x, c1y), (c2x, c2y)) = controls[s][i];
+          final (x, y) = stroke[i + 1];
+          w.curveTo(c1x, c1y, c2x, c2y, x, y);
         }
         w.stroke();
         continue;
@@ -183,16 +217,17 @@ extension PdfAnnotationEditing on PdfEditor {
           ..stroke();
         continue;
       }
-      // one stroked segment per point pair, each at its own width; the
-      // round caps and joins hide the seams
+      // one stroked spline segment per point pair, each at its own width;
+      // the round caps and joins hide the seams
       for (var i = 0; i < stroke.length - 1; i++) {
         final (xa, ya) = stroke[i];
+        final ((c1x, c1y), (c2x, c2y)) = controls[s][i];
         final (xb, yb) = stroke[i + 1];
         w
           ..lineWidth(pdfInkStrokeWidth(
               strokeWidth, (pressure[i] + pressure[i + 1]) / 2))
           ..moveTo(xa, ya)
-          ..lineTo(xb, yb)
+          ..curveTo(c1x, c1y, c2x, c2y, xb, yb)
           ..stroke();
       }
     }

@@ -142,6 +142,14 @@ armed. Touch pinch zoom works everywhere — including with a tool
 armed — and touch or stylus selections get a floating action chip
 (delete, context menu, edit text) standing in for hover and
 right-click.
+Touch text selection works the platform's way: drags always scroll
+(they never get caught starting a selection), a long press selects
+the word under the finger and extends by whole words while the press
+drags, and lifting shows draggable lollipop handles at both ends plus
+a floating Copy/Select-All chip — so highlighting on a tablet is
+long-press, adjust the handles, tap the markup button. The handles
+counter-scale with zoom (constant size on screen) and their color is
+themable (`PdfViewerThemeData.selectionHandleColor`).
 Trackpad gestures behave like the platform's own: a pinch zooms about
 the fingers without also scrolling the document (each gesture commits
 to scrolling or zooming, whichever its motion shows first), and

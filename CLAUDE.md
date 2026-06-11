@@ -1022,3 +1022,41 @@ needing two annotations must finishInk between strokes; a touch tap
 on overlay chrome resolves only after the viewer's 400ms double-tap
 timeout, and pumpAndSettle does NOT advance that timer (no frames
 scheduled) — pump(400ms) explicitly.
+Batch 3, session 8 (touch text selection, from Ben's iPad testing —
+"scroll gets caught in text selection"): the viewer's selection pan
+recognizer accepted touch, so any swipe with a horizontal component
+crossed pan slop before the list's vertical drag could claim it and
+became a selection. Now: the pan recognizer (pdf_viewer.dart, the
+inner detector — now GestureDetector(taps) wrapping a
+RawGestureDetector) is mouse+trackpad only; touch/stylus selection is
+`_SelectionLongPressRecognizer` (long press, touch+stylus, gated by
+`isEnabled` checked in addAllowedPointer: stands down entirely while
+an editing tool is armed or the eyedropper is live, so it never claims
+under a tool gesture). Long-press start selects the word
+(`_wordRangeAt` + HapticFeedback.selectionClick), move extends by
+whole words (`_extendWordSelection`, factored out of
+_onSelectionUpdate's word path), lift shows the chrome. Chrome =
+`_PageTextSelection` config computed per page in `_textSelectionOn`
+(boundary pages only; null mid-long-press — the wash is the live
+feedback), rendered by `_TextSelectionChrome` in the page Stack
+(topmost; only mounts in reader mode) under a
+ValueListenableBuilder(transformScale): `_SelectionHandle` lollipops
+(start ball above rect.topLeft, end ball below rect.bottomRight; color
+= new `PdfViewerThemeData.selectionHandleColor`, default 0xFF2196F3;
+counter-scaled by 1/zoom) whose drags use `_EagerPanRecognizer`
+(claims on pointer down — beats list scroll; handle drag start
+normalizes anchor/focus so the dragged end is the focus, updates via
+`_textPositionAt(globalToLocal through _listSpaceKey's RenderBox)` —
+the render tree applies the zoom transform for free), and a
+Copy/Select-all chip (keys 'pdf-text-selection-chip', '-copy',
+'-select-all'; Copy = copySelection + clear, Select all =
+`_selectAllTextOn(page)`, factored out of _onSelectAll). Handle keys:
+'pdf-text-handle-start'/'-end'. Chrome shows when `_selRange != null`
+&& last pointer kind ∈ {touch, stylus} && !_touchSelecting; chip also
+hides while `_handleDragging`. Tests
+(pdf_touch_selection_test.dart, 14): on a one-word selection the two
+handle hit boxes overlap across the stem zone and the end handle
+(later in the Stack) wins hits there — grab the start handle's BALL
+(above the text line) in tests; touch chip taps need the usual
+pump(400ms); existing selection tests were already mouse-kind so the
+recognizer restriction broke none.

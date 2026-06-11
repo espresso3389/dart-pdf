@@ -424,6 +424,17 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   /// carry one, and default-mode annotation selection is mouse-only.
   PointerDeviceKind? _lastPointerKind;
 
+  /// A long-press (touch/stylus) word selection is mid-gesture: the
+  /// handles and copy chip stay hidden until the finger lifts.
+  bool _touchSelecting = false;
+
+  /// A selection handle is being dragged (chip hidden meanwhile).
+  bool _handleDragging = false;
+
+  /// The widget inside the zoom transform whose render box maps handle
+  /// drags' global positions back into list coordinates.
+  final GlobalKey _listSpaceKey = GlobalKey();
+
   /// A mouse drag that started on empty page area (no text under the
   /// press) grab-pans the document instead of selecting text.
   bool _grabPanning = false;
@@ -1061,6 +1072,12 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       editing.selectAllAnnotationsOn(page);
       return;
     }
+    _selectAllTextOn(page);
+  }
+
+  /// Selects the whole text of one page (⌘A and the touch chip's
+  /// Select All).
+  void _selectAllTextOn(int page) {
     final length = _pageText(page).text.length;
     if (length == 0) return;
     _wordAnchor = null;
@@ -1200,22 +1217,8 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       _grabPanBy(details.delta);
       return;
     }
-    final wordAnchor = _wordAnchor;
-    if (wordAnchor != null) {
-      // word granularity: span from the anchor word through the word
-      // under the pointer
-      final range =
-          _wordRangeAt(details.localPosition, tolerance: double.infinity);
-      if (range == null) return;
-      final start =
-          _isBefore(range.$1, wordAnchor.$1) ? range.$1 : wordAnchor.$1;
-      final end = _isBefore(wordAnchor.$2, range.$2) ? range.$2 : wordAnchor.$2;
-      if (start == _selAnchor && end == _selFocus) return;
-      setState(() {
-        _selAnchor = start;
-        _selFocus = end;
-      });
-      _controller._setSelection(_selectedText());
+    if (_wordAnchor != null) {
+      _extendWordSelection(details.localPosition);
       return;
     }
     if (_selAnchor == null) return;
@@ -1232,6 +1235,128 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     setState(() => _hoverCursor = SystemMouseCursors.grab);
   }
 
+  /// Word granularity: spans from the anchor word through the word
+  /// under the pointer (mouse double-click drags and long-press drags).
+  void _extendWordSelection(Offset local) {
+    final wordAnchor = _wordAnchor;
+    if (wordAnchor == null) return;
+    final range = _wordRangeAt(local, tolerance: double.infinity);
+    if (range == null) return;
+    final start = _isBefore(range.$1, wordAnchor.$1) ? range.$1 : wordAnchor.$1;
+    final end = _isBefore(wordAnchor.$2, range.$2) ? range.$2 : wordAnchor.$2;
+    if (start == _selAnchor && end == _selFocus) return;
+    setState(() {
+      _selAnchor = start;
+      _selFocus = end;
+    });
+    _controller._setSelection(_selectedText());
+  }
+
+  // --- touch text selection ---
+  //
+  // Touch and stylus drags always scroll; selecting text starts with a
+  // long press on a word (the recognizer claims the arena, so the list
+  // can't scroll out from under the press) and extends by whole words
+  // while the press drags. Lifting shows drag handles at both ends and
+  // a Copy/Select-All chip; the handles re-anchor the selection at
+  // character granularity.
+
+  /// Whether the touch selection chrome (handles + chip) should show:
+  /// there is a selection and the last pointer was touch or stylus.
+  bool get _touchSelectionChrome =>
+      _selRange != null &&
+      (_lastPointerKind == PointerDeviceKind.touch ||
+          _lastPointerKind == PointerDeviceKind.stylus);
+
+  void _onLongPressStart(LongPressStartDetails details) {
+    final range = _wordRangeAt(details.localPosition);
+    if (range == null) {
+      _clearSelection();
+      return;
+    }
+    HapticFeedback.selectionClick();
+    _wordAnchor = range;
+    setState(() {
+      _touchSelecting = true;
+      _selAnchor = range.$1;
+      _selFocus = range.$2;
+    });
+    _controller._setSelection(_selectedText());
+  }
+
+  void _onLongPressMove(LongPressMoveUpdateDetails details) {
+    if (!_touchSelecting) return;
+    _extendWordSelection(details.localPosition);
+  }
+
+  void _onLongPressEnd() {
+    if (!_touchSelecting) return;
+    setState(() => _touchSelecting = false);
+  }
+
+  /// A handle drag begins: the dragged end becomes the moving focus and
+  /// the opposite end the fixed anchor, whichever way the original
+  /// selection was made.
+  void _onHandleDragStart(bool start) {
+    final range = _selRange;
+    if (range == null) return;
+    _wordAnchor = null;
+    setState(() {
+      _selAnchor = start ? range.$2 : range.$1;
+      _selFocus = start ? range.$1 : range.$2;
+      _handleDragging = true;
+    });
+  }
+
+  void _onHandleDragUpdate(Offset globalPosition) {
+    final box =
+        _listSpaceKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    // through the render tree, so the zoom transform is applied for free
+    final local = box.globalToLocal(globalPosition);
+    final position = _textPositionAt(local, tolerance: double.infinity);
+    if (position == null || position == _selFocus) return;
+    setState(() => _selFocus = position);
+    _controller._setSelection(_selectedText());
+  }
+
+  void _onHandleDragEnd() {
+    if (!_handleDragging) return;
+    setState(() => _handleDragging = false);
+  }
+
+  Future<void> _copyAndDismiss() async {
+    await _controller.copySelection();
+    _clearSelection();
+  }
+
+  /// The touch selection config for the page at [index], or null when
+  /// the page shows no handles (not a boundary page of the selection,
+  /// or the chrome is hidden entirely).
+  _PageTextSelection? _textSelectionOn(int index) {
+    if (!_touchSelectionChrome) return null;
+    final range = _selRange;
+    if (range == null) return null;
+    final isStart = index == range.$1.$1;
+    final isEnd = index == range.$2.$1;
+    if (!isStart && !isEnd) return null;
+    // mid-long-press the live selection wash is the only feedback;
+    // handles and chip appear when the finger lifts
+    if (_touchSelecting) return null;
+    final rects = _selectionRectsOn(index);
+    if (rects.isEmpty) return null;
+    return _PageTextSelection(
+      startRect: isStart ? rects.first : null,
+      endRect: isEnd ? rects.last : null,
+      chip: isEnd && !_handleDragging,
+      onDragStart: _onHandleDragStart,
+      onDragUpdate: _onHandleDragUpdate,
+      onDragEnd: _onHandleDragEnd,
+      onCopy: _copyAndDismiss,
+      onSelectAll: () => _selectAllTextOn(index),
+    );
+  }
+
   /// Grab panning: moves the document with the pointer. Deltas are in
   /// list-space pixels (the gesture detector sits inside the zoom
   /// transform); the scroll extents absorb what they can and the rest
@@ -1243,10 +1368,12 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
 
   void _clearSelection() {
     _wordAnchor = null;
-    if (_selAnchor != null || _selFocus != null) {
+    if (_selAnchor != null || _selFocus != null || _touchSelecting) {
       setState(() {
         _selAnchor = null;
         _selFocus = null;
+        _touchSelecting = false;
+        _handleDragging = false;
       });
     }
     _controller._setSelection('');
@@ -1656,6 +1783,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                     ? _controller._matches[_controller._currentMatch]
                     : null,
                 selection: _selectionRectsOn(index),
+                textSelection: _textSelectionOn(index),
                 overlayBuilder: widget.pageOverlayBuilder,
                 editing: editing,
                 editingTextPrompt:
@@ -1802,19 +1930,62 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                           child: GestureDetector(
                             onTapUp: _onTapUp,
                             onSecondaryTapUp: _onSecondaryTapUp,
-                            onPanStart: _onSelectionStart,
-                            onPanUpdate: _onSelectionUpdate,
-                            onPanEnd: _onSelectionEnd,
-                            onPanCancel: () =>
-                                _onSelectionEnd(DragEndDetails()),
-                            child: ColoredBox(
-                              color: canvasColor,
-                              // with ctrl/cmd held the list stops claiming wheel
-                              // events, so they reach the InteractiveViewer, which
-                              // zooms around the pointer
-                              child: IgnorePointer(
-                                ignoring: _zoomModifierDown,
-                                child: scrollable,
+                            child: RawGestureDetector(
+                              gestures: <Type, GestureRecognizerFactory>{
+                                // drag selection is mouse-only: touch and
+                                // stylus drags always scroll (a pan
+                                // recognizer that accepted touch claimed
+                                // any swipe with a horizontal component
+                                // before the list's vertical drag could,
+                                // and the swipe selected text instead of
+                                // scrolling)
+                                PanGestureRecognizer:
+                                    GestureRecognizerFactoryWithHandlers<
+                                        PanGestureRecognizer>(
+                                  () => PanGestureRecognizer(
+                                    debugOwner: this,
+                                    supportedDevices: const {
+                                      PointerDeviceKind.mouse,
+                                      PointerDeviceKind.trackpad,
+                                    },
+                                  ),
+                                  (recognizer) => recognizer
+                                    ..onStart = _onSelectionStart
+                                    ..onUpdate = _onSelectionUpdate
+                                    ..onEnd = _onSelectionEnd
+                                    ..onCancel = () =>
+                                        _onSelectionEnd(DragEndDetails()),
+                                ),
+                                // touch text selection starts with a long
+                                // press instead; stands aside while an
+                                // editing tool owns touch gestures
+                                _SelectionLongPressRecognizer:
+                                    GestureRecognizerFactoryWithHandlers<
+                                        _SelectionLongPressRecognizer>(
+                                  () => _SelectionLongPressRecognizer(
+                                      debugOwner: this),
+                                  (recognizer) => recognizer
+                                    ..isEnabled = (() =>
+                                        widget.editing?.tool == null &&
+                                        widget.editing?.isPickingColor !=
+                                            true)
+                                    ..onLongPressStart = _onLongPressStart
+                                    ..onLongPressMoveUpdate = _onLongPressMove
+                                    ..onLongPressEnd =
+                                        ((_) => _onLongPressEnd())
+                                    ..onLongPressCancel = _onLongPressEnd,
+                                ),
+                              },
+                              child: ColoredBox(
+                                key: _listSpaceKey,
+                                color: canvasColor,
+                                // with ctrl/cmd held the list stops claiming wheel
+                                // events, so they reach the InteractiveViewer, which
+                                // zooms around the pointer
+                                child: IgnorePointer(
+                                  ignoring: _zoomModifierDown,
+                                  child: scrollable,
+                                ),
                               ),
                             ),
                           ),
@@ -1871,6 +2042,7 @@ class _PdfViewerPage extends StatefulWidget {
     required this.matches,
     required this.currentMatch,
     required this.selection,
+    required this.textSelection,
     required this.overlayBuilder,
     required this.editing,
     required this.editingTextPrompt,
@@ -1889,6 +2061,11 @@ class _PdfViewerPage extends StatefulWidget {
   final List<PdfTextMatch> matches;
   final PdfTextMatch? currentMatch;
   final List<PdfRect> selection;
+
+  /// Touch selection chrome on this page (handles and the copy chip);
+  /// null when the page shows none.
+  final _PageTextSelection? textSelection;
+
   final PdfPageOverlayBuilder? overlayBuilder;
   final PdfEditingController? editing;
   final PdfTextPrompt editingTextPrompt;
@@ -1934,6 +2111,7 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
     // (dropping its rendered image: a white flash)
     final builder = widget.overlayBuilder;
     final editing = widget.editing;
+    final textSelection = widget.textSelection;
     return Stack(children: [
       PdfPageView(
         page: widget.page,
@@ -1955,7 +2133,7 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
           ),
         ),
       ),
-      if (builder != null || editing != null)
+      if (builder != null || editing != null || textSelection != null)
         Positioned.fill(
           child: LayoutBuilder(builder: (context, constraints) {
             final geometry = PdfPageGeometry(
@@ -1997,6 +2175,20 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
                             ),
                           ),
                         ),
+                ),
+              // touch text selection chrome rides topmost — it only
+              // shows in reader mode (tool disarmed), so it never
+              // competes with an armed tool's gestures
+              if (textSelection != null)
+                Positioned.fill(
+                  child: ValueListenableBuilder<double>(
+                    valueListenable: widget.transformScale,
+                    builder: (context, zoom, _) => _TextSelectionChrome(
+                      geometry: geometry,
+                      selection: textSelection,
+                      zoom: zoom,
+                    ),
+                  ),
                 ),
             ]);
           }),
@@ -2133,4 +2325,278 @@ class _EagerPinchRecognizer extends ScaleGestureRecognizer {
 
   @override
   String get debugDescription => 'eager pinch';
+}
+
+/// Touch text selection: long-press to select. Sits in the same arena
+/// as the list's drag recognizers, so once it fires the press can drag
+/// to extend without scrolling. Stands down (never enters the arena)
+/// while an editing tool is armed — a held finger must not start
+/// selecting text under an ink stroke or a shape drag.
+class _SelectionLongPressRecognizer extends LongPressGestureRecognizer {
+  _SelectionLongPressRecognizer({super.debugOwner})
+      : super(supportedDevices: {
+          PointerDeviceKind.touch,
+          PointerDeviceKind.stylus,
+        });
+
+  bool Function()? isEnabled;
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    if (isEnabled?.call() == false) return;
+    super.addAllowedPointer(event);
+  }
+
+  @override
+  String get debugDescription => 'selection long press';
+}
+
+/// A selection handle's drag must beat the list's scroll drag — the
+/// handle is a small, explicit target, so claiming the pointer the
+/// moment it lands is right.
+class _EagerPanRecognizer extends PanGestureRecognizer {
+  _EagerPanRecognizer({super.debugOwner});
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    super.addAllowedPointer(event);
+    resolve(GestureDisposition.accepted);
+  }
+
+  @override
+  String get debugDescription => 'eager pan';
+}
+
+/// What the viewer hands a boundary page of a touch text selection:
+/// which handle(s) to show, whether the copy chip rides this page, and
+/// the callbacks the chrome drives.
+class _PageTextSelection {
+  const _PageTextSelection({
+    required this.startRect,
+    required this.endRect,
+    required this.chip,
+    required this.onDragStart,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+    required this.onCopy,
+    required this.onSelectAll,
+  });
+
+  /// The selection's first rect on this page (PDF coordinates) when the
+  /// selection starts here, else null. Anchors the start handle.
+  final PdfRect? startRect;
+
+  /// The selection's last rect when the selection ends here.
+  final PdfRect? endRect;
+
+  /// Whether the Copy/Select-All chip shows on this page.
+  final bool chip;
+
+  final void Function(bool isStart) onDragStart;
+  final void Function(Offset globalPosition) onDragUpdate;
+  final VoidCallback onDragEnd;
+  final VoidCallback onCopy;
+  final VoidCallback onSelectAll;
+}
+
+/// The touch selection chrome on one page: iOS-style lollipop handles
+/// at the selection's ends and a floating Copy/Select-All chip. Painted
+/// inside the zoom transform, so everything counter-scales by 1/zoom to
+/// stay constant-size on screen.
+class _TextSelectionChrome extends StatelessWidget {
+  const _TextSelectionChrome({
+    required this.geometry,
+    required this.selection,
+    required this.zoom,
+  });
+
+  final PdfPageGeometry geometry;
+  final _PageTextSelection selection;
+  final double zoom;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = zoom > 0 ? 1 / zoom : 1.0;
+    final theme = PdfViewerTheme.of(context);
+    final color = theme.selectionHandleColor ?? const Color(0xFF2196F3);
+    final startRect = selection.startRect;
+    final endRect = selection.endRect;
+    return Stack(children: [
+      if (startRect != null)
+        _SelectionHandle(
+          rect: geometry.toViewRect(startRect),
+          isStart: true,
+          chromeScale: s,
+          color: color,
+          onDragStart: selection.onDragStart,
+          onDragUpdate: selection.onDragUpdate,
+          onDragEnd: selection.onDragEnd,
+        ),
+      if (endRect != null)
+        _SelectionHandle(
+          rect: geometry.toViewRect(endRect),
+          isStart: false,
+          chromeScale: s,
+          color: color,
+          onDragStart: selection.onDragStart,
+          onDragUpdate: selection.onDragUpdate,
+          onDragEnd: selection.onDragEnd,
+        ),
+      if (selection.chip && endRect != null)
+        _buildChip(geometry.toViewRect(endRect), s),
+    ]);
+  }
+
+  Widget _buildChip(Rect anchor, double s) {
+    // clear of the end handle's ball below and the start handle's above
+    final clearance = 28 * s;
+    final above = anchor.top - clearance - 44 * s >= 0;
+    final width = geometry.viewSize.width;
+    final halfChip = 90.0 * s;
+    final position = Offset(
+      width <= 2 * halfChip
+          ? width / 2
+          : anchor.center.dx.clamp(halfChip, width - halfChip),
+      above ? anchor.top - clearance : anchor.bottom + clearance,
+    );
+    return Positioned(
+      left: position.dx,
+      top: position.dy,
+      child: FractionalTranslation(
+        translation: Offset(-0.5, above ? -1 : 0),
+        child: Transform.scale(
+          scale: s,
+          alignment: above ? Alignment.bottomCenter : Alignment.topCenter,
+          child: Material(
+            key: const ValueKey('pdf-text-selection-chip'),
+            elevation: 3,
+            borderRadius: BorderRadius.circular(22),
+            clipBehavior: Clip.antiAlias,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              TextButton(
+                key: const ValueKey('pdf-text-selection-chip-copy'),
+                onPressed: selection.onCopy,
+                child: const Text('Copy'),
+              ),
+              const SizedBox(
+                  height: 24, child: VerticalDivider(width: 1)),
+              TextButton(
+                key: const ValueKey('pdf-text-selection-chip-select-all'),
+                onPressed: selection.onSelectAll,
+                child: const Text('Select all'),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One lollipop: a ball above the selection start (or below the end)
+/// with a stem spanning the line height. The hit area is finger-sized;
+/// the drag claims the pointer immediately so the list can't scroll it
+/// away.
+class _SelectionHandle extends StatelessWidget {
+  const _SelectionHandle({
+    required this.rect,
+    required this.isStart,
+    required this.chromeScale,
+    required this.color,
+    required this.onDragStart,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+  });
+
+  /// The boundary selection rect, view coordinates.
+  final Rect rect;
+  final bool isStart;
+  final double chromeScale;
+  final Color color;
+  final void Function(bool isStart) onDragStart;
+  final void Function(Offset globalPosition) onDragUpdate;
+  final VoidCallback onDragEnd;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = chromeScale;
+    final ballSpace = 16 * s; // ball diameter + gap, above or below
+    final hitWidth = 36 * s;
+    final x = isStart ? rect.left : rect.right;
+    return Positioned(
+      left: x - hitWidth / 2,
+      top: isStart ? rect.top - ballSpace : rect.top,
+      width: hitWidth,
+      height: rect.height + ballSpace,
+      child: RawGestureDetector(
+        behavior: HitTestBehavior.opaque,
+        gestures: <Type, GestureRecognizerFactory>{
+          _EagerPanRecognizer:
+              GestureRecognizerFactoryWithHandlers<_EagerPanRecognizer>(
+            () => _EagerPanRecognizer(debugOwner: this),
+            (recognizer) => recognizer
+              ..onStart = ((_) => onDragStart(isStart))
+              ..onUpdate = ((details) => onDragUpdate(details.globalPosition))
+              ..onEnd = ((_) => onDragEnd())
+              ..onCancel = onDragEnd,
+          ),
+        },
+        child: CustomPaint(
+          key: ValueKey(
+              isStart ? 'pdf-text-handle-start' : 'pdf-text-handle-end'),
+          painter: _SelectionHandlePainter(
+            isStart: isStart,
+            ballSpace: ballSpace,
+            ballRadius: 7 * s,
+            stemWidth: 2.2 * s,
+            color: color,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SelectionHandlePainter extends CustomPainter {
+  _SelectionHandlePainter({
+    required this.isStart,
+    required this.ballSpace,
+    required this.ballRadius,
+    required this.stemWidth,
+    required this.color,
+  });
+
+  final bool isStart;
+  final double ballSpace;
+  final double ballRadius;
+  final double stemWidth;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = color;
+    final cx = size.width / 2;
+    if (isStart) {
+      canvas.drawCircle(Offset(cx, ballSpace - ballRadius), ballRadius, paint);
+      canvas.drawRect(
+          Rect.fromLTRB(cx - stemWidth / 2, ballSpace - ballRadius,
+              cx + stemWidth / 2, size.height),
+          paint);
+    } else {
+      canvas.drawCircle(
+          Offset(cx, size.height - ballSpace + ballRadius), ballRadius, paint);
+      canvas.drawRect(
+          Rect.fromLTRB(cx - stemWidth / 2, 0, cx + stemWidth / 2,
+              size.height - ballSpace + ballRadius),
+          paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SelectionHandlePainter oldDelegate) =>
+      oldDelegate.isStart != isStart ||
+      oldDelegate.ballSpace != ballSpace ||
+      oldDelegate.ballRadius != ballRadius ||
+      oldDelegate.stemWidth != stemWidth ||
+      oldDelegate.color != color;
 }

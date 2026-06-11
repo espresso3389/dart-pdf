@@ -78,6 +78,7 @@ class PdfViewerThemeData {
   const PdfViewerThemeData({
     this.canvasColor,
     this.selectionColor,
+    this.selectionHandleColor,
     this.searchMatchColor,
     this.currentSearchMatchColor,
     this.annotationChromeColor,
@@ -94,6 +95,10 @@ class PdfViewerThemeData {
   /// The text-selection highlight wash (translucent — it paints over
   /// the page text).
   final Color? selectionColor;
+
+  /// The touch selection's drag handles (the lollipops at either end of
+  /// a long-press text selection). Opaque; defaults to the stock blue.
+  final Color? selectionHandleColor;
 
   /// The highlight wash over search matches.
   final Color? searchMatchColor;
@@ -121,6 +126,7 @@ class PdfViewerThemeData {
       other is PdfViewerThemeData &&
       other.canvasColor == canvasColor &&
       other.selectionColor == selectionColor &&
+      other.selectionHandleColor == selectionHandleColor &&
       other.searchMatchColor == searchMatchColor &&
       other.currentSearchMatchColor == currentSearchMatchColor &&
       other.annotationChromeColor == annotationChromeColor &&
@@ -132,6 +138,7 @@ class PdfViewerThemeData {
   int get hashCode => Object.hash(
       canvasColor,
       selectionColor,
+      selectionHandleColor,
       searchMatchColor,
       currentSearchMatchColor,
       annotationChromeColor,

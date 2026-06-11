@@ -746,8 +746,8 @@ void main() {
 
       // the style button sits at the far right of the scrolling toolbar
       await tester.scrollUntilVisible(
-          find.byTooltip('Stroke, opacity, font size'), 100);
-      await tester.tap(find.byTooltip('Stroke, opacity, font size'));
+          find.byTooltip('Stroke, opacity, font'), 100);
+      await tester.tap(find.byTooltip('Stroke, opacity, font'));
       await tester.pumpAndSettle();
       expect(find.byType(Slider), findsNWidgets(3));
 

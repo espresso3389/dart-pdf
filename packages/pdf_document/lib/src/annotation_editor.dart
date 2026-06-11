@@ -173,8 +173,8 @@ extension PdfAnnotationEditing on PdfEditor {
     // a Bézier stays inside its control points' hull, so including the
     // controls makes the rect cover any spline overshoot past the samples
     for (var s = 0; s < strokes.length; s++) {
-      for (final (x, y) in strokes[s]
-          .followedBy(controls[s].expand((c) => [c.$1, c.$2]))) {
+      for (final (x, y)
+          in strokes[s].followedBy(controls[s].expand((c) => [c.$1, c.$2]))) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -277,12 +277,14 @@ extension PdfAnnotationEditing on PdfEditor {
           opacity, contents, author);
 
   /// Adds a free-text annotation: [text] rendered directly on the page in
-  /// 12pt-default Helvetica, wrapped to fit [rect] and clipped to it.
+  /// [font] (12pt Helvetica by default), wrapped to fit [rect] and
+  /// clipped to it.
   void addFreeText(
     int pageIndex,
     PdfRect rect,
     String text, {
     double fontSize = 12,
+    PdfStandardFont font = PdfStandardFont.helvetica,
     int color = 0x000000,
     int? fillColor,
     int? borderColor,
@@ -310,13 +312,12 @@ extension PdfAnnotationEditing on PdfEditor {
       ..rect(rect.left, rect.bottom, rect.width, rect.height)
       ..clip()
       ..beginText()
-      ..font('Helv', fontSize)
+      ..font(font.resourceName, fontSize)
       ..leading(fontSize * 1.2)
       ..fillColor(color)
-      // Helvetica ascender is 718/1000 em — first baseline sits one
-      // ascent below the top padding
-      ..textAt(rect.left + pad, rect.top - pad - fontSize * 0.718);
-    final lines = _wrap(text, fontSize, rect.width - 2 * pad);
+      // first baseline sits one ascent below the top padding
+      ..textAt(rect.left + pad, rect.top - pad - fontSize * font.ascent / 1000);
+    final lines = _wrap(text, fontSize, rect.width - 2 * pad, font: font);
     for (var i = 0; i < lines.length; i++) {
       if (i > 0) w.nextLine();
       w.showText(lines[i]);
@@ -327,13 +328,13 @@ extension PdfAnnotationEditing on PdfEditor {
 
     final da =
         '${ContentWriter.rgbComponents(color).map(ContentWriter.fmt).join(' ')} rg '
-        '/Helv ${ContentWriter.fmt(fontSize)} Tf';
+        '/${font.resourceName} ${ContentWriter.fmt(fontSize)} Tf';
     _addAnnotation(
       pageIndex,
       _markupDict('FreeText', rect, color, text, author)
         ..['DA'] = CosString.fromText(da)
         ..['Q'] = const CosInteger(0),
-      _form(rect, w, resources: _resources(font: _helvetica())),
+      _form(rect, w, resources: _resources(font: _standardFont(font))),
     );
   }
 
@@ -551,21 +552,29 @@ extension PdfAnnotationEditing on PdfEditor {
     if (maxX - minX < 1e-9 || maxY - minY < 1e-9) return;
     final sx = rect.width / (maxX - minX);
     final sy = rect.height / (maxY - minY);
-    final fit = [sx, 0.0, 0.0, sy, rect.left - minX * sx,
-        rect.bottom - minY * sy];
+    final fit = [
+      sx,
+      0.0,
+      0.0,
+      sy,
+      rect.left - minX * sx,
+      rect.bottom - minY * sy
+    ];
 
     final theta = degrees * math.pi / 180;
     final cosT = math.cos(theta), sinT = math.sin(theta);
     final cx = (rect.left + rect.right) / 2;
     final cy = (rect.bottom + rect.top) / 2;
     final rotation = [
-      cosT, sinT, -sinT, cosT,
+      cosT,
+      sinT,
+      -sinT,
+      cosT,
       cx - (cx * cosT - cy * sinT),
       cy - (cx * sinT + cy * cosT),
     ];
     final matrix = _mulAffine(_mulAffine(m, fit), rotation);
-    form.dictionary['Matrix'] =
-        CosArray([for (final v in matrix) CosReal(v)]);
+    form.dictionary['Matrix'] = CosArray([for (final v in matrix) CosReal(v)]);
 
     // /Rect: the BBox corners' bounds under the new matrix. The matrix
     // carries the whole rotation history, so this stays the tightest box
@@ -979,18 +988,23 @@ extension PdfAnnotationEditing on PdfEditor {
   /// A non-embedded base-14 Helvetica font with explicit /Widths, so both
   /// this renderer's substitution and other viewers space text correctly.
   CosDictionary _helvetica({bool bold = false, String name = 'Helv'}) =>
+      _fontResource(name, bold ? 'Helvetica-Bold' : 'Helvetica',
+          bold ? helveticaBoldWidths : helveticaWidths);
+
+  /// Same, for any of the standard text fonts.
+  CosDictionary _standardFont(PdfStandardFont font) =>
+      _fontResource(font.resourceName, font.baseFont, font.widths);
+
+  CosDictionary _fontResource(String name, String baseFont, List<int> widths) =>
       CosDictionary({
         name: CosDictionary({
           'Type': const CosName('Font'),
           'Subtype': const CosName('Type1'),
-          'BaseFont': CosName(bold ? 'Helvetica-Bold' : 'Helvetica'),
+          'BaseFont': CosName(baseFont),
           'Encoding': const CosName('WinAnsiEncoding'),
           'FirstChar': const CosInteger(32),
           'LastChar': const CosInteger(126),
-          'Widths': CosArray([
-            for (final w in bold ? helveticaBoldWidths : helveticaWidths)
-              CosInteger(w),
-          ]),
+          'Widths': CosArray([for (final w in widths) CosInteger(w)]),
         }),
       });
 
@@ -1034,16 +1048,17 @@ extension PdfAnnotationEditing on PdfEditor {
     return rect;
   }
 
-  /// Greedy word wrap with Helvetica metrics; a single word longer than
+  /// Greedy word wrap with [font]'s metrics; a single word longer than
   /// [maxWidth] overflows (and is clipped by the appearance).
-  List<String> _wrap(String text, double fontSize, double maxWidth) {
+  List<String> _wrap(String text, double fontSize, double maxWidth,
+      {PdfStandardFont font = PdfStandardFont.helvetica}) {
     final lines = <String>[];
     for (final paragraph in text.split('\n')) {
       var line = '';
       for (final word in paragraph.split(' ')) {
         final candidate = line.isEmpty ? word : '$line $word';
         if (line.isNotEmpty &&
-            measureHelvetica(candidate, fontSize) > maxWidth) {
+            measureStandardText(candidate, fontSize, font: font) > maxWidth) {
           lines.add(line);
           line = word;
         } else {

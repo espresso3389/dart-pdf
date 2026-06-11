@@ -47,8 +47,8 @@ class ContentWriter {
 
   void moveTo(double x, double y) => op('m', [x, y]);
   void lineTo(double x, double y) => op('l', [x, y]);
-  void curveTo(double x1, double y1, double x2, double y2, double x3,
-          double y3) =>
+  void curveTo(
+          double x1, double y1, double x2, double y2, double x3, double y3) =>
       op('c', [x1, y1, x2, y2, x3, y3]);
   void closePath() => op('h');
   void rect(double x, double y, double width, double height) =>
@@ -97,7 +97,8 @@ class ContentWriter {
   void endText() => op('ET');
 
   /// References /[name] in the resources' /Font dictionary.
-  void font(String name, double size) => _buffer.write('/$name ${fmt(size)} Tf\n');
+  void font(String name, double size) =>
+      _buffer.write('/$name ${fmt(size)} Tf\n');
 
   void leading(double value) => op('TL', [value]);
   void textAt(double x, double y) => op('Td', [x, y]);
@@ -175,6 +176,17 @@ const List<int> helveticaBoldWidths = [
   333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584,
 ];
 
+/// AFM advance widths for Times-Roman, characters 32–126.
+const List<int> timesRomanWidths = [
+  250, 333, 408, 500, 500, 833, 778, 333, 333, 333, 500, 564, 250, 333, //
+  250, 278, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 278, 278, //
+  564, 564, 564, 444, 921, 722, 667, 667, 722, 611, 556, 722, 722, 333, //
+  389, 722, 611, 889, 722, 722, 556, 722, 667, 556, 611, 722, 722, 944, //
+  722, 722, 611, 333, 278, 333, 469, 500, 333, 444, 500, 444, 500, 444, //
+  333, 500, 500, 278, 278, 500, 278, 778, 500, 500, 500, 500, 333, 389, //
+  278, 500, 500, 722, 500, 500, 444, 480, 200, 480, 541,
+];
+
 /// Measures [text] in points at [fontSize], using base-14 Helvetica
 /// metrics. Characters outside 32–126 count as an average width.
 double measureHelvetica(String text, double fontSize, {bool bold = false}) {
@@ -182,6 +194,64 @@ double measureHelvetica(String text, double fontSize, {bool bold = false}) {
   var total = 0;
   for (final code in text.codeUnits) {
     total += code >= 32 && code <= 126 ? table[code - 32] : 556;
+  }
+  return total * fontSize / 1000;
+}
+
+/// The standard one-byte fonts the editors write text with — a
+/// sans-serif, serif, and monospace pick from the PDF base-14 set, which
+/// every viewer renders without embedding.
+enum PdfStandardFont {
+  helvetica('Helvetica', 'Helv', 718, helveticaWidths, 556),
+  times('Times-Roman', 'TiRo', 683, timesRomanWidths, 500),
+  courier('Courier', 'Cour', 629, null, 600);
+
+  const PdfStandardFont(this.baseFont, this.resourceName, this.ascent,
+      this._widths, this._fallbackWidth);
+
+  /// The /BaseFont name.
+  final String baseFont;
+
+  /// The appearance-resource name used in /DA, following Acrobat's
+  /// conventions (Helv, TiRo, Cour).
+  final String resourceName;
+
+  /// Ascender height in thousandths of an em — where the first baseline
+  /// sits below the top of a text box.
+  final int ascent;
+
+  final List<int>? _widths; // null: monospaced at [_fallbackWidth]
+  final int _fallbackWidth;
+
+  /// AFM advance width of character [code] in thousandths of an em.
+  int widthOf(int code) {
+    final widths = _widths;
+    if (widths == null) return _fallbackWidth;
+    return code >= 32 && code <= 126 ? widths[code - 32] : _fallbackWidth;
+  }
+
+  /// Advance widths for characters 32–126 (the font dict's /Widths).
+  List<int> get widths => _widths ?? List.filled(95, _fallbackWidth);
+
+  /// Maps a /DA resource name or /BaseFont name leniently — other
+  /// producers write /Times-Roman, /Georgia, /CourierNew and the like —
+  /// defaulting to [helvetica].
+  static PdfStandardFont fromName(String name) {
+    final n = name.toLowerCase();
+    if (n.contains('tiro') || n.contains('times') || n.contains('serif')) {
+      return times;
+    }
+    if (n.contains('cour') || n.contains('mono')) return courier;
+    return helvetica;
+  }
+}
+
+/// Measures [text] in points at [fontSize] with [font]'s base-14 metrics.
+double measureStandardText(String text, double fontSize,
+    {PdfStandardFont font = PdfStandardFont.helvetica}) {
+  var total = 0;
+  for (final code in text.codeUnits) {
+    total += font.widthOf(code);
   }
   return total * fontSize / 1000;
 }

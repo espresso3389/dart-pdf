@@ -896,8 +896,9 @@ class _PdfViewerState extends State<PdfViewer>
     _suppressTap = false;
     // a raw listener fires regardless of who wins the gesture arena, so
     // clicking anywhere — including editing overlays — focuses the viewer
-    // and its keyboard shortcuts
-    _focusNode.requestFocus();
+    // and its keyboard shortcuts. Not while an in-place text editor is
+    // typing, though: stealing its focus on every click would close it.
+    if (widget.editing?.isEditingText != true) _focusNode.requestFocus();
     if (event.kind != PointerDeviceKind.mouse) {
       _wordDrag = false;
       return;
@@ -1286,29 +1287,34 @@ class _PdfViewerState extends State<PdfViewer>
         child: list,
       );
       return CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.keyC, meta: true):
-              _controller.copySelection,
-          const SingleActivator(LogicalKeyboardKey.keyC, control: true):
-              _controller.copySelection,
-          const SingleActivator(LogicalKeyboardKey.escape): _onEscape,
-          if (editing != null) ...{
-            const SingleActivator(LogicalKeyboardKey.keyZ, meta: true):
-                editing.undo,
-            const SingleActivator(LogicalKeyboardKey.keyZ, control: true):
-                editing.undo,
-            const SingleActivator(LogicalKeyboardKey.keyZ,
-                meta: true, shift: true): editing.redo,
-            const SingleActivator(LogicalKeyboardKey.keyZ,
-                control: true, shift: true): editing.redo,
-            const SingleActivator(LogicalKeyboardKey.keyY, control: true):
-                editing.redo,
-            const SingleActivator(LogicalKeyboardKey.delete):
-                editing.deleteSelected,
-            const SingleActivator(LogicalKeyboardKey.backspace):
-                editing.deleteSelected,
-          },
-        },
+        // while an in-place text editor is open every key belongs to it:
+        // backspace deletes characters (not the annotation), ⌘C copies
+        // field text, Escape is the editor's own cancel
+        bindings: editing?.isEditingText ?? false
+            ? const {}
+            : {
+                const SingleActivator(LogicalKeyboardKey.keyC, meta: true):
+                    _controller.copySelection,
+                const SingleActivator(LogicalKeyboardKey.keyC, control: true):
+                    _controller.copySelection,
+                const SingleActivator(LogicalKeyboardKey.escape): _onEscape,
+                if (editing != null) ...{
+                  const SingleActivator(LogicalKeyboardKey.keyZ, meta: true):
+                      editing.undo,
+                  const SingleActivator(LogicalKeyboardKey.keyZ, control: true):
+                      editing.undo,
+                  const SingleActivator(LogicalKeyboardKey.keyZ,
+                      meta: true, shift: true): editing.redo,
+                  const SingleActivator(LogicalKeyboardKey.keyZ,
+                      control: true, shift: true): editing.redo,
+                  const SingleActivator(LogicalKeyboardKey.keyY, control: true):
+                      editing.redo,
+                  const SingleActivator(LogicalKeyboardKey.delete):
+                      editing.deleteSelected,
+                  const SingleActivator(LogicalKeyboardKey.backspace):
+                      editing.deleteSelected,
+                },
+              },
         child: Focus(
           focusNode: _focusNode,
           child: RawGestureDetector(

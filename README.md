@@ -127,7 +127,18 @@ pages on any background instead of white (sepia for reading, a tint to
 match the app) — a pure display setting that leaves the document
 untouched, mirrored by the thumbnails and the eyedropper, persisted via
 `PdfEditingPreferences.pageColor`, and exposed in the example app
-through a color-picker button in the app bar. Still
+through a color-picker button in the app bar.
+Text boxes are written and edited in place, like a desktop editor:
+dragging out the free-text tool opens an inline editor right on the
+page — same font, size, and color the committed annotation will have —
+and tapping an already-selected text box reopens it with its text.
+A tap outside (or switching tools) commits; Escape cancels. The font
+itself is selectable: Helvetica, Times, or Courier — the classic PDF
+standard fonts, written with proper AFM metrics and `/Widths` so every
+viewer lays the text out identically — next to the font-size slider in
+the style popup, and with a text box selected those controls restyle
+it directly (font and size changes re-render the annotation while
+keeping its text, position, color, and author). Still
 open: richer text editing (reflow),
 RSASSA-PSS signatures, JBIG2 Huffman/refinement variants, and JPX
 subsampling/PCRL-CPRL progressions.

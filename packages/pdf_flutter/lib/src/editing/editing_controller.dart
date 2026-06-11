@@ -201,6 +201,12 @@ class PdfEditingController extends ChangeNotifier {
 
   set fontSize(double value) => preferences.fontSize = value;
 
+  /// Font family for free-text annotations — one of the standard PDF
+  /// text fonts (sans-serif, serif, monospace). Persisted.
+  PdfStandardFont get fontFamily => preferences.fontFamily;
+
+  set fontFamily(PdfStandardFont value) => preferences.fontFamily = value;
+
   /// Opacity (0–1] new ink, shape, markup, and stamp annotations are
   /// created with. Free text and notes are always opaque. Persisted.
   double get opacity => preferences.opacity;
@@ -215,6 +221,24 @@ class PdfEditingController extends ChangeNotifier {
   String? get author => preferences.author;
 
   set author(String? value) => preferences.author = value;
+
+  // ---------------------------------------------------------------------
+  // in-place text editing
+
+  bool _editingText = false;
+
+  /// Whether an in-place text editor (the free-text tool's box) is open
+  /// on a page. While it is, the viewer releases its keyboard shortcuts —
+  /// backspace must delete characters, not the annotation.
+  bool get isEditingText => _editingText;
+
+  /// Marks an in-place text editor open/closed. Called by the page
+  /// overlay that owns the editor.
+  void setEditingText(bool value) {
+    if (value == _editingText) return;
+    _editingText = value;
+    notifyListeners();
+  }
 
   // ---------------------------------------------------------------------
   // eyedropper
@@ -366,7 +390,10 @@ class PdfEditingController extends ChangeNotifier {
 
   void addFreeText(int pageIndex, PdfRect rect, String text) =>
       apply((e) => e.addFreeText(pageIndex, rect, text,
-          fontSize: preferences.fontSize, color: _colorValue, author: author));
+          fontSize: preferences.fontSize,
+          font: preferences.fontFamily,
+          color: _colorValue,
+          author: author));
 
   void addStamp(int pageIndex, PdfRect rect, String text, {int? color}) =>
       apply((e) => e.addStamp(pageIndex, rect, text,
@@ -673,15 +700,56 @@ class PdfEditingController extends ChangeNotifier {
   /// The selected annotation's text, for pre-filling an edit prompt.
   String? get selectedText => selectedAnnotation?.contents;
 
-  /// Rewrites the selected annotation's text: same place, same color, new
+  /// Parses a free-text annotation's /DA: the font it was written with
+  /// and its size, falling back to the current preferences.
+  ({PdfStandardFont font, double size}) _freeTextStyleOf(
+      PdfAnnotation annotation) {
+    final tf = RegExp(r'/(\S+)\s+(\d+(?:\.\d+)?)\s+Tf')
+        .firstMatch(annotation.defaultAppearance ?? '');
+    return (
+      font: tf == null
+          ? preferences.fontFamily
+          : PdfStandardFont.fromName(tf.group(1)!),
+      size: double.tryParse(tf?.group(2) ?? '') ?? preferences.fontSize,
+    );
+  }
+
+  /// Whether the selection is a free-text annotation whose font and size
+  /// [restyleSelectedText] can change.
+  bool get canRestyleSelectedText => selectedAnnotation?.subtype == 'FreeText';
+
+  /// The selected free-text annotation's font and size (parsed from its
+  /// /DA), or null when the selection isn't free text.
+  ({PdfStandardFont font, double size})? get selectedTextStyle {
+    final annotation = selectedAnnotation;
+    if (annotation?.subtype != 'FreeText') return null;
+    return _freeTextStyleOf(annotation!);
+  }
+
+  /// Rewrites the selected free-text annotation with a new [font] and/or
+  /// [size], keeping its text, place, color, and author. The selection
+  /// survives (the annotation keeps its /Annots slot).
+  void restyleSelectedText({PdfStandardFont? font, double? size}) {
+    final annotation = selectedAnnotation;
+    if (annotation == null || !canRestyleSelectedText) return;
+    final style = _freeTextStyleOf(annotation);
+    _rewriteSelected(annotation, annotation.contents ?? '',
+        font: font ?? style.font, size: size ?? style.size);
+  }
+
+  /// Rewrites the selected annotation's text: same place, same style, new
   /// text. Implemented as remove + re-add, which regenerates the
   /// appearance stream.
   void setSelectedText(String text) {
-    final selected = _selected;
     final annotation = selectedAnnotation;
-    if (selected == null || annotation == null || !canEditSelectedText) {
-      return;
-    }
+    if (annotation == null || !canEditSelectedText) return;
+    _rewriteSelected(annotation, text);
+  }
+
+  void _rewriteSelected(PdfAnnotation annotation, String text,
+      {PdfStandardFont? font, double? size}) {
+    final selected = _selected;
+    if (selected == null) return;
     final page = selected.$1;
     final rect = annotation.rect;
     final color = annotation.color;
@@ -691,11 +759,10 @@ class PdfEditingController extends ChangeNotifier {
       e.removeAnnotation(page, annotation);
       switch (annotation.subtype) {
         case 'FreeText':
-          final tf = RegExp(r'(\d+(?:\.\d+)?)\s+Tf')
-              .firstMatch(annotation.defaultAppearance ?? '');
+          final style = _freeTextStyleOf(annotation);
           e.addFreeText(page, rect, text,
-              fontSize:
-                  double.tryParse(tf?.group(1) ?? '') ?? preferences.fontSize,
+              fontSize: size ?? style.size,
+              font: font ?? style.font,
               color: color ?? 0x000000,
               author: by);
         case 'Stamp':
@@ -705,6 +772,13 @@ class PdfEditingController extends ChangeNotifier {
               color: color ?? 0xFFD100, author: by);
       }
     });
+    // the rewritten annotation lands in the last /Annots slot — keep it
+    // selected so consecutive restyles (a settings popup) stay anchored
+    final annotations = _document.page(page).annotations;
+    if (annotations.isNotEmpty) {
+      _selected = (page, annotations.length - 1);
+      notifyListeners();
+    }
   }
 
   // ---------------------------------------------------------------------

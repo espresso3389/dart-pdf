@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf_document/pdf_document.dart';
 
 import '../page_geometry.dart';
@@ -86,6 +87,18 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   /// The latest normalized pressure of the pointer being tracked, or null
   /// for devices that don't report pressure (finger, mouse).
   double? _pointerPressure;
+
+  // in-place text editor: open after a free-text drag-out (new) or a
+  // tap on the already-selected free text annotation (existing)
+  Rect? _textEditRect; // view space; null = closed
+  bool _textEditExisting = false;
+  PdfEditTool? _textEditTool;
+  late final TextEditingController _textEditText = TextEditingController();
+  late final FocusNode _textEditFocus = FocusNode()
+    ..addListener(_onTextEditFocus);
+  PdfStandardFont _textEditFont = PdfStandardFont.helvetica;
+  double _textEditSize = 14; // pt
+  Color _textEditColor = const Color(0xFF000000);
 
   // select-tool drags
   Offset? _moveStart;
@@ -190,6 +203,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
 
   @override
   void dispose() {
+    if (_textEditRect != null) _controller.setEditingText(false);
+    _textEditFocus
+      ..removeListener(_onTextEditFocus)
+      ..dispose();
+    _textEditText.dispose();
     _ghost?.dispose();
     super.dispose();
   }
@@ -258,8 +276,75 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     return Rect.fromLTRB(left, top, right, bottom);
   }
 
+  // -----------------------------------------------------------------
+  // in-place text editing
+
+  /// Opens the inline text editor over [viewRect] — empty for a fresh
+  /// free-text box, prefilled from the selected annotation when
+  /// [existing]. The editor renders with the same font, size, and color
+  /// the committed annotation will use.
+  void _openTextEditor(Rect viewRect, {required bool existing}) {
+    final style = existing ? _controller.selectedTextStyle : null;
+    final annotationColor =
+        existing ? _controller.selectedAnnotation?.color : null;
+    _textEditText.text = existing ? (_controller.selectedText ?? '') : '';
+    setState(() {
+      _textEditRect = viewRect;
+      _textEditExisting = existing;
+      _textEditTool = _tool;
+      _textEditFont = style?.font ?? _controller.fontFamily;
+      _textEditSize = style?.size ?? _controller.fontSize;
+      _textEditColor = annotationColor != null
+          ? Color(0xFF000000 | annotationColor)
+          : _controller.color;
+    });
+    _controller.setEditingText(true);
+  }
+
+  /// Commits the editor's text: a new free-text annotation, or the
+  /// selected one rewritten. Empty text adds nothing / changes nothing.
+  void _commitTextEdit() {
+    final rect = _textEditRect;
+    if (rect == null) return;
+    final text = _textEditText.text.trimRight();
+    final existing = _textEditExisting;
+    _closeTextEditor();
+    if (existing) {
+      if (text.isNotEmpty && text != _controller.selectedText) {
+        _controller.setSelectedText(text);
+      }
+    } else if (text.isNotEmpty) {
+      _controller.addFreeText(
+          widget.pageIndex, _geometry.toPageRect(rect), text);
+    }
+  }
+
+  void _cancelTextEdit() => _closeTextEditor();
+
+  void _closeTextEditor() {
+    if (_textEditRect == null) return;
+    if (mounted) {
+      setState(() => _textEditRect = null);
+    } else {
+      _textEditRect = null;
+    }
+    _controller.setEditingText(false);
+  }
+
+  /// Losing focus commits — tapping another widget, switching panes.
+  /// (Escape cancels first, so by the time the unfocus arrives the
+  /// session is already gone and this is a no-op.)
+  void _onTextEditFocus() {
+    if (!_textEditFocus.hasFocus) _commitTextEdit();
+  }
+
   void _panStart(DragStartDetails details) {
     final position = details.localPosition;
+    if (_textEditRect != null) {
+      // a drag outside the open editor commits it, like a tap
+      _commitTextEdit();
+      return;
+    }
     switch (_tool) {
       case null:
         break; // eyedropper only — taps, no drags
@@ -372,7 +457,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     } else if (dragStart != null && dragCurrent != null) {
       final viewRect = Rect.fromPoints(dragStart, dragCurrent);
       if (viewRect.width < 4 || viewRect.height < 4) return; // a click
-      _commitRect(_geometry.toPageRect(viewRect));
+      if (_tool == PdfEditTool.freeText) {
+        // type into the box just dragged out, instead of a dialog
+        _openTextEditor(viewRect, existing: false);
+      } else {
+        _commitRect(_geometry.toPageRect(viewRect));
+      }
     }
   }
 
@@ -382,11 +472,6 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
         _controller.addRectangle(widget.pageIndex, rect);
       case PdfEditTool.ellipse:
         _controller.addEllipse(widget.pageIndex, rect);
-      case PdfEditTool.freeText:
-        final text =
-            await widget.textPrompt(context, title: 'Text', multiline: true);
-        if (text == null || text.isEmpty) return;
-        _controller.addFreeText(widget.pageIndex, rect, text);
       case PdfEditTool.stamp:
         final stamp = _controller.activeStamp;
         if (stamp != null) {
@@ -463,11 +548,24 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   Future<void> _onTapUp(TapUpDetails details) async {
     // the eyedropper commits from the raw pointer-up instead
     if (_controller.isPickingColor) return;
+    if (_textEditRect != null) {
+      // tapping outside the open editor commits it
+      _commitTextEdit();
+      return;
+    }
     final (x, y) = _geometry.toPagePoint(details.localPosition);
     switch (_tool) {
       case null:
         break;
       case PdfEditTool.select:
+        // tapping the already-selected free text edits it in place,
+        // like clicking into a text box in any editor
+        if (_controller.selectedAnnotationSlot?.$1 == widget.pageIndex &&
+            _controller.selectedAnnotation?.subtype == 'FreeText' &&
+            (_selectedViewRect?.contains(details.localPosition) ?? false)) {
+          _openTextEditor(_selectedViewRect!, existing: true);
+          return;
+        }
         _controller.selectAnnotationAt(widget.pageIndex, x, y);
       case PdfEditTool.content:
         _controller.selectElementAt(widget.pageIndex, x, y);
@@ -524,9 +622,25 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     if (cursor != _cursor) setState(() => _cursor = cursor);
   }
 
+  /// The Flutter font family that visually matches [font] — the same
+  /// substitution the renderer uses for non-embedded base-14 fonts.
+  static String _uiFamily(PdfStandardFont font) => switch (font) {
+        PdfStandardFont.helvetica => 'Helvetica',
+        PdfStandardFont.times => 'Times New Roman',
+        PdfStandardFont.courier => 'Courier',
+      };
+
   @override
   Widget build(BuildContext context) {
     _ensureGhost();
+    // switching tools mid-edit commits the text, like leaving the ink tool
+    if (_textEditRect != null && _tool != _textEditTool) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _textEditRect != null && _tool != _textEditTool) {
+          _commitTextEdit();
+        }
+      });
+    }
     final selected = _selectedViewRect;
     final moveDelta =
         _resizeHandle == null && _moveStart != null && _moveCurrent != null
@@ -618,6 +732,54 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
                 top: preview.dy - 38,
                 child: IgnorePointer(
                   child: _EyedropperChip(color: _pickPreview),
+                ),
+              ),
+            if (_textEditRect != null)
+              Positioned.fromRect(
+                rect: _textEditRect!.inflate(2),
+                child: CallbackShortcuts(
+                  bindings: {
+                    const SingleActivator(LogicalKeyboardKey.escape):
+                        _cancelTextEdit,
+                    const SingleActivator(LogicalKeyboardKey.enter, meta: true):
+                        _commitTextEdit,
+                    const SingleActivator(LogicalKeyboardKey.enter,
+                        control: true): _commitTextEdit,
+                  },
+                  child: Container(
+                    decoration: BoxDecoration(
+                      // wash the paper color over what's underneath: faint
+                      // for a fresh box, near-opaque when editing existing
+                      // text so the old rendering doesn't show through
+                      color: widget.pageColor
+                          .withValues(alpha: _textEditExisting ? 0.92 : 0.3),
+                      border: Border.all(
+                          color: const Color(0xFF1E88E5), width: 1.5),
+                    ),
+                    child: TextField(
+                      key: const ValueKey('pdf-freetext-editor'),
+                      controller: _textEditText,
+                      focusNode: _textEditFocus,
+                      autofocus: true,
+                      maxLines: null,
+                      expands: true,
+                      textAlignVertical: TextAlignVertical.top,
+                      cursorColor: _textEditColor,
+                      // mirrors the committed appearance: same size in view
+                      // pixels, same 1.2 leading, matching family and color
+                      style: TextStyle(
+                        color: _textEditColor,
+                        fontSize: _textEditSize * _geometry.scale,
+                        height: 1.2,
+                        fontFamily: _uiFamily(_textEditFont),
+                      ),
+                      decoration: InputDecoration(
+                        isCollapsed: true,
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.all(3 * _geometry.scale),
+                      ),
+                    ),
+                  ),
                 ),
               ),
           ]),

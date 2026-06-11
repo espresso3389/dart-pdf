@@ -332,3 +332,36 @@ pref into both the viewer and the thumbnail strip. Test gotcha
 widget tests — placeholders are already replaced after a pump, so
 assert on the RawImage/RepaintBoundary pixels (poll with runAsync
 delays), not on placeholder ColoredBoxes.
+In-place text (Ben: write in place, edit after creation, font + size):
+`PdfStandardFont` (pdf_cos-free, content_writer.dart) — Helv/TiRo/Cour
+resource names, BaseFont, per-font ascent, AFM widths (new
+`timesRomanWidths`; Courier is flat 600), `measureStandardText`, and a
+lenient `fromName` (Times*/serif→times, Cour*/mono→courier, else
+helvetica). `addFreeText(font:)` threads it through wrap, baseline,
+/DA, and the resource dict (`_standardFont`/`_fontResource` generalize
+the old `_helvetica`, which stays for bold stamps). Controller:
+`fontFamily` (persisted pref key `fontFamily`, stored by enum name),
+`selectedTextStyle` (/DA parse `/(\S+) (\d+) Tf`),
+`restyleSelectedText(font:,size:)`; it and `setSelectedText` share
+`_rewriteSelected` (remove+re-add, re-selects the last /Annots slot so
+consecutive restyles stay anchored). `isEditingText`/`setEditingText`
+gate the viewer: CallbackShortcuts binds {} and the pointer-down
+focus-steal is skipped while typing — otherwise backspace deletes the
+selected annotation and any click closes the editor. Overlay: a
+free-text drag-out or a tap on the already-selected FreeText opens an
+inline TextField (key 'pdf-freetext-editor') over the view rect,
+styled fontSize×scale, height 1.2, family mapped like canvas_device's
+substitution (Helvetica/Times New Roman/Courier); outside tap, drag,
+or tool switch commits, Escape cancels via the editor's own
+CallbackShortcuts (nearer to the focus, so it wins); editing existing
+text washes pageColor at 0.92 alpha over the old rendering. Toolbar
+`_StyleMenu` (now stateful): Sans/Serif/Mono SegmentedButton + the
+size slider show the selected free text's style and restyle it on
+change end (one revision per slider gesture, `_draggingFontSize`
+carries the thumb meanwhile); tooltip renamed 'Stroke, opacity,
+font'. Test gotchas (editing_text_edit_test.dart): tap targets must
+stay inside the 800×600 test viewport — view(500,300) is y≈643px, the
+tap silently misses; the SharedPreferences mock store is
+process-global, so widget tests call setMockInitialValues({}) before
+creating controllers or a prior test's stored fontFamily leaks in
+through the async preference load.

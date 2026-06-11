@@ -133,8 +133,7 @@ void main() {
 
     // the Catmull-Rom controls: endpoints clamp, interior tangents are
     // (next − previous) / 6
-    final controls =
-        pdfInkCurveControls([(100, 100), (150, 130), (200, 100)]);
+    final controls = pdfInkCurveControls([(100, 100), (150, 130), (200, 100)]);
     expect(controls, hasLength(2));
     expect(controls[0].$1.$1, closeTo(100 + 50 / 6, 1e-9));
     expect(controls[0].$1.$2, closeTo(105, 1e-9));
@@ -157,9 +156,12 @@ void main() {
   test('ink rect covers spline overshoot past the sampled points', () {
     // an asymmetric apex: the spline's control points poke above and
     // left of the samples, and the rect must still contain the curve
-    final doc = roundTrip((e) => e.addInk(0, [
+    final doc = roundTrip((e) => e.addInk(
+        0,
+        [
           [(50, 0), (60, 100), (150, 90)],
-        ], strokeWidth: 2));
+        ],
+        strokeWidth: 2));
     final ink = doc.page(0).annotations.single;
     // seg 1's c1 = p1 + (p2 − p0)/6 = (76.67, 115); pad = w/2 + 1 = 2
     expect(ink.rect.top, closeTo(115 + 2, 1e-4));
@@ -225,6 +227,58 @@ void main() {
     final helv = doc.cos.resolve(fonts['Helv']) as CosDictionary;
     expect((doc.cos.resolve(helv['BaseFont']) as CosName).value, 'Helvetica');
     expect((doc.cos.resolve(helv['Widths']) as CosArray).length, 95);
+  });
+
+  test('free text takes a standard serif or monospace font', () {
+    final doc = roundTrip((e) {
+      e.addFreeText(0, const PdfRect(72, 600, 240, 680), 'Serif text',
+          fontSize: 14, font: PdfStandardFont.times);
+      e.addFreeText(0, const PdfRect(72, 500, 240, 580), 'Mono text',
+          fontSize: 10, font: PdfStandardFont.courier);
+    });
+    final annots = doc.page(0).annotations;
+
+    final serifDa = doc.cos.resolve(annots[0].dict['DA']) as CosString;
+    expect(serifDa.text, contains('/TiRo 14 Tf'));
+    expect(appearanceText(doc, annots[0]), contains('/TiRo 14 Tf'));
+    final serifRes =
+        doc.cos.resolve(annots[0].normalAppearance!.dictionary['Resources'])
+            as CosDictionary;
+    final serifFonts = doc.cos.resolve(serifRes['Font']) as CosDictionary;
+    final tiro = doc.cos.resolve(serifFonts['TiRo']) as CosDictionary;
+    expect((doc.cos.resolve(tiro['BaseFont']) as CosName).value, 'Times-Roman');
+    final tiroWidths = doc.cos.resolve(tiro['Widths']) as CosArray;
+    expect((tiroWidths.items.first as CosInteger).value, 250); // space
+
+    final monoDa = doc.cos.resolve(annots[1].dict['DA']) as CosString;
+    expect(monoDa.text, contains('/Cour 10 Tf'));
+    final monoRes =
+        doc.cos.resolve(annots[1].normalAppearance!.dictionary['Resources'])
+            as CosDictionary;
+    final monoFonts = doc.cos.resolve(monoRes['Font']) as CosDictionary;
+    final cour = doc.cos.resolve(monoFonts['Cour']) as CosDictionary;
+    expect((doc.cos.resolve(cour['BaseFont']) as CosName).value, 'Courier');
+    final courWidths = doc.cos.resolve(cour['Widths']) as CosArray;
+    expect(courWidths.length, 95);
+    expect(
+        courWidths.items.every((w) => (w as CosInteger).value == 600), isTrue);
+  });
+
+  test('standard-font metrics measure and map names leniently', () {
+    // Courier is monospaced at 600/1000 em
+    expect(measureStandardText('abc', 10, font: PdfStandardFont.courier), 18);
+    // Times-Roman 'A' is 722/1000 em
+    expect(measureStandardText('A', 10, font: PdfStandardFont.times), 7.22);
+    // the helvetica path matches the long-standing helper
+    expect(measureStandardText('Hello world', 12),
+        measureHelvetica('Hello world', 12));
+
+    expect(PdfStandardFont.fromName('TiRo'), PdfStandardFont.times);
+    expect(PdfStandardFont.fromName('Times-Roman'), PdfStandardFont.times);
+    expect(PdfStandardFont.fromName('Cour'), PdfStandardFont.courier);
+    expect(PdfStandardFont.fromName('CourierNew'), PdfStandardFont.courier);
+    expect(PdfStandardFont.fromName('Helv'), PdfStandardFont.helvetica);
+    expect(PdfStandardFont.fromName('Arial'), PdfStandardFont.helvetica);
   });
 
   test('note builds a 20pt icon at the given top-left corner', () {
@@ -399,8 +453,7 @@ void main() {
         throwsArgumentError);
   });
 
-  test('rotateAnnotation rotates rect, appearance matrix, and ink points',
-      () {
+  test('rotateAnnotation rotates rect, appearance matrix, and ink points', () {
     final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
       ..addSquare(0, const PdfRect(100, 100, 200, 150))
       ..addInk(0, [
@@ -423,13 +476,13 @@ void main() {
     // generated appearances have BBox == old rect (identity fit), so the
     // matrix is exactly the +90° rotation about the center: b=1, c=−1,
     // and the old bottom-left corner lands on the new bottom-right
-    final matrix =
-        reopened.cos.resolve(square.normalAppearance!.dictionary['Matrix'])
-            as CosArray;
+    final matrix = reopened.cos
+        .resolve(square.normalAppearance!.dictionary['Matrix']) as CosArray;
     double m(int i) {
       final n = reopened.cos.resolve(matrix[i]);
       return n is CosInteger ? n.value.toDouble() : (n as CosReal).value;
     }
+
     expect(m(0), closeTo(0, 1e-9));
     expect(m(1), closeTo(1, 1e-9));
     expect(m(2), closeTo(-1, 1e-9));
@@ -451,8 +504,7 @@ void main() {
 
   test('two 45° rotations land where one 90° does', () {
     PdfRect rotatedRect(List<double> steps) {
-      var doc = PdfDocument.open((PdfEditor(
-              PdfDocument.open(buildClassicPdf()))
+      var doc = PdfDocument.open((PdfEditor(PdfDocument.open(buildClassicPdf()))
             ..addSquare(0, const PdfRect(100, 100, 200, 150)))
           .save());
       for (final degrees in steps) {
@@ -477,8 +529,8 @@ void main() {
     final doc = PdfDocument.open(first.save());
     final square = doc.page(0).annotations.single;
     square.dict.entries.remove('AP');
-    expect(() => PdfEditor(doc).rotateAnnotation(0, square, 90),
-        throwsStateError);
+    expect(
+        () => PdfEditor(doc).rotateAnnotation(0, square, 90), throwsStateError);
   });
 
   test('print flag is set so annotations survive printing', () {

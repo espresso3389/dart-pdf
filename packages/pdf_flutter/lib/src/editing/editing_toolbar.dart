@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:pdf_document/pdf_document.dart' show PdfStandardFont;
 
 import '../pdf_viewer.dart';
 import 'editing_color_picker.dart';
@@ -304,11 +305,33 @@ class PdfEditingToolbar extends StatelessWidget {
   }
 }
 
-/// The style popup: sliders for stroke width, opacity, and font size.
-class _StyleMenu extends StatelessWidget {
+/// The style popup: sliders for stroke width, opacity, and font size,
+/// and the font family for free text. With a free-text annotation
+/// selected, the font controls show — and change — that annotation's
+/// style; otherwise they set the style new text is created with.
+class _StyleMenu extends StatefulWidget {
   const _StyleMenu({required this.controller});
 
   final PdfEditingController controller;
+
+  @override
+  State<_StyleMenu> createState() => _StyleMenuState();
+}
+
+class _StyleMenuState extends State<_StyleMenu> {
+  PdfEditingController get controller => widget.controller;
+
+  /// The font-size slider's in-flight value while dragging over a
+  /// selected annotation — the annotation only restyles on release (one
+  /// revision per gesture), so the thumb needs its own state meanwhile.
+  double? _draggingFontSize;
+
+  void _setFontFamily(PdfStandardFont font) {
+    controller.fontFamily = font; // the new default either way
+    if (controller.canRestyleSelectedText) {
+      controller.restyleSelectedText(font: font);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -318,45 +341,96 @@ class _StyleMenu extends StatelessWidget {
         // ListenableBuilder — it needs its own listener to track sliders
         ListenableBuilder(
           listenable: controller,
-          builder: (context, _) => Container(
-            width: 280,
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _slider(
-                  label: 'Stroke width',
-                  value: controller.strokeWidth,
-                  min: 0.5,
-                  max: 12,
-                  display: '${controller.strokeWidth.toStringAsFixed(1)} pt',
-                  onChanged: (v) => controller.strokeWidth = v,
-                ),
-                _slider(
-                  label: 'Opacity',
-                  value: controller.opacity,
-                  min: 0.1,
-                  max: 1,
-                  display: '${(controller.opacity * 100).round()}%',
-                  onChanged: (v) => controller.opacity = v,
-                ),
-                _slider(
-                  label: 'Font size',
-                  value: controller.fontSize,
-                  min: 8,
-                  max: 48,
-                  display: '${controller.fontSize.round()} pt',
-                  onChanged: (v) => controller.fontSize = v.roundToDouble(),
-                ),
-              ],
-            ),
-          ),
+          builder: (context, _) {
+            final selectedStyle = controller.selectedTextStyle;
+            return Container(
+              width: 300,
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _slider(
+                    label: 'Stroke width',
+                    value: controller.strokeWidth,
+                    min: 0.5,
+                    max: 12,
+                    display: '${controller.strokeWidth.toStringAsFixed(1)} pt',
+                    onChanged: (v) => controller.strokeWidth = v,
+                  ),
+                  _slider(
+                    label: 'Opacity',
+                    value: controller.opacity,
+                    min: 0.1,
+                    max: 1,
+                    display: '${(controller.opacity * 100).round()}%',
+                    onChanged: (v) => controller.opacity = v,
+                  ),
+                  _slider(
+                    label: 'Font size',
+                    value: _draggingFontSize ??
+                        selectedStyle?.size ??
+                        controller.fontSize,
+                    min: 8,
+                    max: 48,
+                    display:
+                        '${(_draggingFontSize ?? selectedStyle?.size ?? controller.fontSize).round()} pt',
+                    onChanged: (v) {
+                      setState(() => _draggingFontSize = v.roundToDouble());
+                      if (selectedStyle == null) {
+                        controller.fontSize = v.roundToDouble();
+                      }
+                    },
+                    onChangeEnd: (v) {
+                      final size = v.roundToDouble();
+                      controller.fontSize = size;
+                      if (controller.canRestyleSelectedText) {
+                        controller.restyleSelectedText(size: size);
+                      }
+                      setState(() => _draggingFontSize = null);
+                    },
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(children: [
+                      const SizedBox(width: 86, child: Text('Font')),
+                      Expanded(
+                        child: SegmentedButton<PdfStandardFont>(
+                          segments: const [
+                            ButtonSegment(
+                                value: PdfStandardFont.helvetica,
+                                label: Text('Sans')),
+                            ButtonSegment(
+                                value: PdfStandardFont.times,
+                                label: Text('Serif')),
+                            ButtonSegment(
+                                value: PdfStandardFont.courier,
+                                label: Text('Mono')),
+                          ],
+                          selected: {
+                            selectedStyle?.font ?? controller.fontFamily
+                          },
+                          showSelectedIcon: false,
+                          style: const ButtonStyle(
+                            visualDensity: VisualDensity.compact,
+                            padding: WidgetStatePropertyAll(
+                                EdgeInsets.symmetric(horizontal: 8)),
+                          ),
+                          onSelectionChanged: (selection) =>
+                              _setFontFamily(selection.single),
+                        ),
+                      ),
+                    ]),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
       ],
       builder: (context, menu, _) => IconButton(
         icon: const Icon(Icons.tune),
-        tooltip: 'Stroke, opacity, font size',
+        tooltip: 'Stroke, opacity, font',
         onPressed: () => menu.isOpen ? menu.close() : menu.open(),
       ),
     );
@@ -369,6 +443,7 @@ class _StyleMenu extends StatelessWidget {
     required double max,
     required String display,
     required ValueChanged<double> onChanged,
+    ValueChanged<double>? onChangeEnd,
   }) {
     return Row(children: [
       SizedBox(width: 86, child: Text(label)),
@@ -378,6 +453,7 @@ class _StyleMenu extends StatelessWidget {
           min: min,
           max: max,
           onChanged: onChanged,
+          onChangeEnd: onChangeEnd,
         ),
       ),
       SizedBox(width: 44, child: Text(display, textAlign: TextAlign.end)),

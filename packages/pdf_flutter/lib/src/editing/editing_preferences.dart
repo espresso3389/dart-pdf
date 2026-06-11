@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter/painting.dart';
+import 'package:pdf_document/pdf_document.dart' show PdfStandardFont;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'editing_signature.dart';
@@ -44,6 +45,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   Color _color = const Color(0xFFE53935);
   double _strokeWidth = 2;
   double _fontSize = 14;
+  PdfStandardFont _fontFamily = PdfStandardFont.helvetica;
   double _opacity = 1;
   bool _fingerDrawsInk = true;
   bool _showThumbnailSidebar = false;
@@ -67,6 +69,11 @@ class PdfEditingPreferences extends ChangeNotifier {
       if (color != null) _color = Color(color);
       _strokeWidth = store.getDouble('${_prefix}strokeWidth') ?? _strokeWidth;
       _fontSize = store.getDouble('${_prefix}fontSize') ?? _fontSize;
+      final fontFamily = store.getString('${_prefix}fontFamily');
+      if (fontFamily != null) {
+        _fontFamily =
+            PdfStandardFont.values.asNameMap()[fontFamily] ?? _fontFamily;
+      }
       _opacity = store.getDouble('${_prefix}opacity') ?? _opacity;
       _fingerDrawsInk =
           store.getBool('${_prefix}fingerDrawsInk') ?? _fingerDrawsInk;
@@ -129,6 +136,17 @@ class PdfEditingPreferences extends ChangeNotifier {
     if (value == _fontSize) return;
     _fontSize = value;
     _write((s) => s.setDouble('${_prefix}fontSize', value));
+    notifyListeners();
+  }
+
+  /// Font family for free-text annotations — one of the standard PDF
+  /// text fonts (sans-serif, serif, monospace).
+  PdfStandardFont get fontFamily => _fontFamily;
+
+  set fontFamily(PdfStandardFont value) {
+    if (value == _fontFamily) return;
+    _fontFamily = value;
+    _write((s) => s.setString('${_prefix}fontFamily', value.name));
     notifyListeners();
   }
 

@@ -340,6 +340,19 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   Timer? _scrollSettleTimer;
   int _settleGeneration = 0;
 
+  /// True while the list is scrolling faster than pages can usefully
+  /// render — [PdfPageView.renderHold]: not-yet-interpreted pages keep
+  /// their paper placeholder instead of stalling the UI thread with
+  /// interpreter walks mid-fling (the stall is what made the scrollbar
+  /// leap on heavy documents). Cleared when the velocity estimate drops
+  /// or the scroll-settle timer fires.
+  final _renderHold = ValueNotifier<bool>(false);
+
+  /// (frame timestamp, scroll pixels) samples from the last ~200ms,
+  /// at most one per frame, for the velocity estimate behind
+  /// [_renderHold].
+  final List<(Duration, double)> _scrollSamples = [];
+
   late List<PdfPage> _pages;
   late List<double> _aspects; // height / width, after /Rotate
   final Map<int, PdfPageText> _textCache = {};
@@ -560,10 +573,39 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   /// Debounced scroll-settle: scrolling moves pages under a deep-zoom
   /// detail patch, so the patch must follow once movement stops.
   void _onScrollForDetail() {
+    _trackScrollVelocity();
     _scrollSettleTimer?.cancel();
     _scrollSettleTimer = Timer(const Duration(milliseconds: 250), () {
+      _scrollSamples.clear();
+      _renderHold.value = false;
       if (mounted) setState(() => _settleGeneration++);
     });
+  }
+
+  /// Estimates the scroll velocity over a ~200ms window of per-frame
+  /// samples and flips [_renderHold] past ~2 viewport-heights/second.
+  /// Frame timestamps (not wall clock) collapse the burst of listener
+  /// calls a single wheel tick produces into one sample — an instant
+  /// 100px jump must not read as infinite velocity.
+  void _trackScrollVelocity() {
+    if (!_scroll.hasClients) return;
+    final now = WidgetsBinding.instance.currentSystemFrameTimeStamp;
+    final pixels = _scroll.position.pixels;
+    if (_scrollSamples.isNotEmpty && _scrollSamples.last.$1 == now) {
+      _scrollSamples.last = (now, pixels);
+    } else {
+      _scrollSamples.add((now, pixels));
+    }
+    while (_scrollSamples.length > 2 &&
+        now - _scrollSamples.first.$1 > const Duration(milliseconds: 200)) {
+      _scrollSamples.removeAt(0);
+    }
+    final span = (now - _scrollSamples.first.$1).inMicroseconds;
+    if (span <= 0) return; // all samples this frame: keep the verdict
+    final velocity =
+        (pixels - _scrollSamples.first.$2).abs() * 1e6 / span; // px/s
+    final viewport = _scroll.position.viewportDimension;
+    _renderHold.value = velocity > math.max(800, 2 * viewport);
   }
 
   @override
@@ -641,6 +683,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     _scroll.dispose();
     _transform.dispose();
     _transformScale.dispose();
+    _renderHold.dispose();
     _zoomAnimator.dispose();
     _panFlinger.dispose();
     _focusNode.dispose();
@@ -1496,6 +1539,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                     widget.editingTextPrompt ?? showPdfTextPrompt,
                 onPanViewport: _grabPanBy,
                 transformScale: _transformScale,
+                renderHold: _renderHold,
               ),
             ),
           ),
@@ -1718,6 +1762,7 @@ class _PdfViewerPage extends StatefulWidget {
     required this.editingTextPrompt,
     required this.onPanViewport,
     required this.transformScale,
+    required this.renderHold,
   });
 
   final PdfPage page;
@@ -1736,6 +1781,9 @@ class _PdfViewerPage extends StatefulWidget {
   /// The viewer transform's scale — the editing overlay's chrome divides
   /// by it to stay constant-size on screen while zoomed.
   final ValueListenable<double> transformScale;
+
+  /// See [PdfPageView.renderHold].
+  final ValueListenable<bool> renderHold;
 
   @override
   State<_PdfViewerPage> createState() => _PdfViewerPageState();
@@ -1773,6 +1821,7 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
         settleGeneration: widget.settleGeneration,
         pageColor: widget.pageColor,
         onRasterReady: _onRasterReady,
+        renderHold: widget.renderHold,
       ),
       Positioned.fill(
         child: CustomPaint(

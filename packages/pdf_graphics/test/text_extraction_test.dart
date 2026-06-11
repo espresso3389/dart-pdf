@@ -69,4 +69,15 @@ void main() {
     expect(PdfTextExtractor.extract(doc, 0).text, 'Page 1');
     expect(PdfTextExtractor.extract(doc, 2).text, 'Page 3');
   });
+
+  test('textIn returns the runs whose center a rectangle covers', () {
+    final doc = PdfDocument.open(buildClassicPdf());
+    final text = PdfTextExtractor.extract(doc, 0);
+    // 'Hello, world!' spans x 72..228, y 714..738 (center 150, 726)
+    expect(text.textIn(const PdfRect(60, 700, 300, 760)), 'Hello, world!');
+    expect(text.textIn(const PdfRect(0, 0, 50, 50)), '');
+    // covering only the tail of the run misses its center — whole runs
+    // are in or out, no partial text
+    expect(text.textIn(const PdfRect(200, 700, 300, 760)), '');
+  });
 }

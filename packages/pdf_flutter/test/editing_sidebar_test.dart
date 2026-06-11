@@ -1,8 +1,44 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_flutter/pdf_flutter.dart';
 import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
+
+/// One page with 'Hello, world!' at 72,720 (24pt) and a URI link whose
+/// rectangle covers the text — the sidebar shows that text as the link's
+/// label.
+Uint8List buildLinkOverTextPdf() {
+  const content = 'BT /F1 24 Tf 72 720 Td (Hello, world!) Tj ET';
+  final objects = <String>[
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R '
+        '/Resources << /Font << /F1 5 0 R >> >> '
+        '/Annots [ << /Type /Annot /Subtype /Link /Rect [60 700 300 760] '
+        '/A << /S /URI /URI (https://example.com) >> >> ] >>',
+    '<< /Length ${content.length} >>\nstream\n$content\nendstream',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  final buffer = StringBuffer('%PDF-1.4\n');
+  final offsets = <int>[];
+  for (var i = 0; i < objects.length; i++) {
+    offsets.add(buffer.length);
+    buffer.write('${i + 1} 0 obj\n${objects[i]}\nendobj\n');
+  }
+  final xrefOffset = buffer.length;
+  buffer
+    ..write('xref\n0 ${objects.length + 1}\n')
+    ..write('0000000000 65535 f \n');
+  for (final offset in offsets) {
+    buffer.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  buffer
+    ..write('trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n')
+    ..write('startxref\n$xrefOffset\n%%EOF\n');
+  return ascii(buffer.toString());
+}
 
 void main() {
   Future<void> pumpSidebar(WidgetTester tester, PdfEditingController editing,
@@ -105,5 +141,65 @@ void main() {
     expect(region.right, greaterThan(400 / 612));
     expect(region.top, lessThan((792 - 450) / 792));
     expect(region.bottom, greaterThan((792 - 350) / 792));
+  });
+
+  // the detail tests mount the sidebar alone: tiles don't need a viewer
+  Future<void> pumpSidebarOnly(
+      WidgetTester tester, PdfEditingController editing) async {
+    final viewer = PdfViewerController();
+    addTearDown(viewer.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Row(children: [
+          const Expanded(child: SizedBox()),
+          PdfAnnotationSidebar(
+              controller: editing, viewerController: viewer, width: 360),
+        ]),
+      ),
+    ));
+    await tester.pump();
+  }
+
+  testWidgets('form-field tiles show the kind, name, and value',
+      (tester) async {
+    final editing = PdfEditingController(buildAcroFormPdf());
+    addTearDown(editing.dispose);
+    await pumpSidebarOnly(tester, editing);
+
+    expect(find.text('Text field'), findsNWidgets(3)); // name/address/serial
+    expect(find.text('name — prefilled'), findsOneWidget);
+    expect(find.text('address'), findsOneWidget); // no value yet
+    expect(find.text('serial — A-1000'), findsOneWidget);
+    expect(find.text('Button field'), findsNWidgets(3)); // agree + 2 radios
+    expect(find.text('agree — Off'), findsOneWidget);
+    // radio kids inherit name and value up the /Parent chain
+    expect(find.text('color — Off'), findsNWidgets(2));
+    expect(find.text('Choice field'), findsOneWidget);
+    expect(find.text('size — Medium'), findsOneWidget);
+  });
+
+  testWidgets('link tiles show where each link goes', (tester) async {
+    final editing = PdfEditingController(buildAnnotatedPdf());
+    addTearDown(editing.dispose);
+    await pumpSidebarOnly(tester, editing);
+
+    expect(find.text('Link'), findsNWidgets(5));
+    expect(find.text('app://invoice/42'), findsOneWidget); // URI
+    expect(find.text('Page 3'), findsOneWidget); // GoTo destination
+    expect(find.text('Page 2'), findsOneWidget); // named destination
+    expect(find.text('NextPage'), findsOneWidget); // named action
+    expect(find.text('app://hidden'), findsOneWidget);
+    // the push button resolves its field name through /Parent
+    expect(find.text('Button field'), findsOneWidget);
+    expect(find.text('actions.launch'), findsOneWidget);
+  });
+
+  testWidgets('a link over page text shows that text as its label',
+      (tester) async {
+    final editing = PdfEditingController(buildLinkOverTextPdf());
+    addTearDown(editing.dispose);
+    await pumpSidebarOnly(tester, editing);
+
+    expect(find.text('Hello, world! — https://example.com'), findsOneWidget);
   });
 }

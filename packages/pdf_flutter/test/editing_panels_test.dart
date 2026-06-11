@@ -474,4 +474,62 @@ void main() {
       expect(editing.pendingFlash, isNull);
     });
   });
+
+  group('scrollbar clearance', () {
+    testWidgets('the lists keep clear of the overlay scrollbar zone',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(2))
+        ..addNote(0, 100, 700, 'note');
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            PdfThumbnailSidebar(controller: editing, viewerController: viewer),
+            const Expanded(child: SizedBox()),
+            PdfAnnotationSidebar(controller: editing, viewerController: viewer),
+          ]),
+        ),
+      ));
+      await tester.pump();
+
+      // left-docked strip: 14px bar stepped off the 8px grip, tiles
+      // already pad 12 — the list adds the missing 10
+      final strip = tester
+          .widget<ReorderableListView>(find.byType(ReorderableListView));
+      expect(strip.padding, const EdgeInsets.fromLTRB(0, 8, 10, 8));
+
+      // right-docked annotation list: the grip rides the far edge, so
+      // just the bar's 14px
+      final list = tester.widget<ListView>(find.byType(ListView));
+      expect(list.padding, const EdgeInsets.only(right: 14));
+      await tester.pump(const Duration(seconds: 2)); // drain tile renders
+    });
+
+    testWidgets('a left-docked annotation list also steps off the grip',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..addNote(0, 100, 700, 'note');
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            PdfAnnotationSidebar(
+              controller: editing,
+              viewerController: viewer,
+              side: PdfSidebarSide.left,
+            ),
+            const Expanded(child: SizedBox()),
+          ]),
+        ),
+      ));
+      await tester.pump();
+
+      final list = tester.widget<ListView>(find.byType(ListView));
+      expect(list.padding, const EdgeInsets.only(right: 22));
+    });
+  });
 }

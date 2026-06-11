@@ -386,6 +386,28 @@ class PdfWidgetAnnotation extends PdfAnnotation {
   /// Fully qualified field name (partial names joined with dots).
   final String? fieldName;
 
+  /// The field's current value — /V resolved up the /Parent chain
+  /// (§12.7.4.2): the text of text and choice fields, the on-state name
+  /// of buttons ('Off' when unchecked), the first element of a
+  /// multi-select choice value.
+  String? get fieldValue {
+    final cos = document.cos;
+    CosDictionary? node = dict;
+    final visited = <CosDictionary>{};
+    while (node != null && visited.add(node)) {
+      final v = cos.resolve(node['V']);
+      if (v is CosString) return v.text;
+      if (v is CosName) return v.value;
+      if (v is CosArray && v.length > 0) {
+        final first = cos.resolve(v[0]);
+        if (first is CosString) return first.text;
+      }
+      final parent = cos.resolve(node['Parent']);
+      node = parent is CosDictionary ? parent : null;
+    }
+    return null;
+  }
+
   @override
   PdfAction? get action => _action;
 }

@@ -792,3 +792,43 @@ and annotation_editor_test.dart reorder tests. Gotcha: with every
 annotation on a page selected, ANY reorder is the identity — both
 menu entries disable; multi-select menu tests need a third,
 unselected annotation for the action to do anything.
+Batch 3, session 4 (scrolling & panels): three features. (1) Fast-scroll
+render hold — the scrollbar "jumping" on big/CAD docs was UI-thread
+stalls: renderPicture walks the content stream TWICE synchronously
+(collector + paint; worst corpus pages 100–420ms per walk — probe:
+pdf_graphics/tool/interp_timing.dart), and every page entering the
+cacheExtent kicked it mid-fling. `PdfPageView.renderHold`
+(ValueListenable<bool>): while true, a page with no `_picture` yet
+skips `_render` (sets `_holdPending`, re-fires on release); pages with
+a picture re-raster freely (toImage is raster-thread). The viewer owns
+`_renderHold` + `_trackScrollVelocity` (in `_onScrollForDetail`):
+per-frame samples (timestamp = `currentSystemFrameTimeStamp`, NOT wall
+clock — one wheel tick fires several listener calls in one frame and
+an instant 100px jump must not read as infinite velocity; same-frame
+samples collapse), ~200ms window, hold = |v| > max(800, 2·viewport)/s;
+the 250ms scroll-settle timer clears samples + hold. jumpToPage's
+250ms animateTo trips it too (long jumps render only on arrival).
+First-frame gap: the first scroll event of a gesture has span 0 → no
+verdict → that frame may still interpret one page; inherent to any
+estimator. (2) Sidebar scrollbar clearance: both panels pad their list
+on the right by the bar zone — hitExtent(14) + grip(8) when the grip
+rides the same right edge (thumbnails: minus the tiles' own 12px,
+`_extraRightPadding`; tileWidth/_estimateOffset now share `_tileWidth`
+= width−26−extra). (3) Annotation-list detail:
+`PdfWidgetAnnotation.fieldValue` (inherited /V up /Parent: string,
+name, or first array string) + sidebar `_detail` — Widget tiles titled
+by /FT (`_fieldLabel`) with "name — value", Link tiles "text — target"
+via `PdfPageText.textIn(rect)` (new in pdf_graphics: runs whose bounds
+CENTER lies in the rect, document order — whole runs, no partial text)
+and `_actionLabel` (URI → uri, GoTo → 'Page N', Named → name, JS →
+'JavaScript'); per-page PdfPageText cached in `_pageTexts`, cleared
+with `_builtFor` (extraction interprets the page — once per revision
+per page that lists a link). Tests: render_hold_test.dart (the
+fling test interleaves runAsync delays into the animation pumps so an
+un-held render WOULD complete — without that, findsNothing passes
+vacuously; both tests verified to fail with the hold disabled),
+annotation_test.dart field values, text_extraction_test textIn,
+editing_sidebar_test detail tiles (sidebar mounts fine without a
+viewer), editing_panels_test clearance (assert the list widgets'
+`padding`). buildAcroFormPdf/buildAnnotatedPdf already cover fields
+and link actions; link-over-text needed an inline fixture.

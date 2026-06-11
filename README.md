@@ -201,9 +201,20 @@ menu through `PdfViewer.annotationMenuBuilder`: return
 `PdfAnnotationMenuItem`s and they appear below a divider, each handed
 the selection it acts on (the example app adds "Copy text" for
 annotations that carry any).
+Fast scrolling stays smooth on heavy documents: pages flying past
+during a fling defer their first interpretation — the expensive part
+of rendering — until the scroll settles, showing the paper color
+meanwhile, the way desktop browsers blank pages mid-fling. Without
+that, a dense CAD page entering the viewport could stall the UI for
+hundreds of milliseconds and the scrollbar visibly leapt; with it,
+the fling glides and the pages fill in the moment the view comes to
+rest (slow scrolling still renders continuously — the hold only
+engages past about two viewport-heights per second).
 The side panels are desktop-grade too. Both sidebars resize by
 dragging their inner edge (the chosen widths persist on the device
-with the other UI preferences), the thumbnail strip follows the
+with the other UI preferences), both keep their content clear of the
+overlay scrollbar's lane (no bar over a delete button), the thumbnail
+strip follows the
 viewer — scrolling, search hits, and link jumps bring the current
 page's tile into view — and tapping an annotation in the list pulses
 an amber attention ring around it on the page, so the eye lands on
@@ -213,6 +224,11 @@ cache keyed by a per-page render stamp, so an edit (or undo) only
 re-renders the pages it actually touched, renders run one page at a
 time instead of bursting on first layout, and scrolling the viewer
 repaints only the little viewport indicators — never the page images.
+The annotation list reads like an inspector: form-field tiles show
+the field's kind (text, button, choice, signature), its fully
+qualified name, and its current value; link tiles show the text the
+link covers on the page and where it goes — the URI, the target page,
+or the named action.
 Text boxes are written and edited in place, like a desktop editor:
 dragging out the free-text tool opens an inline editor right on the
 page — same font, size, color, and background the committed annotation

@@ -109,4 +109,38 @@ void main() {
       expect(annots[3].normalAppearance, isNotNull);
     });
   });
+
+  group('widget field values', () {
+    late List<PdfAnnotation> annots;
+
+    setUp(() {
+      annots = PdfDocument.open(buildAcroFormPdf()).page(0).annotations;
+    });
+
+    PdfWidgetAnnotation widget(String name) =>
+        annots.whereType<PdfWidgetAnnotation>().firstWhere(
+            (annotation) => annotation.fieldName == name);
+
+    test('fieldValue reads /V off the widget itself', () {
+      expect(widget('name').fieldValue, 'prefilled');
+      expect(widget('agree').fieldValue, 'Off'); // a /Name on-state
+      expect(widget('size').fieldValue, 'Medium');
+    });
+
+    test('fieldValue resolves up the /Parent chain for radio kids', () {
+      final kids = annots
+          .whereType<PdfWidgetAnnotation>()
+          .where((annotation) => annotation.fieldName == 'color')
+          .toList();
+      expect(kids, hasLength(2));
+      for (final kid in kids) {
+        expect(kid.fieldValue, 'Off');
+        expect(kid.fieldType, 'Btn');
+      }
+    });
+
+    test('fieldValue is null without a /V anywhere', () {
+      expect(widget('address').fieldValue, isNull);
+    });
+  });
 }

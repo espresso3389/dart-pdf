@@ -103,6 +103,23 @@ class PdfPageText {
     return rects;
   }
 
+  /// The page text inside [rect] (page space): runs whose bounds center
+  /// falls within the rect, in document order, joined with single
+  /// spaces. The text a /Link annotation's rectangle covers, for one.
+  String textIn(PdfRect rect) {
+    final parts = <(int, String)>[];
+    for (final run in runs) {
+      final piece = run.text.trim();
+      if (piece.isEmpty) continue;
+      final b = run.bounds;
+      if (rect.contains((b.left + b.right) / 2, (b.bottom + b.top) / 2)) {
+        parts.add((run.startIndex, piece));
+      }
+    }
+    parts.sort((a, b) => a.$1.compareTo(b.$1));
+    return parts.map((part) => part.$2).join(' ');
+  }
+
   /// Index into [text] nearest the page-space point ([x], [y]), for
   /// mapping pointer positions to text positions (selection).
   ///

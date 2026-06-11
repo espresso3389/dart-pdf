@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_graphics/pdf_graphics.dart';
 
 import '../pdf_viewer.dart';
 import '../scrollbar.dart';
@@ -11,6 +12,9 @@ import 'editing_preferences.dart';
 
 /// A panel listing every annotation in the document, grouped by page,
 /// each tile showing its author (/T) when the annotation carries one.
+/// Form-field tiles show the field's kind, fully qualified name, and
+/// current value; link tiles show the text under the link and where it
+/// goes (the URI, or the target page).
 ///
 /// Tapping a tile zooms the viewer to the annotation, selects it
 /// (arming the select tool), and pulses an attention flash around it on
@@ -87,6 +91,13 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
   /// undo, or redo can shift /Annots slots, so a new revision drops it.
   PdfDocument? _builtFor;
 
+  /// Extracted page text for link tiles ("the text under the link"),
+  /// per page, for the current revision only — extraction interprets
+  /// the page, so it runs once per page that actually lists a link and
+  /// the cache dies with [_builtFor]. Null entries are failed or
+  /// text-free extractions.
+  final Map<int, PdfPageText?> _pageTexts = {};
+
   /// The panel width while a resize drag is in flight, overriding the
   /// preference until the drag ends and persists it.
   double? _dragWidth;
@@ -160,6 +171,64 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
         _ => subtype,
       };
 
+  /// A finer title for form fields, from the inherited /FT.
+  static String _fieldLabel(String? fieldType) => switch (fieldType) {
+        'Tx' => 'Text field',
+        'Btn' => 'Button field',
+        'Ch' => 'Choice field',
+        'Sig' => 'Signature field',
+        _ => 'Form field',
+      };
+
+  /// Where an action leads, for a link tile's subtitle.
+  static String? _actionLabel(PdfAction? action) => switch (action) {
+        PdfUriAction(:final uri) => uri,
+        PdfGoToAction(:final destination) =>
+          'Page ${destination.pageIndex + 1}',
+        PdfNamedAction(:final name) => name,
+        PdfJavaScriptAction() => 'JavaScript',
+        PdfUnknownAction(:final type) => type.isEmpty ? null : type,
+        null => null,
+      };
+
+  PdfPageText? _pageText(int page) {
+    if (_pageTexts.containsKey(page)) return _pageTexts[page];
+    PdfPageText? text;
+    try {
+      text = PdfTextExtractor.extract(widget.controller.document, page);
+    } catch (_) {
+      // a page that won't interpret still lists its annotations
+    }
+    return _pageTexts[page] = text;
+  }
+
+  /// The tile subtitle: author — contents for markup, name — value for
+  /// form fields, link text — target for links.
+  String _detail(int pageIndex, PdfAnnotation annotation) {
+    if (annotation is PdfWidgetAnnotation) {
+      final value = annotation.fieldValue;
+      return [
+        if (annotation.fieldName != null && annotation.fieldName!.isNotEmpty)
+          annotation.fieldName!,
+        if (value != null && value.isNotEmpty) value,
+      ].join(' — ');
+    }
+    if (annotation.subtype == 'Link') {
+      final text = _pageText(pageIndex)?.textIn(annotation.rect);
+      return [
+        if (text != null && text.isNotEmpty) text,
+        if (_actionLabel(annotation.action) case final target?) target,
+      ].join(' — ');
+    }
+    // on widgets /T is the field name, not an author — handled above
+    final author = annotation.author;
+    final contents = annotation.contents;
+    return [
+      if (author != null && author.isNotEmpty) author,
+      if (contents != null && contents.isNotEmpty) contents,
+    ].join(' — ');
+  }
+
   void _toggle((int, int) slot) => setState(() {
         if (!_checked.add(slot)) _checked.remove(slot);
       });
@@ -168,13 +237,7 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
       PdfAnnotation annotation) {
     final slot = (pageIndex, index);
     final selectable = !_unselectable.contains(annotation.subtype);
-    // on widgets /T is the field name, not an author
-    final author = annotation.subtype == 'Widget' ? null : annotation.author;
-    final contents = annotation.contents;
-    final detail = [
-      if (author != null && author.isNotEmpty) author,
-      if (contents != null && contents.isNotEmpty) contents,
-    ].join(' — ');
+    final detail = _detail(pageIndex, annotation);
     return ListTile(
       dense: true,
       leading: _selecting
@@ -183,7 +246,9 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
               onChanged: selectable ? (_) => _toggle(slot) : null,
             )
           : Icon(_icon(annotation.subtype), size: 20),
-      title: Text(_label(annotation.subtype)),
+      title: Text(annotation is PdfWidgetAnnotation
+          ? _fieldLabel(annotation.fieldType)
+          : _label(annotation.subtype)),
       subtitle: detail.isEmpty
           ? null
           : Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -261,6 +326,7 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
                   _builtFor = document;
                   _checked.clear();
                   _selecting = false;
+                  _pageTexts.clear();
                 }
                 final children = <Widget>[];
                 for (var page = 0; page < document.pageCount; page++) {
@@ -287,14 +353,22 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
                 // multi-select header above stays clear of it. Stepped
                 // off the resize grip when the grip rides the same
                 // (right) edge.
+                // keep the list clear of the overlay scrollbar's zone so
+                // the bar never covers a tile's trailing button
+                final barClearance = PdfScrollbar.hitExtent +
+                    (widget.resizable && widget.side == PdfSidebarSide.left
+                        ? PdfSidebarResizeGrip.width
+                        : 0);
                 final list = children.isEmpty
                     ? const Center(child: Text('No annotations'))
                     : Stack(children: [
                         ScrollConfiguration(
                           behavior: ScrollConfiguration.of(context)
                               .copyWith(scrollbars: false),
-                          child:
-                              ListView(controller: _scroll, children: children),
+                          child: ListView(
+                              controller: _scroll,
+                              padding: EdgeInsets.only(right: barClearance),
+                              children: children),
                         ),
                         Positioned(
                           top: 0,

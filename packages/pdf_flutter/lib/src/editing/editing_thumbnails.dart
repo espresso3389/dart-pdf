@@ -111,6 +111,22 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
       (_dragWidth ?? _preferences.thumbnailSidebarWidth ?? widget.width)
           .clamp(widget.minWidth, widget.maxWidth);
 
+  /// The scrollbar (and, when it rides the same right edge, the resize
+  /// grip) overlay the list — the list keeps clear of that zone so the
+  /// bar never covers a tile. Tiles already pad 12px on their own.
+  double get _barClearance =>
+      PdfScrollbar.hitExtent +
+      (widget.resizable && widget.side == PdfSidebarSide.left
+          ? PdfSidebarResizeGrip.width
+          : 0);
+
+  double get _extraRightPadding => math.max(0, _barClearance - 12);
+
+  /// The width a tile's thumbnail actually lays out at: panel width less
+  /// the tile's 12px side paddings, the 1px borders, and the scrollbar
+  /// clearance.
+  double get _tileWidth => _width - 26 - _extraRightPadding;
+
   @override
   void initState() {
     super.initState();
@@ -190,7 +206,7 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
   /// layout math the tiles use (12px side padding, 1px border, 4px
   /// vertical padding, ~28px footer row).
   double _estimateOffset(int index) {
-    final thumbWidth = _width - 26;
+    final thumbWidth = _tileWidth;
     var offset = 8.0; // the list's top padding
     for (var i = 0; i < index; i++) {
       final size = PdfPageRenderer.pageSize(widget.controller.pageAt(i));
@@ -231,7 +247,7 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
                 child: ReorderableListView.builder(
                   scrollController: _scroll,
                   buildDefaultDragHandles: false,
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: EdgeInsets.fromLTRB(0, 8, _extraRightPadding, 8),
                   itemCount: controller.document.pageCount,
                   onReorderItem: controller.movePage,
                   itemBuilder: (context, index) => _ReorderDragStartListener(
@@ -244,7 +260,7 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
                       pageIndex: index,
                       pageColor: widget.pageColor,
                       cache: _cache,
-                      tileWidth: width - 26,
+                      tileWidth: _tileWidth,
                     ),
                   ),
                 ),

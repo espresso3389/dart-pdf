@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:pdf_document/pdf_document.dart';
 
@@ -22,9 +23,18 @@ class PdfPageView extends StatefulWidget {
     this.settleGeneration = 0,
     this.pageColor = const Color(0xFFFFFFFF),
     this.onRasterReady,
+    this.renderHold,
   });
 
   final PdfPage page;
+
+  /// While true, a page that has not been interpreted yet keeps its
+  /// paper placeholder instead of starting the (UI-thread) interpreter
+  /// walk — the viewer raises it during fast scrolling so heavy pages
+  /// flying past can't stall the frame rate. Held pages render as soon
+  /// as it drops back to false. Pages that already have a picture are
+  /// unaffected (re-rasters reuse it).
+  final ValueListenable<bool>? renderHold;
 
   /// Called whenever a full-page raster for the current [page] object
   /// lands on screen. Lets the editing overlay hold its just-committed
@@ -58,11 +68,28 @@ class _PdfPageViewState extends State<PdfPageView> {
   Rect? _detailFraction; // patch placement as fractions of the page
   int _detailGeneration = 0;
 
+  /// A render that arrived while [PdfPageView.renderHold] was up — it
+  /// fires the moment the hold releases.
+  bool _holdPending = false;
+
   // Full-page rasters stay within GPU texture limits and sane memory:
   // at most ~16.7M px (64 MB RGBA) and 8192 px per side. Past these caps
   // the detail patch takes over for the visible region.
   static const _maxPixels = 1 << 24;
   static const _maxDimension = 8192.0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.renderHold?.addListener(_onRenderHoldChanged);
+  }
+
+  void _onRenderHoldChanged() {
+    if (widget.renderHold?.value == false && _holdPending) {
+      _holdPending = false;
+      if (mounted) _render();
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -93,6 +120,11 @@ class _PdfPageViewState extends State<PdfPageView> {
   @override
   void didUpdateWidget(PdfPageView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.renderHold, widget.renderHold)) {
+      oldWidget.renderHold?.removeListener(_onRenderHoldChanged);
+      widget.renderHold?.addListener(_onRenderHoldChanged);
+      _onRenderHoldChanged();
+    }
     if (!identical(oldWidget.page, widget.page) ||
         oldWidget.pageColor != widget.pageColor) {
       _dropPicture();
@@ -110,6 +142,7 @@ class _PdfPageViewState extends State<PdfPageView> {
 
   @override
   void dispose() {
+    widget.renderHold?.removeListener(_onRenderHoldChanged);
     _dropPicture();
     _image?.dispose();
     _detailImage?.dispose();
@@ -153,6 +186,14 @@ class _PdfPageViewState extends State<PdfPageView> {
   }
 
   Future<void> _render() async {
+    // only the first interpretation is deferred: it walks the content
+    // stream twice on the UI thread, which is what stalls fast scrolling
+    // on heavy pages. With a picture cached, rendering is a raster-thread
+    // toImage and proceeds even during the hold.
+    if (_picture == null && (widget.renderHold?.value ?? false)) {
+      _holdPending = true;
+      return;
+    }
     final generation = ++_renderGeneration;
     final picture = await (_picture ??= PdfPageRenderer.renderPicture(
         widget.page,
@@ -227,6 +268,8 @@ class _PdfPageViewState extends State<PdfPageView> {
     ratio =
         math.min(ratio, _maxDimension / math.max(region.width, region.height));
 
+    // never interpret during a hold — the next settle refreshes the patch
+    if (_picture == null && (widget.renderHold?.value ?? false)) return;
     final picture = await (_picture ??= PdfPageRenderer.renderPicture(
         widget.page,
         pageColor: widget.pageColor));

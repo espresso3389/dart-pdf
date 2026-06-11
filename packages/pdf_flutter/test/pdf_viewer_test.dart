@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_flutter/pdf_flutter.dart';
+import 'package:pdf_graphics/pdf_graphics.dart' show PdfTextExtractor;
 import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 
 void main() {
@@ -488,6 +489,122 @@ void main() {
 
     await tester.pumpAndSettle(const Duration(milliseconds: 100));
     expect(scrollable.position.pixels, greaterThan(atLiftOff + 100));
+  });
+
+  testWidgets('trackpad pinch zooms without scrolling the document',
+      (tester) async {
+    final controller = await pumpViewer(tester);
+    final scrollable =
+        tester.state<ScrollableState>(find.byType(Scrollable).first);
+
+    // macOS reports the fingers' drift as pan deltas during a magnify
+    // gesture — the pinch must zoom only, never scroll
+    final pinch = await tester.createGesture(
+        kind: PointerDeviceKind.trackpad, pointer: 30);
+    await pinch.panZoomStart(const Offset(400, 300));
+    for (var i = 1; i <= 6; i++) {
+      await pinch.panZoomUpdate(const Offset(400, 300),
+          pan: Offset(0, -30.0 * i), scale: 1 + 0.2 * i);
+      await tester.pump();
+    }
+    await pinch.panZoomEnd();
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+
+    expect(controller.zoom, greaterThan(1.5));
+    expect(scrollable.position.pixels, 0);
+    expect(controller.currentPage, 0);
+  });
+
+  testWidgets('horizontal trackpad fling keeps panning while zoomed',
+      (tester) async {
+    final controller = await pumpViewer(tester);
+
+    // zoom in with a touch double-tap (2.5×)
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, greaterThan(1));
+
+    // brisk sideways swipe: ~40px every 16ms ≈ 2500 px/s
+    final gesture = await tester.createGesture(
+        kind: PointerDeviceKind.trackpad, pointer: 31);
+    await gesture.panZoomStart(const Offset(400, 300));
+    for (var i = 1; i <= 6; i++) {
+      await gesture.panZoomUpdate(const Offset(400, 300),
+          pan: Offset(-40.0 * i, 0), timeStamp: Duration(milliseconds: 16 * i));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.panZoomEnd(timeStamp: const Duration(milliseconds: 112));
+    await tester.pump();
+    final atLiftOff = controller.visiblePageRegion(0)!.left;
+
+    // momentum carries the zoom window on after lift-off
+    await tester.pumpAndSettle(const Duration(milliseconds: 400));
+    expect(
+        controller.visiblePageRegion(0)!.left, greaterThan(atLiftOff + 0.02));
+    expect(controller.zoom, greaterThan(1)); // flinging didn't unzoom
+  });
+
+  testWidgets('search lands on the match in a long mixed-size document',
+      (tester) async {
+    final bytes = buildVariedHeightPdf(48);
+    final controller = await pumpViewer(tester, bytes: bytes);
+
+    await tester.runAsync(() => controller.search('Page 45'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.matchCount, 1);
+
+    // exact target: heights cycle 792/396/1008 pt at 612 wide, laid out
+    // fit-width in an 800px viewport with 12px spacing; the match sits a
+    // third of the way down the viewport (see _showMatch)
+    const heights = [792.0, 396.0, 1008.0];
+    double pageHeight(int i) => heights[i % 3] / 612 * 800;
+    var offset = 0.0;
+    for (var i = 0; i < 44; i++) {
+      offset += pageHeight(i) + 12;
+    }
+    final doc = PdfDocument.open(bytes);
+    final match = PdfTextExtractor.extract(doc, 44).findAll('Page 45').single;
+    final box = doc.page(44).cropBox;
+    final fractionDown = (box.top - match.rects.first.top) / box.height;
+    final expected = offset + fractionDown * pageHeight(44) - 600 / 3;
+
+    final scrollable =
+        tester.state<ScrollableState>(find.byType(Scrollable).first);
+    expect(scrollable.position.pixels, moreOrLessEquals(expected, epsilon: 1));
+    expect(controller.currentPage, 44);
+  });
+
+  testWidgets('search jump accounts for the zoom window', (tester) async {
+    final controller = await pumpViewer(tester);
+
+    // zoom in 2.5× with a touch double-tap at (400,300): the screen
+    // viewport now sees list space through the window (p − t)/s
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.tapAt(const Offset(400, 300));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.zoom, moreOrLessEquals(2.5, epsilon: 0.01));
+
+    await tester.runAsync(() => controller.search('Page 4'));
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
+    expect(controller.matchCount, 1);
+
+    // the match must sit a third of the way down the SCREEN, not a third
+    // down the unprojected list viewport: t_y = −300·1.5, s = 2.5
+    const pageHeight = 792 / 612 * 800;
+    final doc = PdfDocument.open(buildMultiPagePdf(5));
+    final match = PdfTextExtractor.extract(doc, 3).findAll('Page 4').single;
+    final box = doc.page(3).cropBox;
+    final fractionDown = (box.top - match.rects.first.top) / box.height;
+    final matchY = 3 * (pageHeight + 12) + fractionDown * pageHeight;
+    final expected = matchY + (-300 * 1.5) / 2.5 - 600 / (3 * 2.5);
+
+    final scrollable =
+        tester.state<ScrollableState>(find.byType(Scrollable).first);
+    expect(scrollable.position.pixels, moreOrLessEquals(expected, epsilon: 1));
+    expect(controller.visiblePageRegion(3), isNotNull);
   });
 
   testWidgets('zoomed trackpad scrolling reaches the document ends',

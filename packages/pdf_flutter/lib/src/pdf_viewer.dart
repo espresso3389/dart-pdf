@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf_document/pdf_document.dart';
@@ -303,8 +304,7 @@ class PdfViewer extends StatefulWidget {
   State<PdfViewer> createState() => _PdfViewerState();
 }
 
-class _PdfViewerState extends State<PdfViewer>
-    with SingleTickerProviderStateMixin {
+class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   late PdfViewerController _controller;
   bool _ownsController = false;
 
@@ -351,6 +351,16 @@ class _PdfViewerState extends State<PdfViewer>
 
   /// Tracks the gesture's pan velocity for the fling on lift-off.
   VelocityTracker? _trackpadVelocity;
+
+  /// What the gesture turned out to be — see _onTrackpadPanZoomUpdate.
+  _TrackpadIntent _trackpadIntent = _TrackpadIntent.undecided;
+  Offset _trackpadPendingPan = Offset.zero;
+
+  /// Carries horizontal momentum after a zoomed trackpad pan lifts off:
+  /// sideways overflow lives in the zoom window's translation, which the
+  /// scroll position's ballistic simulation can't reach.
+  late final AnimationController _panFlinger =
+      AnimationController.unbounded(vsync: this)..addListener(_onPanFlingTick);
 
   final _focusNode = FocusNode(debugLabel: 'PdfViewer');
 
@@ -429,6 +439,7 @@ class _PdfViewerState extends State<PdfViewer>
     if (event is! PointerScrollEvent) return;
     GestureBinding.instance.pointerSignalResolver.register(event, (event) {
       final scroll = event as PointerScrollEvent;
+      _panFlinger.stop();
       if (_zoomModifierDown) {
         _applyWheelZoom(scroll);
       } else if (_zoomed) {
@@ -597,6 +608,7 @@ class _PdfViewerState extends State<PdfViewer>
     _scroll.dispose();
     _transform.dispose();
     _zoomAnimator.dispose();
+    _panFlinger.dispose();
     _focusNode.dispose();
     super.dispose();
   }
@@ -626,9 +638,18 @@ class _PdfViewerState extends State<PdfViewer>
     _controller._setCurrentPage(_pages.length - 1);
   }
 
+  /// While zoomed in, the screen viewport sees list space starting at
+  /// (pixels − t_y)/s (see _visibleFractionOf) — scroll targets must
+  /// shift by t_y/s, or every jump lands above where the user looks.
+  double get _zoomWindowDy {
+    final m = _transform.value;
+    return m.storage[13] / m.getMaxScaleOnAxis();
+  }
+
   Future<void> _jumpToPage(int index) async {
     if (!_scroll.hasClients) return;
-    final target = _pageOffset(index.clamp(0, _pages.length - 1));
+    final target =
+        _pageOffset(index.clamp(0, _pages.length - 1)) + _zoomWindowDy;
     await _scroll.animateTo(
       target.clamp(0.0, _scroll.position.maxScrollExtent),
       duration: const Duration(milliseconds: 250),
@@ -836,7 +857,7 @@ class _PdfViewerState extends State<PdfViewer>
   void _scrollToDestination(PdfDestination destination) {
     if (!_scroll.hasClients) return;
     final index = destination.pageIndex.clamp(0, _pages.length - 1);
-    var target = _pageOffset(index);
+    var target = _pageOffset(index) + _zoomWindowDy;
     final box = _pages[index].cropBox;
     final top = destination.top;
     if (top != null && box.height > 0) {
@@ -894,6 +915,7 @@ class _PdfViewerState extends State<PdfViewer>
 
   void _onPointerDown(PointerDownEvent event) {
     _suppressTap = false;
+    _panFlinger.stop();
     // a raw listener fires regardless of who wins the gesture arena, so
     // clicking anywhere — including editing overlays — focuses the viewer
     // and its keyboard shortcuts. Not while an in-place text editor is
@@ -1031,12 +1053,14 @@ class _PdfViewerState extends State<PdfViewer>
     if (!_scroll.hasClients || _viewWidth <= 0) return;
     final page = _pages[match.pageIndex];
     final box = page.cropBox;
-    var target = _pageOffset(match.pageIndex);
+    var target = _pageOffset(match.pageIndex) + _zoomWindowDy;
     if (match.rects.isNotEmpty && box.height > 0) {
-      // place the match a third of the way down the viewport
+      // place the match a third of the way down the screen viewport —
+      // which, zoomed in, covers 1/s of the list's space
+      final scale = _transform.value.getMaxScaleOnAxis();
       final fractionDown = (box.top - match.rects.first.top) / box.height;
       target += fractionDown * _pageHeight(match.pageIndex) -
-          _scroll.position.viewportDimension / 3;
+          _scroll.position.viewportDimension / (3 * scale);
     }
     _scroll.animateTo(
       target.clamp(0.0, _scroll.position.maxScrollExtent),
@@ -1125,32 +1149,57 @@ class _PdfViewerState extends State<PdfViewer>
   // scroll position's ballistic simulation, so flings feel stock.
 
   void _onTrackpadPanZoomStart(PointerPanZoomStartEvent event) {
+    _panFlinger.stop();
     _trackpadScale = 1;
+    _trackpadIntent = _TrackpadIntent.undecided;
+    _trackpadPendingPan = Offset.zero;
     _trackpadVelocity = VelocityTracker.withKind(PointerDeviceKind.trackpad);
   }
 
   void _onTrackpadPanZoomUpdate(PointerPanZoomUpdateEvent event) {
     _trackpadVelocity?.addPosition(event.timeStamp, event.pan);
 
-    if (event.scale > 0 && event.scale != _trackpadScale) {
-      final target = _currentZoom * event.scale / _trackpadScale;
-      _trackpadScale = event.scale;
-      // pinch zooms around the gesture's start point and may cross the
-      // fit-width seam into layout zoom
-      _zoomTo(target, event.localPosition);
+    // macOS delivers magnification and scrolling through the same gesture
+    // stream, and a magnify gesture reports the fingers' drift as pan
+    // deltas — applying both made every pinch also scroll. The first
+    // intent to cross its threshold claims the whole gesture; until then
+    // motion accumulates unapplied (and is paid back in one piece when
+    // scrolling latches, so nothing is lost to the dead zone).
+    var delta = event.panDelta;
+    if (_trackpadIntent == _TrackpadIntent.undecided) {
+      _trackpadPendingPan += delta;
+      if ((event.scale - 1).abs() > 0.01) {
+        _trackpadIntent = _TrackpadIntent.zoom;
+      } else if (_trackpadPendingPan.distance > 8) {
+        _trackpadIntent = _TrackpadIntent.scroll;
+        delta = _trackpadPendingPan;
+      } else {
+        return;
+      }
+    }
+
+    if (_trackpadIntent == _TrackpadIntent.zoom) {
+      if (event.scale > 0 && event.scale != _trackpadScale) {
+        final target = _currentZoom * event.scale / _trackpadScale;
+        _trackpadScale = event.scale;
+        // pinch zooms around the gesture's start point and may cross the
+        // fit-width seam into layout zoom
+        _zoomTo(target, event.localPosition);
+      }
+      return; // a pinch only zooms
     }
 
     final matrix = _transform.value.clone();
     final scale = matrix.getMaxScaleOnAxis();
-    matrix.storage[12] += event.panDelta.dx;
+    matrix.storage[12] += delta.dx;
 
     // vertical: scroll the list (deltas are screen pixels; the list lives
     // under the zoom transform). Whatever the extents can't absorb pans
     // the zoom window instead, so the very top and bottom of the document
     // are reachable at any zoom.
-    if (_scroll.hasClients && event.panDelta.dy != 0) {
+    if (_scroll.hasClients && delta.dy != 0) {
       final position = _scroll.position;
-      final target = position.pixels - event.panDelta.dy / scale;
+      final target = position.pixels - delta.dy / scale;
       final clamped =
           target.clamp(position.minScrollExtent, position.maxScrollExtent);
       if (clamped != position.pixels) position.jumpTo(clamped);
@@ -1166,6 +1215,8 @@ class _PdfViewerState extends State<PdfViewer>
     final scale = _transform.value.getMaxScaleOnAxis();
     final zoomed = scale > 1.01;
     if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
+    // a pinch's lift-off carries no momentum anywhere
+    if (_trackpadIntent != _TrackpadIntent.scroll) return;
     // hand leftover momentum to the scroll physics (same sign convention
     // as a drag: content follows the fingers)
     if (_scroll.hasClients && velocity.dy.abs() > kMinFlingVelocity) {
@@ -1174,6 +1225,28 @@ class _PdfViewerState extends State<PdfViewer>
         position.goBallistic(-velocity.dy / scale);
       }
     }
+    // horizontal momentum continues in the zoom window's translation,
+    // with the same friction InteractiveViewer uses for its flings
+    if (zoomed && velocity.dx.abs() > kMinFlingVelocity) {
+      _panFlinger.animateWith(FrictionSimulation(
+          0.0000135, _transform.value.storage[12], velocity.dx));
+    }
+  }
+
+  /// One frame of the horizontal fling: moves the zoom window's
+  /// x-translation along the friction simulation, stopping at the edges.
+  void _onPanFlingTick() {
+    final matrix = _transform.value.clone();
+    final scale = matrix.getMaxScaleOnAxis();
+    if (scale <= 1.01) {
+      _panFlinger.stop();
+      return;
+    }
+    final min = _viewWidth * (1 - scale);
+    final value = _panFlinger.value;
+    matrix.storage[12] = value.clamp(min, 0.0);
+    _transform.value = matrix;
+    if (value <= min || value >= 0) _panFlinger.stop();
   }
 
   /// Keeps the zoom window over the content: snaps near-1 scales back to
@@ -1253,6 +1326,13 @@ class _PdfViewerState extends State<PdfViewer>
         // the arena otherwise. Wheel and trackpad scrolling are unaffected.
         physics:
             editing?.tool != null ? const NeverScrollableScrollPhysics() : null,
+        // every page's extent is known up front, so give the sliver exact
+        // geometry instead of letting it estimate from built children —
+        // estimates drift on long mixed-size documents, landing jumps
+        // (search, links, page navigation) off target
+        itemExtentBuilder: (index, dimensions) => index >= _pages.length
+            ? null
+            : _pageHeight(index) + (index == 0 ? 0 : widget.pageSpacing),
         itemCount: _pages.length,
         padding: EdgeInsets.only(bottom: widget.pageSpacing),
         itemBuilder: (context, index) => Padding(
@@ -1819,6 +1899,11 @@ class _PdfScrollbarState extends State<_PdfScrollbar> {
     );
   }
 }
+
+/// What a trackpad pan-zoom gesture is doing. Decided once per gesture:
+/// a pinch only zooms (the fingers' drift is not a scroll) and a scroll
+/// never zooms.
+enum _TrackpadIntent { undecided, scroll, zoom }
 
 /// Claims every trackpad pan-zoom gesture, eagerly. The viewer drives
 /// scrolling, zoom-window panning, and pinch zoom itself: leaving these

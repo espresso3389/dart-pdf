@@ -365,3 +365,26 @@ tap silently misses; the SharedPreferences mock store is
 process-global, so widget tests call setMockInitialValues({}) before
 creating controllers or a prior test's stored fontFamily leaks in
 through the async preference load.
+Gesture/navigation fixes (session 3 of batch 2): trackpad gestures
+latch an intent per gesture (`_TrackpadIntent` in pdf_viewer.dart) —
+macOS reports finger drift as pan deltas during a magnify gesture, so
+the first signal past its threshold (|scale−1| > 0.01 → zoom, 8px
+accumulated pan → scroll) claims the whole gesture; pre-latch motion
+is paid back in one piece when scroll latches, and pinch lift-offs
+never fling. Horizontal momentum: `_panFlinger` (unbounded
+AnimationController + FrictionSimulation 0.0000135, InteractiveViewer's
+drag) continues the zoom window's x-translation after lift-off,
+clamped at the edges; stopped on pointer down, wheel, and new trackpad
+gestures (State is now TickerProviderStateMixin — two tickers). Jump
+accuracy: the ListView gets `itemExtentBuilder` (exact per-page
+extents, so scroll extents/offsets never drift from estimates on long
+mixed-size docs — `buildVariedHeightPdf` in pdf_test_fixtures cycles
+792/396/1008pt pages to defeat uniform estimates), and `_jumpToPage` /
+`_scrollToDestination` / `_showMatch` add `_zoomWindowDy` (= t_y/s):
+zoomed in, the screen sees list space through (p − t)/s, so targets
+shift by t_y/s — _showMatch also scales its viewport-third to
+viewH/(3s). Test gotchas (pdf_viewer_test.dart): panZoomUpdate's `pan`
+is cumulative, not a delta; widget tests can't reproduce the lazy-list
+estimate drift (animateTo lays pages out continuously, so the
+zoomed-search test is the regression gate for jump accuracy — it
+fails by t_y/s ≈ 240px un-fixed).

@@ -109,6 +109,15 @@ strokes are smoothed: the sampled points become a Catmull-Rom spline
 written as Bézier curves in the appearance stream, so fast strokes
 stay rounded instead of showing polyline corners — in this viewer and
 any other.
+Trackpad gestures behave like the platform's own: a pinch zooms about
+the fingers without also scrolling the document (each gesture commits
+to scrolling or zooming, whichever its motion shows first), and
+sideways flings while zoomed in carry momentum just like vertical ones.
+Navigation jumps — search results, links, page thumbnails — land
+exactly where they should: the page list is laid out from exact page
+geometry rather than scroll estimates (which drift on long documents
+with mixed page sizes), and jumping while zoomed in accounts for the
+zoom window, placing the target where the user is actually looking.
 The viewer opens fitted to the whole page like desktop browser viewers
 (`PdfViewer.initialFit`), and draws its own always-visible scrollbar —
 high-contrast, outside the zoom transform so it never scales away, with

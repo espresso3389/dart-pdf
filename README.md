@@ -163,11 +163,20 @@ tool in play it selects the page's text instead). A multi-selection
 moves as a group and deletes as a group — one undo step — and while
 the select tool is armed, touch drags on empty page area still scroll
 the document, so selecting and getting around never fight each other.
-Annotation interactions have desktop-app polish. The selection chrome
+Annotation interactions have desktop-app polish. Resizing behaves like
+a vector editor, not an image stretcher: squares, circles, and text
+boxes regenerate their appearance at the new size, so a stretched
+rectangle keeps its line weight and a widened text box re-wraps its
+text at the same font size (free text round-trips its background fill
+and border through the dictionary for the same reason — text edits
+keep them too). The selection chrome
 follows a rotated annotation — box, knob, and all spin with the artwork
 instead of boxing its axis-aligned bounds, and the next rotate drag
 snaps the *total* angle to 45° steps, so a rotated annotation clicks
-back to square. Edits never flash: when a commit lands, the overlay
+back to square. Rotated annotations resize too: the handles ride the
+spun chrome and drag along the annotation's own axes (the live preview
+scaling with them), so rotated artwork grows and shrinks without ever
+shearing. Edits never flash: when a commit lands, the overlay
 keeps the committed preview painted (the moved annotation's artwork at
 its new place, the just-drawn ink, the typed text) until the page's
 re-render actually reaches the screen, so nothing blinks out for a few

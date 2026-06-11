@@ -985,6 +985,18 @@ class PdfEditingController extends ChangeNotifier {
         pages: [_selected.last.$1]);
   }
 
+  /// Resizes the selected annotation in its own (unrotated) frame:
+  /// [localTo] rotated by the annotation's resting angle about its
+  /// center is where the artwork lands — how the overlay resizes a
+  /// rotated selection without shearing it.
+  void resizeSelectedLocal(PdfRect localTo) {
+    final annotation = selectedAnnotation;
+    if (annotation == null || !canResizeSelected) return;
+    if (localTo.width < 1 || localTo.height < 1) return;
+    apply((e) => e.resizeAnnotationLocal(_selected.last.$1, annotation, localTo),
+        pages: [_selected.last.$1]);
+  }
+
   /// Rotates the selected annotation by [degrees] counterclockwise (page
   /// space) about its center. The selection keeps its /Annots slot.
   void rotateSelected(double degrees) {
@@ -1070,10 +1082,16 @@ class PdfEditingController extends ChangeNotifier {
       switch (annotation.subtype) {
         case 'FreeText':
           final style = _freeTextStyleOf(annotation);
+          // the parsed style carries what /C alone can't: the text color
+          // (from /DA) plus any background fill and border
+          final parsed = annotation.freeTextStyle;
           e.addFreeText(page, rect, text,
               fontSize: size ?? style.size,
               font: font ?? style.font,
-              color: color ?? 0x000000,
+              color: parsed?.color ?? color ?? 0x000000,
+              fillColor: parsed?.fillColor,
+              borderColor: parsed?.borderColor,
+              borderWidth: parsed?.borderWidth ?? 1,
               author: by);
         case 'Stamp':
           e.addStamp(page, rect, text, color: color ?? 0xC03030, author: by);

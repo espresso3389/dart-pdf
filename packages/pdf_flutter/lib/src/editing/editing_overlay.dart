@@ -127,11 +127,15 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   double _textEditSize = 14; // pt
   Color _textEditColor = const Color(0xFF000000);
 
-  // select-tool drags
+  // select-tool drags. A rotated selection resizes in its local frame:
+  // _resizeFrom/_resizeRect are then the chrome's local box (the rect
+  // the painter spins by _resizeAngle), not page-axis view rects.
   Offset? _moveStart;
   Offset? _moveCurrent;
   _Handle? _resizeHandle;
+  Rect? _resizeFrom;
   Rect? _resizeRect;
+  double _resizeAngle = 0;
 
   // rubber-band selection (mouse drags on empty page area)
   Offset? _marqueeStart;
@@ -162,6 +166,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   Rect? _afterGhostFrom;
   Rect? _afterGhostTo;
   double _afterGhostRotation = 0;
+  double _afterGhostLocalAngle = 0;
   ({Rect rect, PdfEditTool tool, Color color, double strokeWidth})?
       _afterShape;
   ({
@@ -326,6 +331,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterGhostFrom = null;
     _afterGhostTo = null;
     _afterGhostRotation = 0;
+    _afterGhostLocalAngle = 0;
     _afterShape = null;
     _afterText = null;
     _afterSignature = null;
@@ -337,8 +343,14 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   /// afterimage — the move/resize/rotate result stays visible while the
   /// page re-renders. The ghost's ownership transfers to the afterimage;
   /// [_ensureGhost] re-renders a fresh one for the new revision.
-  void _commitWithGhost(VoidCallback commit, {Rect? to, double rotation = 0}) {
-    final from = _selectedViewRect;
+  ///
+  /// For a rotated selection's resize, [localAngle] is its resting
+  /// rotation and [to] the dragged *local* box — the afterimage then
+  /// scales along the local axes, exactly like the live preview did.
+  void _commitWithGhost(VoidCallback commit,
+      {Rect? to, double rotation = 0, double localAngle = 0}) {
+    final from =
+        localAngle == 0 ? _selectedViewRect : _selectionChrome?.$1;
     final ghost = _ghost;
     final before = _controller.document;
     commit();
@@ -351,6 +363,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterGhostFrom = from;
     _afterGhostTo = to;
     _afterGhostRotation = rotation;
+    _afterGhostLocalAngle = localAngle;
     _afterDocument = _controller.document;
   }
 
@@ -494,8 +507,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   /// the committed annotation will use.
   void _openTextEditor(Rect viewRect, {required bool existing}) {
     final style = existing ? _controller.selectedTextStyle : null;
-    final annotationColor =
-        existing ? _controller.selectedAnnotation?.color : null;
+    // /DA carries the text color; /C is the box background for free text
+    final annotation = existing ? _controller.selectedAnnotation : null;
+    final annotationColor = annotation?.freeTextStyle?.color ?? annotation?.color;
     _textEditText.text = existing ? (_controller.selectedText ?? '') : '';
     setState(() {
       _textEditRect = viewRect;
@@ -623,14 +637,19 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     final chrome = _selectionChrome;
     final resting = chrome?.$2 ?? 0;
     if (selected != null) {
-      // resizing a rotated annotation would stretch it along the page
-      // axes (§12.5.5 maps the appearance onto /Rect) — shearing the
-      // artwork — so a rotated selection moves and rotates only
-      final handle = resting == 0 ? _handleAt(selected, position) : null;
+      // a rotated selection resizes in its local frame: hit-test the
+      // handles where they're drawn (on the spun chrome box) by
+      // unrotating the pointer about the chrome center
+      final handle = resting == 0 || chrome == null
+          ? _handleAt(selected, position)
+          : _handleAt(chrome.$1,
+              _rotatePoint(position, chrome.$1.center, -resting));
       if (handle != null) {
         setState(() {
           _resizeHandle = handle;
-          _resizeRect = selected;
+          _resizeFrom = resting == 0 ? selected : chrome!.$1;
+          _resizeRect = _resizeFrom;
+          _resizeAngle = resting;
           _moveStart = position;
           _moveCurrent = position;
         });
@@ -701,8 +720,15 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     } else if (_resizeHandle != null) {
       setState(() {
         _moveCurrent = position;
+        // a rotated selection's handles move along its own axes, so the
+        // pointer delta rotates into the local frame
+        final delta = position - _moveStart!;
         _resizeRect = _resizedRect(
-            _selectedViewRect!, _resizeHandle!, position - _moveStart!);
+            _resizeFrom!,
+            _resizeHandle!,
+            _resizeAngle == 0
+                ? delta
+                : _rotatePoint(delta, Offset.zero, -_resizeAngle));
       });
     } else if (_moveStart != null) {
       setState(() => _moveCurrent = position);
@@ -725,6 +751,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     final moveStart = _moveStart;
     final moveCurrent = _moveCurrent;
     final resizeRect = _resizeHandle != null ? _resizeRect : null;
+    final resizeAngle = _resizeAngle;
     final rotating = _rotateStartAngle != null;
     final rotateDelta = _rotateDelta;
     final marquee = _marqueeStart != null && _marqueeCurrent != null
@@ -741,7 +768,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       _moveStart = null;
       _moveCurrent = null;
       _resizeHandle = null;
+      _resizeFrom = null;
       _resizeRect = null;
+      _resizeAngle = 0;
       _rotateStartAngle = null;
       _rotateDelta = 0;
       _marqueeStart = null;
@@ -771,9 +800,19 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           to: _selectedViewRect,
           rotation: rotateDelta);
     } else if (resizeRect != null) {
-      _commitWithGhost(
-          () => _controller.resizeSelected(_geometry.toPageRect(resizeRect)),
-          to: resizeRect);
+      if (resizeAngle == 0) {
+        _commitWithGhost(
+            () => _controller.resizeSelected(_geometry.toPageRect(resizeRect)),
+            to: resizeRect);
+      } else {
+        // the dragged rect is the local box; the editor re-applies the
+        // resting rotation about its center
+        _commitWithGhost(
+            () => _controller
+                .resizeSelectedLocal(_geometry.toPageRect(resizeRect)),
+            to: resizeRect,
+            localAngle: resizeAngle);
+      }
     } else if (moveStart != null && moveCurrent != null) {
       if ((moveCurrent - moveStart).distance < 2) return; // a click
       // mapping both endpoints keeps the delta correct on rotated pages
@@ -969,9 +1008,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       final selected = _selectedViewRect;
       final chrome = _selectionChrome;
       final resting = chrome?.$2 ?? 0;
-      final handle = selected == null || resting != 0
+      final handle = selected == null
           ? null
-          : _handleAt(selected, event.localPosition);
+          : resting == 0 || chrome == null
+              ? _handleAt(selected, event.localPosition)
+              : _handleAt(chrome.$1,
+                  _rotatePoint(event.localPosition, chrome.$1.center, -resting));
       if (handle != null) {
         cursor = switch ((handle.dx, handle.dy)) {
           (0, _) => SystemMouseCursors.resizeUpDown,
@@ -1172,7 +1214,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                       ? Rect.fromPoints(_marqueeStart!, _marqueeCurrent!)
                       : null,
                   ghost: _ghost,
-                  ghostFrom: selected,
+                  ghostFrom: _resizeHandle != null && _resizeAngle != 0
+                      ? _resizeFrom
+                      : selected,
                   ghostTo: _resizeHandle != null
                       ? _resizeRect
                       : selected?.shift(moveDelta),
@@ -1180,6 +1224,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                   rotation:
                       restingRotation + (rotating ? _rotateDelta : 0),
                   ghostRotation: rotating ? _rotateDelta : 0,
+                  ghostLocalAngle:
+                      _resizeHandle != null ? _resizeAngle : 0,
                   extraInk: extraInk,
                   afterGhost: _afterGhost != null
                       ? (
@@ -1187,11 +1233,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                           from: _afterGhostFrom!,
                           to: _afterGhostTo!,
                           rotation: _afterGhostRotation,
+                          localAngle: _afterGhostLocalAngle,
                         )
                       : null,
                   afterShape: _afterShape,
                   showHandles: selected != null &&
-                      restingRotation == 0 &&
                       _controller.canResizeSelected &&
                       _moveStart == null,
                   showRotateHandle: selected != null &&
@@ -1356,6 +1402,7 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.dragging,
     required this.rotation,
     required this.ghostRotation,
+    this.ghostLocalAngle = 0,
     required this.extraInk,
     required this.afterGhost,
     required this.afterShape,
@@ -1403,14 +1450,24 @@ class _EditingPreviewPainter extends CustomPainter {
   /// the resting rotation, so only the delta spins it.
   final double ghostRotation;
 
+  /// A rotated selection's resting angle during a resize drag:
+  /// [ghostFrom]/[ghostTo] are then local boxes and the ghost scales
+  /// along the rotated axes instead of stretching page-axis rects.
+  final double ghostLocalAngle;
+
   /// Stroke sets beyond the pending ink: committed-ink afterimages and
   /// the signature tool's live preview.
   final List<_InkPaint> extraInk;
 
   /// A just-committed move/resize/rotate, kept painted at full strength
   /// until the new revision's raster lands.
-  final ({ui.Picture picture, Rect from, Rect to, double rotation})?
-      afterGhost;
+  final ({
+    ui.Picture picture,
+    Rect from,
+    Rect to,
+    double rotation,
+    double localAngle,
+  })? afterGhost;
 
   /// A just-committed shape's drag preview, same deal.
   final ({Rect rect, PdfEditTool tool, Color color, double strokeWidth})?
@@ -1578,6 +1635,7 @@ class _EditingPreviewPainter extends CustomPainter {
           to: committed.to,
           scale: geometry.scale,
           rotation: committed.rotation,
+          localAngle: committed.localAngle,
           opacity: 1);
     }
 
@@ -1591,7 +1649,8 @@ class _EditingPreviewPainter extends CustomPainter {
           from: ghostFrom,
           to: ghostTo,
           scale: geometry.scale,
-          rotation: ghostRotation);
+          rotation: ghostRotation,
+          localAngle: ghostLocalAngle);
     }
     if (selection != null) {
       canvas.save();
@@ -1706,6 +1765,7 @@ class _EditingPreviewPainter extends CustomPainter {
       oldDelegate.dragging != dragging ||
       oldDelegate.rotation != rotation ||
       oldDelegate.ghostRotation != ghostRotation ||
+      oldDelegate.ghostLocalAngle != ghostLocalAngle ||
       _inkChanged(oldDelegate.extraInk, extraInk) ||
       oldDelegate.afterGhost != afterGhost ||
       oldDelegate.afterShape != afterShape ||
@@ -1733,6 +1793,12 @@ class _EditingPreviewPainter extends CustomPainter {
 ///
 /// [rotation] (view radians, clockwise positive) additionally spins the
 /// preview about [to]'s center — the rotate handle's live feedback.
+///
+/// With [localAngle] (a rotated selection's resting angle), [from] and
+/// [to] are *local* boxes: the picture scales by their size ratio along
+/// the rotated axes about the box centers, instead of stretching one
+/// page-axis rect onto another — a rotated annotation's resize preview
+/// must not shear.
 @visibleForTesting
 void paintAnnotationDragPreview(
   Canvas canvas, {
@@ -1741,10 +1807,11 @@ void paintAnnotationDragPreview(
   required Rect to,
   required double scale,
   double rotation = 0,
+  double localAngle = 0,
   double opacity = 0.75,
 }) {
   if (from.width <= 0 || from.height <= 0) return;
-  final bounds = rotation == 0
+  final bounds = rotation == 0 && localAngle == 0
       ? to.inflate(4)
       : Rect.fromCircle(
           center: to.center,
@@ -1759,9 +1826,17 @@ void paintAnnotationDragPreview(
     canvas.rotate(rotation);
     canvas.translate(-to.center.dx, -to.center.dy);
   }
-  canvas.translate(to.left, to.top);
-  canvas.scale(to.width / from.width, to.height / from.height);
-  canvas.translate(-from.left, -from.top);
+  if (localAngle != 0) {
+    canvas.translate(to.center.dx, to.center.dy);
+    canvas.rotate(localAngle);
+    canvas.scale(to.width / from.width, to.height / from.height);
+    canvas.rotate(-localAngle);
+    canvas.translate(-from.center.dx, -from.center.dy);
+  } else {
+    canvas.translate(to.left, to.top);
+    canvas.scale(to.width / from.width, to.height / from.height);
+    canvas.translate(-from.left, -from.top);
+  }
   canvas.scale(scale, scale);
   canvas.drawPicture(picture);
   canvas.restore();

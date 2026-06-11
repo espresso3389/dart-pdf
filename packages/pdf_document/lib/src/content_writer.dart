@@ -236,13 +236,23 @@ enum PdfStandardFont {
   /// Maps a /DA resource name or /BaseFont name leniently — other
   /// producers write /Times-Roman, /Georgia, /CourierNew and the like —
   /// defaulting to [helvetica].
-  static PdfStandardFont fromName(String name) {
+  static PdfStandardFont fromName(String name) =>
+      tryFromName(name) ?? helvetica;
+
+  /// Like [fromName], but null for names that don't clearly belong to
+  /// one of the three families (e.g. an embedded font's `/F1`) — callers
+  /// that would *regenerate* text in the mapped font use this to leave
+  /// unrecognized fonts alone rather than silently substitute.
+  static PdfStandardFont? tryFromName(String name) {
     final n = name.toLowerCase();
     if (n.contains('tiro') || n.contains('times') || n.contains('serif')) {
       return times;
     }
     if (n.contains('cour') || n.contains('mono')) return courier;
-    return helvetica;
+    if (n.contains('helv') || n.contains('arial') || n.contains('sans')) {
+      return helvetica;
+    }
+    return null;
   }
 }
 

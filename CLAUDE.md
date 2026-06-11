@@ -116,7 +116,8 @@ are byte prefixes of one buffer and undo/redo is a stack of lengths;
 `PdfViewer(editing:)` injects per-page tool overlays (markup/ink/shapes/
 free text/note/stamp; select + move + resize via
 `PdfEditor.resizeAnnotation`, which rewrites /Rect and scales the point
-arrays — appearances stretch per §12.5.5), binds undo/redo/delete/escape
+arrays — appearances regenerate for shapes/free text, stretch per
+§12.5.5 otherwise; see the batch-3 session-1 block), binds undo/redo/delete/escape
 shortcuts, and preserves the viewport across same-geometry document
 swaps. `PdfEditingToolbar` is the stock chrome. The host must rebuild
 the viewer with `editing.document` whenever the controller notifies
@@ -676,3 +677,45 @@ pdfImageKey, CanvasPdfDevice.images is Map<Object, ui.Image>.
 Regression test: pdf_flutter/test/inline_image_test.dart. Two Ghent
 baselines moved because GWG090's Type 3 bitmap-font row (CharProcs
 painting inline images) now renders — re-baselined as an improvement.
+Batch 3, session 1 (resize correctness): three fixes sharing one root —
+resizeAnnotation's blind §12.5.5 stretch. (1) Shapes + free text now
+REGENERATE on resize (`_regenerateResizedAppearance` in
+annotation_editor.dart): Square/Circle rebuild from /C (stroke) +
+/IC (fill) + /BS /W + opacity, FreeText re-wraps at the /DA font size —
+constant stroke width / font size, like desktop editors. Guards fall
+back to stretch: /BE (cloudy), /BS /D (dashed), free text whose /DA
+font `PdfStandardFont.tryFromName` can't place (embedded fonts — never
+silently substitute Helvetica). Opacity reads the appearance's own GS0
+/ca (`_appearanceOpacity`), NOT a dict /CA — writing /CA alongside a
+baked-in ca would double-apply in conforming viewers.
+`_replaceAppearance` swaps the /AP /N stream keeping its object number
+and must ALSO `adoptObject` — `replaceObject` only stages, the resolve
+cache still returns the old stream within the same apply.
+(2) Free-text style now round-trips through the dict
+(`PdfAnnotation.freeTextStyle` → `PdfFreeTextStyle`): /C = background
+(spec §12.5.6.6; legacy files where /C mirrors the /DA text color parse
+as no-background), /DA carries `rg` text + optional `RG` border color,
+/BS /W the border width (absent → 0, NOT the spec default 1 — don't
+conjure borders). `_rewriteSelected` passes fill/border through (text
+edits used to drop the demo's yellow box), `_openTextEditor` reads the
+text color from freeTextStyle (annotation.color may now be the
+background). New: `interiorColor`/`borderWidth` getters,
+`PdfStandardFont.tryFromName`.
+(3) Rotated resize: `resizeAnnotationLocal(page, annot, localTo)` —
+localTo is the annotation's own unrotated frame; regen types regenerate
+at localTo then re-rotate by the quad angle (must rotate a
+`PdfAnnotation.fromDict` RE-WRAP: rect is parsed once at construction,
+so the freshly-written /Rect is invisible through the stale instance);
+stretch types compose T(−c)·R(−θ)·S·R(θ)·T(c′) into the §12.5.5-baked
+matrix (`_bakedFormMatrix`/`_bboxBounds`, extracted from
+rotateAnnotation) and map point arrays through the same affine. Overlay:
+handles show on rotated selections (hit-test + pointer delta unrotate
+about the chrome center, `_resizeFrom`/`_resizeAngle`), commit goes
+through `controller.resizeSelectedLocal`, and the ghost gets a
+`localAngle` path in paintAnnotationDragPreview —
+T(toC)·R(λ)·S·R(−λ)·T(−fromC), scaling along the rotated axes (a
+page-axis from→to stretch would shear the preview). Test gotchas:
+exact-valued mapped coordinates serialize as CosInteger, so resolve
+point arrays as num, never cast CosReal; the local-frame drag test
+derives handle positions by spinning chrome corners by the resting
+angle (view angle = −page angle).

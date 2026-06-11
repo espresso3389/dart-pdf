@@ -279,6 +279,11 @@ extension PdfAnnotationEditing on PdfEditor {
   /// Adds a free-text annotation: [text] rendered directly on the page in
   /// [font] (12pt Helvetica by default), wrapped to fit [rect] and
   /// clipped to it.
+  ///
+  /// The style round-trips through the dictionary so the appearance can
+  /// be regenerated (resize, text edits): text color and [borderColor]
+  /// live in /DA (`rg` / `RG`), [fillColor] is /C (the free-text
+  /// background per §12.5.6.6), [borderWidth] is /BS /W.
   void addFreeText(
     int pageIndex,
     PdfRect rect,
@@ -290,6 +295,45 @@ extension PdfAnnotationEditing on PdfEditor {
     int? borderColor,
     double borderWidth = 1,
     String? author,
+  }) {
+    final w = _freeTextContent(rect, text,
+        fontSize: fontSize,
+        font: font,
+        color: color,
+        fillColor: fillColor,
+        borderColor: borderColor,
+        borderWidth: borderWidth);
+
+    String rgb(int c) =>
+        ContentWriter.rgbComponents(c).map(ContentWriter.fmt).join(' ');
+    final da = '${rgb(color)} rg '
+        '${borderColor != null ? '${rgb(borderColor)} RG ' : ''}'
+        '/${font.resourceName} ${ContentWriter.fmt(fontSize)} Tf';
+    final dict =
+        _markupDict('FreeText', rect, fillColor ?? color, text, author)
+          ..['DA'] = CosString.fromText(da)
+          ..['Q'] = const CosInteger(0);
+    if (borderColor != null && borderWidth > 0) {
+      dict['BS'] = _borderStyle(borderWidth);
+    }
+    _addAnnotation(
+      pageIndex,
+      dict,
+      _form(rect, w, resources: _resources(font: _standardFont(font))),
+    );
+  }
+
+  /// The free-text appearance content: optional background fill and
+  /// border, then [text] wrapped into [rect] and clipped to it.
+  ContentWriter _freeTextContent(
+    PdfRect rect,
+    String text, {
+    required double fontSize,
+    required PdfStandardFont font,
+    required int color,
+    required int? fillColor,
+    required int? borderColor,
+    required double borderWidth,
   }) {
     const pad = 3.0;
     final w = ContentWriter();
@@ -325,17 +369,7 @@ extension PdfAnnotationEditing on PdfEditor {
     w
       ..endText()
       ..restore();
-
-    final da =
-        '${ContentWriter.rgbComponents(color).map(ContentWriter.fmt).join(' ')} rg '
-        '/${font.resourceName} ${ContentWriter.fmt(fontSize)} Tf';
-    _addAnnotation(
-      pageIndex,
-      _markupDict('FreeText', rect, color, text, author)
-        ..['DA'] = CosString.fromText(da)
-        ..['Q'] = const CosInteger(0),
-      _form(rect, w, resources: _resources(font: _standardFont(font))),
-    );
+    return w;
   }
 
   /// Adds a sticky-note (/Text) annotation with its top-left corner at
@@ -473,12 +507,18 @@ extension PdfAnnotationEditing on PdfEditor {
 
   /// Resizes [annotation] so its /Rect becomes [to].
   ///
-  /// The absolute-coordinate entries that travel with the rect
-  /// (/QuadPoints, /InkList, /L, /Vertices, /CL) are mapped through the
-  /// old-rect → new-rect affine, so the annotation's geometry stays
-  /// consistent for viewers that regenerate appearances. The appearance
-  /// stream itself needs no rewrite: viewers fit its BBox onto the new
-  /// /Rect (§12.5.5), stretching the existing artwork.
+  /// Squares, circles, and free text get their appearance *regenerated*
+  /// at the new size — stroke width and font size stay what they were,
+  /// the way desktop editors behave — whenever the dictionary carries
+  /// enough style to do it faithfully (see
+  /// [_regenerateResizedAppearance]). Everything else (ink, stamps,
+  /// foreign artwork) keeps the §12.5.5 stretch: viewers fit the
+  /// existing appearance's BBox onto the new /Rect.
+  ///
+  /// Either way, the absolute-coordinate entries that travel with the
+  /// rect (/QuadPoints, /InkList, /L, /Vertices, /CL) are mapped through
+  /// the old-rect → new-rect affine, so the annotation's geometry stays
+  /// consistent for viewers that regenerate appearances.
   void resizeAnnotation(int pageIndex, PdfAnnotation annotation, PdfRect to) {
     final from = annotation.rect;
     if (from.width <= 0 ||
@@ -487,6 +527,7 @@ extension PdfAnnotationEditing on PdfEditor {
         to.height <= 0) {
       throw ArgumentError('resizeAnnotation needs non-degenerate rects');
     }
+    _regenerateResizedAppearance(annotation, to);
     final dict = annotation.dict;
     dict['Rect'] = _rectArray(to);
     final sx = to.width / from.width;
@@ -531,35 +572,9 @@ extension PdfAnnotationEditing on PdfEditor {
     final cos = document.cos;
     final bbox = pdfRectFrom(cos, form.dictionary['BBox']);
     if (bbox == null) return; // no BBox: §12.5.5 has nothing to map
-
     // the current BBox→Rect fit (the same bounds walk as the renderer)
-    final m = _formMatrix(form);
-    var minX = double.infinity, minY = double.infinity;
-    var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
-    for (final (x, y) in [
-      (bbox.left, bbox.bottom),
-      (bbox.right, bbox.bottom),
-      (bbox.right, bbox.top),
-      (bbox.left, bbox.top),
-    ]) {
-      final tx = m[0] * x + m[2] * y + m[4];
-      final ty = m[1] * x + m[3] * y + m[5];
-      minX = math.min(minX, tx);
-      maxX = math.max(maxX, tx);
-      minY = math.min(minY, ty);
-      maxY = math.max(maxY, ty);
-    }
-    if (maxX - minX < 1e-9 || maxY - minY < 1e-9) return;
-    final sx = rect.width / (maxX - minX);
-    final sy = rect.height / (maxY - minY);
-    final fit = [
-      sx,
-      0.0,
-      0.0,
-      sy,
-      rect.left - minX * sx,
-      rect.bottom - minY * sy
-    ];
+    final baked = _bakedFormMatrix(form, rect);
+    if (baked == null) return;
 
     final theta = degrees * math.pi / 180;
     final cosT = math.cos(theta), sinT = math.sin(theta);
@@ -573,30 +588,14 @@ extension PdfAnnotationEditing on PdfEditor {
       cx - (cx * cosT - cy * sinT),
       cy - (cx * sinT + cy * cosT),
     ];
-    final matrix = _mulAffine(_mulAffine(m, fit), rotation);
+    final matrix = _mulAffine(baked, rotation);
     form.dictionary['Matrix'] = CosArray([for (final v in matrix) CosReal(v)]);
 
     // /Rect: the BBox corners' bounds under the new matrix. The matrix
     // carries the whole rotation history, so this stays the tightest box
     // around the rotated artwork — two 45° turns land exactly where one
     // 90° turn does, instead of compounding loose bounding boxes.
-    var newMinX = double.infinity, newMinY = double.infinity;
-    var newMaxX = double.negativeInfinity, newMaxY = double.negativeInfinity;
-    for (final (x, y) in [
-      (bbox.left, bbox.bottom),
-      (bbox.right, bbox.bottom),
-      (bbox.right, bbox.top),
-      (bbox.left, bbox.top),
-    ]) {
-      final tx = matrix[0] * x + matrix[2] * y + matrix[4];
-      final ty = matrix[1] * x + matrix[3] * y + matrix[5];
-      newMinX = math.min(newMinX, tx);
-      newMaxX = math.max(newMaxX, tx);
-      newMinY = math.min(newMinY, ty);
-      newMaxY = math.max(newMaxY, ty);
-    }
-    annotation.dict['Rect'] =
-        _rectArray(PdfRect(newMinX, newMinY, newMaxX, newMaxY));
+    annotation.dict['Rect'] = _rectArray(_bboxBounds(bbox, matrix));
 
     (double, double) rotate(double x, double y) => (
           cx + (x - cx) * cosT - (y - cy) * sinT,
@@ -617,6 +616,243 @@ extension PdfAnnotationEditing on PdfEditor {
     final formRef = cos.referenceTo(form);
     if (formRef != null) _updater.replaceObject(formRef.objectNumber, form);
     _markAnnotationChanged(pageIndex, annotation.dict);
+  }
+
+  /// Resizes a possibly-rotated annotation in its own (unrotated) frame.
+  ///
+  /// [localTo] is the new axis-aligned box *before* the annotation's
+  /// resting rotation: the committed annotation occupies [localTo]
+  /// rotated about [localTo]'s center by the angle its appearance
+  /// already carries. A page-axis /Rect stretch would shear rotated
+  /// artwork; this never does. For an unrotated annotation it is
+  /// exactly [resizeAnnotation].
+  ///
+  /// Square/Circle/FreeText regenerate their appearance at [localTo]
+  /// (constant stroke width / font size) and re-rotate; every other
+  /// subtype scales along its local axes inside the appearance /Matrix.
+  void resizeAnnotationLocal(
+      int pageIndex, PdfAnnotation annotation, PdfRect localTo) {
+    final quad = annotation.appearanceQuad;
+    final theta = quad == null ? 0.0 : _quadRotation(quad);
+    if (theta == 0) {
+      resizeAnnotation(pageIndex, annotation, localTo);
+      return;
+    }
+    if (localTo.width <= 0 || localTo.height <= 0) {
+      throw ArgumentError('resizeAnnotationLocal needs a non-degenerate rect');
+    }
+    // the resting local box: the quad's edge lengths about its center
+    final (llx, lly) = quad![0];
+    final (lrx, lry) = quad[1];
+    final (urx, ury) = quad[2];
+    final (ulx, uly) = quad[3];
+    final cx = (llx + urx) / 2, cy = (lly + ury) / 2;
+    final fromW =
+        math.sqrt((lrx - llx) * (lrx - llx) + (lry - lly) * (lry - lly));
+    final fromH =
+        math.sqrt((ulx - llx) * (ulx - llx) + (uly - lly) * (uly - lly));
+    if (fromW < 1e-9 || fromH < 1e-9) {
+      resizeAnnotation(pageIndex, annotation, localTo);
+      return;
+    }
+
+    if (_regenerateResizedAppearance(annotation, localTo)) {
+      // a fresh, unrotated appearance at the local box — re-applying the
+      // resting angle is then plain rotation (which also sets /Rect).
+      // PdfAnnotation parses /Rect once, so rotate a re-wrapped view of
+      // the dict instead of the stale [annotation]
+      annotation.dict['Rect'] = _rectArray(localTo);
+      rotateAnnotation(pageIndex,
+          PdfAnnotation.fromDict(document, annotation.dict),
+          theta * 180 / math.pi);
+      return;
+    }
+
+    final form = annotation.normalAppearance;
+    final baked =
+        form == null ? null : _bakedFormMatrix(form, annotation.rect);
+    if (form == null || baked == null) {
+      // nothing can be rotated without a matrix-carrying appearance;
+      // degrade to a page-space resize of the bounds
+      resizeAnnotation(pageIndex, annotation, localTo);
+      return;
+    }
+    final dict = annotation.dict;
+    final sx = localTo.width / fromW;
+    final sy = localTo.height / fromH;
+    final tcx = (localTo.left + localTo.right) / 2;
+    final tcy = (localTo.bottom + localTo.top) / 2;
+    final cosT = math.cos(theta), sinT = math.sin(theta);
+    // page-space affine: into the local frame about the old center,
+    // scale, back out, recenter — T(-c) · R(-θ) · S · R(θ) · T(c')
+    final local = _mulAffine(
+      _mulAffine(
+        _mulAffine(
+            [1, 0, 0, 1, -cx, -cy], [cosT, -sinT, sinT, cosT, 0, 0]),
+        [sx, 0, 0, sy, 0, 0],
+      ),
+      _mulAffine([cosT, sinT, -sinT, cosT, 0, 0], [1, 0, 0, 1, tcx, tcy]),
+    );
+    final matrix = _mulAffine(baked, local);
+    form.dictionary['Matrix'] = CosArray([for (final v in matrix) CosReal(v)]);
+    final bbox = pdfRectFrom(document.cos, form.dictionary['BBox']);
+    if (bbox != null) dict['Rect'] = _rectArray(_bboxBounds(bbox, matrix));
+
+    (double, double) map(double x, double y) => (
+          local[0] * x + local[2] * y + local[4],
+          local[1] * x + local[3] * y + local[5],
+        );
+    for (final key in const ['QuadPoints', 'L', 'Vertices', 'CL']) {
+      final mapped = _mapPointPairs(dict[key], map);
+      if (mapped != null) dict[key] = mapped;
+    }
+    final ink = document.cos.resolve(dict['InkList']);
+    if (ink is CosArray) {
+      dict['InkList'] = CosArray([
+        for (final stroke in ink.items) _mapPointPairs(stroke, map) ?? stroke,
+      ]);
+    }
+    final formRef = document.cos.referenceTo(form);
+    if (formRef != null) _updater.replaceObject(formRef.objectNumber, form);
+    _markAnnotationChanged(pageIndex, dict);
+  }
+
+  /// The page-space rotation of [quad]'s bottom edge, radians CCW;
+  /// numeric noise within ~0.3° reads as unrotated.
+  static double _quadRotation(List<(double, double)> quad) {
+    final dx = quad[1].$1 - quad[0].$1;
+    final dy = quad[1].$2 - quad[0].$2;
+    if (dx == 0 && dy == 0) return 0;
+    final angle = math.atan2(dy, dx);
+    return angle.abs() < 0.005 ? 0 : angle;
+  }
+
+  /// Regenerates the appearance of a Square, Circle, or FreeText at
+  /// [to] from the style its dictionary carries, replacing the /AP /N
+  /// stream. Returns false — leaving the caller on the §12.5.5 stretch
+  /// path — for other subtypes and for styles it can't reproduce
+  /// faithfully: cloudy (/BE) or dashed (/BS /D) borders, free text
+  /// whose /DA doesn't name a standard font.
+  bool _regenerateResizedAppearance(PdfAnnotation annotation, PdfRect to) {
+    final form = annotation.normalAppearance;
+    if (form == null) return false;
+    final cos = document.cos;
+    final dict = annotation.dict;
+    switch (annotation.subtype) {
+      case 'Square' || 'Circle':
+        if (dict['BE'] != null) return false;
+        final bs = cos.resolve(dict['BS']);
+        if (bs is CosDictionary && bs['D'] != null) return false;
+        final width = annotation.borderWidth ?? 1;
+        final stroke = width > 0 ? annotation.color : null;
+        final fill = annotation.interiorColor;
+        if (stroke == null && fill == null) return false;
+        final gs = _alphaState(_appearanceOpacity(form));
+        final w = _shapeContent(annotation.subtype, to, stroke, width, fill,
+            hasAlpha: gs != null);
+        _replaceAppearance(dict, form, to, w,
+            resources: _resources(extGState: gs));
+        return true;
+      case 'FreeText':
+        final style = annotation.freeTextStyle;
+        if (style == null) return false;
+        final font = PdfStandardFont.tryFromName(style.fontName);
+        if (font == null) return false;
+        final w = _freeTextContent(to, annotation.contents ?? '',
+            fontSize: style.fontSize,
+            font: font,
+            color: style.color,
+            fillColor: style.fillColor,
+            borderColor: style.borderColor,
+            borderWidth: style.borderWidth);
+        _replaceAppearance(dict, form, to, w,
+            resources: _resources(font: _standardFont(font)));
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  /// The constant alpha an appearance we generated carries: the first
+  /// /ca found in its /Resources /ExtGState entries, else opaque. (The
+  /// dictionary deliberately has no /CA — viewers would apply it *on
+  /// top* of the alpha already baked into the appearance.)
+  double _appearanceOpacity(CosStream form) {
+    final cos = document.cos;
+    final resources = cos.resolve(form.dictionary['Resources']);
+    if (resources is! CosDictionary) return 1;
+    final ext = cos.resolve(resources['ExtGState']);
+    if (ext is! CosDictionary) return 1;
+    for (final entry in ext.entries.values) {
+      final gs = cos.resolve(entry);
+      if (gs is! CosDictionary) continue;
+      final ca = cos.resolve(gs['ca']);
+      if (ca is CosInteger) return ca.value.toDouble().clamp(0.0, 1.0);
+      if (ca is CosReal) return ca.value.clamp(0.0, 1.0);
+    }
+    return 1;
+  }
+
+  /// Replaces [oldForm] (the annotation's /AP /N) with a fresh form of
+  /// BBox [bbox] and content [w] — keeping the same object number when
+  /// the stream is indirect, so existing references stay valid, and
+  /// adopting the new object into the document cache so later edits in
+  /// the same apply resolve it.
+  void _replaceAppearance(
+      CosDictionary annot, CosStream oldForm, PdfRect bbox, ContentWriter w,
+      {CosDictionary? resources}) {
+    final form = _form(bbox, w, resources: resources);
+    final cos = document.cos;
+    final ref = cos.referenceTo(oldForm);
+    if (ref != null) {
+      _updater.replaceObject(ref.objectNumber, form);
+      cos.adoptObject(ref, form);
+    } else {
+      final ap = cos.resolve(annot['AP']);
+      if (ap is CosDictionary) ap['N'] = _updater.addObject(form);
+    }
+  }
+
+  /// [form]'s /Matrix with the §12.5.5 BBox→Rect fit baked in: the
+  /// explicit affine mapping BBox space onto [rect] exactly as a
+  /// conforming viewer would. Null when the BBox is missing or its
+  /// transformed bounds are degenerate.
+  List<double>? _bakedFormMatrix(CosStream form, PdfRect rect) {
+    final bbox = pdfRectFrom(document.cos, form.dictionary['BBox']);
+    if (bbox == null) return null;
+    final m = _formMatrix(form);
+    final bounds = _bboxBounds(bbox, m);
+    if (bounds.width < 1e-9 || bounds.height < 1e-9) return null;
+    final sx = rect.width / bounds.width;
+    final sy = rect.height / bounds.height;
+    return _mulAffine(m, [
+      sx,
+      0,
+      0,
+      sy,
+      rect.left - bounds.left * sx,
+      rect.bottom - bounds.bottom * sy
+    ]);
+  }
+
+  /// The bounds of [bbox]'s corners under the affine [m].
+  PdfRect _bboxBounds(PdfRect bbox, List<double> m) {
+    var minX = double.infinity, minY = double.infinity;
+    var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    for (final (x, y) in [
+      (bbox.left, bbox.bottom),
+      (bbox.right, bbox.bottom),
+      (bbox.right, bbox.top),
+      (bbox.left, bbox.top),
+    ]) {
+      final tx = m[0] * x + m[2] * y + m[4];
+      final ty = m[1] * x + m[3] * y + m[5];
+      minX = math.min(minX, tx);
+      maxX = math.max(maxX, tx);
+      minY = math.min(minY, ty);
+      maxY = math.max(maxY, ty);
+    }
+    return PdfRect(minX, minY, maxX, maxY);
   }
 
   /// `first`, then `second` — the affine product in PDF's row-vector
@@ -871,10 +1107,31 @@ extension PdfAnnotationEditing on PdfEditor {
       throw ArgumentError('strokeColor and fillColor are both null');
     }
     final stroking = strokeColor != null && strokeWidth > 0;
+    final gs = _alphaState(opacity);
+    final w = _shapeContent(subtype, rect, strokeColor, strokeWidth, fillColor,
+        hasAlpha: gs != null);
+
+    final dict =
+        _markupDict(subtype, rect, strokeColor ?? fillColor!, contents, author)
+          ..['BS'] = _borderStyle(stroking ? strokeWidth : 0);
+    if (fillColor != null) {
+      dict['IC'] = CosArray([
+        for (final c in ContentWriter.rgbComponents(fillColor)) CosReal(c),
+      ]);
+    }
+    _addAnnotation(
+        pageIndex, dict, _form(rect, w, resources: _resources(extGState: gs)));
+  }
+
+  /// The shape appearance content: a rectangle or inscribed ellipse,
+  /// stroked inside [rect] so the line never spills past the /Rect.
+  ContentWriter _shapeContent(String subtype, PdfRect rect, int? strokeColor,
+      double strokeWidth, int? fillColor,
+      {required bool hasAlpha}) {
+    final stroking = strokeColor != null && strokeWidth > 0;
     final inset = stroking ? strokeWidth / 2 : 0.0;
     final w = ContentWriter();
-    final gs = _alphaState(opacity);
-    if (gs != null) w.extGState('GS0');
+    if (hasAlpha) w.extGState('GS0');
     if (fillColor != null) w.fillColor(fillColor);
     if (stroking) {
       w
@@ -895,17 +1152,7 @@ extension PdfAnnotationEditing on PdfEditor {
     } else {
       w.stroke();
     }
-
-    final dict =
-        _markupDict(subtype, rect, strokeColor ?? fillColor!, contents, author)
-          ..['BS'] = _borderStyle(stroking ? strokeWidth : 0);
-    if (fillColor != null) {
-      dict['IC'] = CosArray([
-        for (final c in ContentWriter.rgbComponents(fillColor)) CosReal(c),
-      ]);
-    }
-    _addAnnotation(
-        pageIndex, dict, _form(rect, w, resources: _resources(extGState: gs)));
+    return w;
   }
 
   /// The common annotation dictionary: /C carries [color], /F sets Print

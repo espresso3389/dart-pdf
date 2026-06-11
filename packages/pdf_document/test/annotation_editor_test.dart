@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
@@ -426,7 +427,8 @@ void main() {
 
     final resized = reopened.page(0).annotations[0];
     expect(resized.rect, const PdfRect(100, 100, 300, 250));
-    // the appearance survives untouched: the BBox→Rect mapping stretches it
+    // shapes regenerate their appearance at the new size (ink keeps the
+    // §12.5.5 stretch — its rect doubles below and the points follow)
     expect(resized.normalAppearance, isNotNull);
 
     // ink points scale with the rect: x doubled relative to the rect's
@@ -441,6 +443,139 @@ void main() {
     expect(at(1), closeTo(100, 1e-6));
     expect(at(2), closeTo(inkRect.left + (200 - inkRect.left) * 2, 1e-6));
     expect(at(3), closeTo(150, 1e-6));
+  });
+
+  test('resizing a square regenerates the appearance at constant stroke width',
+      () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150),
+          strokeWidth: 4, fillColor: 0x00FF00, opacity: 0.5);
+    final doc = PdfDocument.open(first.save());
+
+    final editor = PdfEditor(doc)
+      ..resizeAnnotation(
+          0, doc.page(0).annotations.single, const PdfRect(100, 100, 400, 350));
+    final reopened = PdfDocument.open(editor.save());
+
+    final square = reopened.page(0).annotations.single;
+    final content = appearanceText(reopened, square);
+    // the new geometry at the OLD stroke width: a doubled rect would have
+    // come out of a §12.5.5 stretch as an 8pt-wide line
+    expect(content, contains('4 w'));
+    expect(content, contains('102 102 296 246 re'));
+    expect(content, contains('B')); // fill + stroke
+    // the opacity round-trips through the regenerated GS0
+    final resources = reopened.cos
+        .resolve(square.normalAppearance!.dictionary['Resources']) as CosDictionary;
+    final gstates =
+        reopened.cos.resolve(resources['ExtGState']) as CosDictionary;
+    final gs0 = reopened.cos.resolve(gstates['GS0']) as CosDictionary;
+    expect((reopened.cos.resolve(gs0['ca']) as CosReal).value, closeTo(0.5, 1e-9));
+    // no stretch matrix: the regenerated form maps 1:1
+    expect(square.normalAppearance!.dictionary['Matrix'], isNull);
+  });
+
+  test('resizing a fill-only circle regenerates fill without a stroke', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addCircle(0, const PdfRect(100, 100, 200, 150),
+          strokeColor: null, fillColor: 0x2060C0);
+    final doc = PdfDocument.open(first.save());
+
+    final editor = PdfEditor(doc)
+      ..resizeAnnotation(
+          0, doc.page(0).annotations.single, const PdfRect(50, 50, 350, 250));
+    final reopened = PdfDocument.open(editor.save());
+
+    final content = appearanceText(reopened, reopened.page(0).annotations.single);
+    expect(content, contains('c')); // the ellipse Béziers
+    expect(content.trimRight(), endsWith('f')); // filled, not stroked
+    // the new ellipse spans the new rect: center (200,150), rx 150
+    expect(content, contains('350 150')); // right extreme of the ellipse
+  });
+
+  test('a dashed border falls back to the stretch path', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150));
+    final doc = PdfDocument.open(first.save());
+
+    final square = doc.page(0).annotations.single;
+    square.dict['BS'] = CosDictionary({
+      'W': const CosInteger(2),
+      'S': const CosName('D'),
+      'D': CosArray([const CosInteger(3)]),
+    });
+    final editor = PdfEditor(doc)
+      ..resizeAnnotation(0, square, const PdfRect(100, 100, 400, 350));
+    final reopened = PdfDocument.open(editor.save());
+
+    final resized = reopened.page(0).annotations.single;
+    expect(resized.rect, const PdfRect(100, 100, 400, 350));
+    // the appearance still paints the ORIGINAL geometry — the viewer's
+    // BBox→Rect fit stretches it, dashes and all
+    expect(appearanceText(reopened, resized), contains('101 101 98 48 re'));
+  });
+
+  test('resizing free text re-wraps at the same font size', () {
+    const text = 'several words that wrap differently at different widths';
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addFreeText(0, const PdfRect(100, 100, 200, 200), text);
+    final doc = PdfDocument.open(first.save());
+
+    final narrow = appearanceText(doc, doc.page(0).annotations.single);
+    final editor = PdfEditor(doc)
+      ..resizeAnnotation(
+          0, doc.page(0).annotations.single, const PdfRect(100, 100, 450, 200));
+    final reopened = PdfDocument.open(editor.save());
+
+    final wide = appearanceText(reopened, reopened.page(0).annotations.single);
+    expect(wide, contains('/Helv 12 Tf')); // font size unchanged
+    int lines(String s) => 'T*'.allMatches(s).length;
+    expect(lines(narrow), greaterThan(0));
+    expect(lines(wide), lessThan(lines(narrow))); // fewer wrapped lines
+    expect(reopened.page(0).annotations.single.rect,
+        const PdfRect(100, 100, 450, 200));
+  });
+
+  test('free text persists and regenerates fill and border', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addFreeText(0, const PdfRect(100, 100, 250, 180), 'styled box',
+          fillColor: 0xFFFBE6, borderColor: 0x806820, borderWidth: 2);
+    final doc = PdfDocument.open(first.save());
+
+    final style = doc.page(0).annotations.single.freeTextStyle!;
+    expect(style.color, 0x000000);
+    expect(style.fillColor, 0xFFFBE6);
+    expect(style.borderColor, 0x806820);
+    expect(style.borderWidth, 2);
+    expect(style.fontName, 'Helv');
+    expect(style.fontSize, 12);
+
+    final editor = PdfEditor(doc)
+      ..resizeAnnotation(
+          0, doc.page(0).annotations.single, const PdfRect(100, 100, 400, 300));
+    final reopened = PdfDocument.open(editor.save());
+
+    final box = reopened.page(0).annotations.single;
+    final content = appearanceText(reopened, box);
+    expect(content, contains('100 100 300 200 re')); // background at new size
+    expect(content, contains('2 w')); // border width survives
+    expect(content, contains('RG')); // stroked border color
+    // and the style still parses identically from the resized annotation
+    final after = box.freeTextStyle!;
+    expect(after.fillColor, 0xFFFBE6);
+    expect(after.borderColor, 0x806820);
+  });
+
+  test('plain free text reads back without a phantom background', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addFreeText(0, const PdfRect(100, 100, 250, 180), 'plain',
+          color: 0xD02020);
+    final doc = PdfDocument.open(first.save());
+    final style = doc.page(0).annotations.single.freeTextStyle!;
+    expect(style.color, 0xD02020);
+    // legacy-compatible /C (mirroring the text color) is not a background
+    expect(style.fillColor, isNull);
+    expect(style.borderColor, isNull);
   });
 
   test('resizeAnnotation rejects degenerate rects', () {
@@ -521,6 +656,97 @@ void main() {
     expect(twice.bottom, closeTo(once.bottom, 1e-6));
     expect(twice.right, closeTo(once.right, 1e-6));
     expect(twice.top, closeTo(once.top, 1e-6));
+  });
+
+  test('resizeAnnotationLocal on an unrotated annotation is a plain resize',
+      () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150), strokeWidth: 4);
+    final doc = PdfDocument.open(first.save());
+
+    final editor = PdfEditor(doc)
+      ..resizeAnnotationLocal(
+          0, doc.page(0).annotations.single, const PdfRect(100, 100, 300, 250));
+    final reopened = PdfDocument.open(editor.save());
+    final square = reopened.page(0).annotations.single;
+    expect(square.rect, const PdfRect(100, 100, 300, 250));
+    expect(appearanceText(reopened, square), contains('4 w'));
+  });
+
+  test('rotated square resizes in its local frame, regenerated unsheared', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150), strokeWidth: 4);
+    var doc = PdfDocument.open(first.save());
+    doc = PdfDocument.open((PdfEditor(doc)
+          ..rotateAnnotation(0, doc.page(0).annotations.single, 45))
+        .save());
+
+    // grow the local box to 150×80 about a new center (175,125)
+    final editor = PdfEditor(doc)
+      ..resizeAnnotationLocal(
+          0, doc.page(0).annotations.single, const PdfRect(100, 85, 250, 165));
+    final reopened = PdfDocument.open(editor.save());
+
+    final square = reopened.page(0).annotations.single;
+    // stroke width survives the regeneration
+    expect(appearanceText(reopened, square), contains('4 w'));
+    // the quad's edges measure the local box, still at 45°
+    final quad = square.appearanceQuad!;
+    double dist((double, double) a, (double, double) b) {
+      final dx = b.$1 - a.$1, dy = b.$2 - a.$2;
+      return math.sqrt(dx * dx + dy * dy);
+    }
+
+    expect(dist(quad[0], quad[1]), closeTo(150, 1e-6));
+    expect(dist(quad[0], quad[3]), closeTo(80, 1e-6));
+    final angle =
+        math.atan2(quad[1].$2 - quad[0].$2, quad[1].$1 - quad[0].$1);
+    expect(angle, closeTo(math.pi / 4, 1e-6));
+    // centered where the local box put it
+    expect((square.rect.left + square.rect.right) / 2, closeTo(175, 1e-6));
+    expect((square.rect.bottom + square.rect.top) / 2, closeTo(125, 1e-6));
+  });
+
+  test('rotated ink resizes along its local axes without shear', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addInk(0, [
+        [(100, 100), (200, 150)],
+      ]);
+    var doc = PdfDocument.open(first.save());
+    doc = PdfDocument.open((PdfEditor(doc)
+          ..rotateAnnotation(0, doc.page(0).annotations.single, 90))
+        .save());
+
+    // resting local box: 104×54 about (150,125) — double the local width
+    final editor = PdfEditor(doc)
+      ..resizeAnnotationLocal(
+          0, doc.page(0).annotations.single, const PdfRect(46, 98, 254, 152));
+    final reopened = PdfDocument.open(editor.save());
+
+    final ink = reopened.page(0).annotations.single;
+    // local x is page y after the 90° turn: the page rect spans 54×208
+    expect(ink.rect.right - ink.rect.left, closeTo(54, 1e-6));
+    expect(ink.rect.top - ink.rect.bottom, closeTo(208, 1e-6));
+    expect((ink.rect.left + ink.rect.right) / 2, closeTo(150, 1e-6));
+    expect((ink.rect.bottom + ink.rect.top) / 2, closeTo(125, 1e-6));
+    // the ink points scale with the artwork: (175,75) → (175,25),
+    // (125,175) → (125,225)
+    final inkList = reopened.cos.resolve(ink.dict['InkList']) as CosArray;
+    final stroke = reopened.cos.resolve(inkList[0]) as CosArray;
+    double at(int i) {
+      final n = reopened.cos.resolve(stroke[i]);
+      return n is CosInteger ? n.value.toDouble() : (n as CosReal).value;
+    }
+
+    expect(at(0), closeTo(175, 1e-6));
+    expect(at(1), closeTo(25, 1e-6));
+    expect(at(2), closeTo(125, 1e-6));
+    expect(at(3), closeTo(225, 1e-6));
+    // and the quad still reads 90° with the doubled local width
+    final quad = ink.appearanceQuad!;
+    final angle =
+        math.atan2(quad[1].$2 - quad[0].$2, quad[1].$1 - quad[0].$1);
+    expect(angle.abs(), closeTo(math.pi / 2, 1e-6));
   });
 
   test('rotateAnnotation requires an appearance stream', () {

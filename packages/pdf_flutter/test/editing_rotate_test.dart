@@ -99,6 +99,37 @@ void main() {
     picture.dispose();
   });
 
+  test('paintAnnotationDragPreview scales along the local axes', () async {
+    // a full-square "appearance": pts 10..20 red (view 20..40 at 2 px/pt)
+    final appearance = ui.PictureRecorder();
+    Canvas(appearance).drawRect(const Rect.fromLTRB(10, 10, 20, 20),
+        Paint()..color = const Color(0xFFFF0000));
+    final picture = appearance.endRecording();
+
+    // a quarter-turned annotation whose local box doubles in width:
+    // local x is view y, so the preview must grow vertically
+    final recorder = ui.PictureRecorder();
+    paintAnnotationDragPreview(Canvas(recorder),
+        picture: picture,
+        from: const Rect.fromLTRB(20, 20, 40, 40),
+        to: const Rect.fromLTRB(10, 20, 50, 40),
+        scale: 2,
+        localAngle: math.pi / 2);
+    final image = await recorder.endRecording().toImage(60, 60);
+    final data = (await image.toByteData())!;
+
+    // grown along view y (local x): (30,12) is now covered...
+    final (r, _, _, a) = pixelAt(data, image.width, 30, 12);
+    expect(a, closeTo(191, 25));
+    expect(r, closeTo(191, 25));
+    // ...while view x (local y) did not grow — a page-axis stretch
+    // would have covered (12,30)
+    final (_, _, _, a2) = pixelAt(data, image.width, 12, 30);
+    expect(a2, 0);
+    image.dispose();
+    picture.dispose();
+  });
+
   group('rotate handle in the viewer', () {
     // 800px viewport over a 612pt page
     const scale = 800 / 612;
@@ -155,6 +186,66 @@ void main() {
       expect(rect.bottom, closeTo(625, 1e-6));
       expect(rect.right, closeTo(225, 1e-6));
       expect(rect.top, closeTo(775, 1e-6));
+    });
+
+    testWidgets('a rotated selection resizes in its local frame',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1));
+      final viewer = PdfViewerController();
+      addTearDown(editing.dispose);
+      addTearDown(viewer.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: ListenableBuilder(
+            listenable: editing,
+            builder: (context, _) => PdfViewer(
+              initialFit: PdfViewerFit.width,
+              document: editing.document,
+              controller: viewer,
+              editing: editing,
+            ),
+          ),
+        ),
+      ));
+      await tester.pump();
+
+      editing
+        ..color = const Color(0xFFFF0000)
+        ..strokeWidth = 4
+        ..addRectangle(0, const PdfRect(100, 650, 250, 750))
+        ..tool = PdfEditTool.select
+        ..selectAnnotation(0, 0)
+        ..rotateSelected(90);
+      await tester.pump();
+      // page rect is now 100×150 about (175,700); the local box is still
+      // 150×100, spun -90° on screen
+      expect(editing.canResizeSelected, isTrue);
+
+      // the local (+1,+1) handle sits on the page corner (225,775); the
+      // local +x axis points up on screen, so dragging up extends the
+      // local width
+      final gesture = await tester.startGesture(view(225, 775));
+      await gesture.moveBy(Offset(0, -25 * scale));
+      await gesture.moveBy(Offset(0, -25 * scale));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle(const Duration(milliseconds: 350));
+
+      // local box 150×100 → 200×100 (center moves to (200,700) in local
+      // space), re-rotated 90°: page rect 100×200 about (200,700)
+      final annotation = editing.document.page(0).annotations.single;
+      final rect = annotation.rect;
+      expect(rect.left, closeTo(150, 0.5));
+      expect(rect.bottom, closeTo(600, 0.5));
+      expect(rect.right, closeTo(250, 0.5));
+      expect(rect.top, closeTo(800, 0.5));
+      // still a pure 90° turn — no shear in the matrix
+      expect(matrixEntry(editing.document, annotation, 0), closeTo(0, 1e-6));
+      expect(matrixEntry(editing.document, annotation, 1), closeTo(1, 1e-6));
+      // and the appearance was regenerated at the original stroke width
+      final content = String.fromCharCodes(editing.document.cos
+          .decodeStreamData(annotation.normalAppearance!));
+      expect(content, contains('4 w'));
     });
   });
 }

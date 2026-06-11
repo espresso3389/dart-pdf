@@ -86,8 +86,26 @@ class PdfAnnotation {
   /// The /C color as 0xRRGGBB, if present. Gray and CMYK component
   /// counts are converted; an empty array (explicit "no color") and
   /// malformed entries resolve to null.
-  int? get color {
-    final c = document.cos.resolve(dict['C']);
+  ///
+  /// For free text /C is the *background* color per §12.5.6.6 (see
+  /// [freeTextStyle], which disambiguates against legacy files where it
+  /// held the text color).
+  int? get color => _colorArray(dict['C']);
+
+  /// The /IC interior (fill) color of shape annotations, as 0xRRGGBB.
+  int? get interiorColor => _colorArray(dict['IC']);
+
+  /// The /BS border-style width, or null when no /BS /W is present.
+  double? get borderWidth {
+    final bs = document.cos.resolve(dict['BS']);
+    if (bs is! CosDictionary) return null;
+    final w = document.cos.resolve(bs['W']);
+    if (w is CosInteger) return w.value.toDouble();
+    return w is CosReal ? w.value : null;
+  }
+
+  int? _colorArray(CosObject? raw) {
+    final c = document.cos.resolve(raw);
     if (c is! CosArray) return null;
     final values = <double>[];
     for (final item in c.items) {
@@ -120,6 +138,59 @@ class PdfAnnotation {
   String? get defaultAppearance {
     final da = document.cos.resolve(dict['DA']);
     return da is CosString ? da.text : null;
+  }
+
+  /// The complete style of a free-text annotation, parsed from /DA, /C,
+  /// and /BS — everything needed to regenerate its appearance at a new
+  /// size. Null for other subtypes or when /DA has no usable `Tf`.
+  ///
+  /// Mapping: text color is /DA's `rg` (or `g`) operator; the background
+  /// is /C (per §12.5.6.6 — but a /C that *equals* the text color is
+  /// treated as a legacy text-color mirror, not a background); border
+  /// width is /BS /W (0 when absent — the /Border default of 1 would
+  /// conjure borders most viewers never drew); border color is /DA's
+  /// `RG` operator, falling back to the text color when /BS declares a
+  /// width without one.
+  PdfFreeTextStyle? get freeTextStyle {
+    if (subtype != 'FreeText') return null;
+    final da = defaultAppearance;
+    final tf = da == null
+        ? null
+        : RegExp(r'/(\S+)\s+([\d.]+)\s+Tf').firstMatch(da);
+    final size = double.tryParse(tf?.group(2) ?? '');
+    if (tf == null || size == null) return null;
+
+    int? lastColor(String op) {
+      final m = RegExp('([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\s+$op\\b')
+          .allMatches(da!)
+          .lastOrNull;
+      if (m == null) return null;
+      int byte(String s) =>
+          ((double.tryParse(s) ?? 0).clamp(0.0, 1.0) * 255).round();
+      return (byte(m.group(1)!) << 16) |
+          (byte(m.group(2)!) << 8) |
+          byte(m.group(3)!);
+    }
+
+    int? gray() {
+      final m = RegExp(r'([\d.]+)\s+g\b').allMatches(da!).lastOrNull;
+      if (m == null) return null;
+      final v = ((double.tryParse(m.group(1)!) ?? 0).clamp(0.0, 1.0) * 255)
+          .round();
+      return (v << 16) | (v << 8) | v;
+    }
+
+    final text = lastColor('rg') ?? gray() ?? 0x000000;
+    final background = color;
+    final width = borderWidth ?? 0;
+    return PdfFreeTextStyle(
+      fontName: tf.group(1)!,
+      fontSize: size,
+      color: text,
+      fillColor: background != null && background != text ? background : null,
+      borderColor: lastColor('RG') ?? (width > 0 ? text : null),
+      borderWidth: width,
+    );
   }
 
   /// The action this annotation triggers when activated, if any.
@@ -207,6 +278,34 @@ class PdfAnnotation {
     final destination = PdfDestination.parse(document, raw);
     return destination == null ? null : PdfGoToAction(destination);
   }
+}
+
+/// A free-text annotation's text and box styling, as recoverable from
+/// its dictionary (see [PdfAnnotation.freeTextStyle]). Colors are
+/// 0xRRGGBB.
+class PdfFreeTextStyle {
+  const PdfFreeTextStyle({
+    required this.fontName,
+    required this.fontSize,
+    required this.color,
+    this.fillColor,
+    this.borderColor,
+    this.borderWidth = 0,
+  });
+
+  /// The /DA font resource name (e.g. `Helv`), unresolved.
+  final String fontName;
+  final double fontSize;
+
+  /// The text color.
+  final int color;
+
+  /// The box background, or null for a transparent box.
+  final int? fillColor;
+
+  /// The box border color, or null for no border.
+  final int? borderColor;
+  final double borderWidth;
 }
 
 /// A /Link annotation: a clickable region with an action (§12.5.6.5).

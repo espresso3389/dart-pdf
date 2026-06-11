@@ -1267,3 +1267,48 @@ reset) — ListView children below 600px never build, and enterText
 on an unbuilt field fails. receiveAction(TextInputAction.done) fires
 onSubmitted on multiline fields too. Remaining batch-4: page-number
 jump field, slimmer search bar + results panel, PDF.js corpus.
+Batch 4, session 4 (navigation & search chrome): three widgets + the
+controller API under them. (1) `PdfViewerController.searchResults` →
+`PdfSearchResult` (match + prefix/matchText/suffix snippet; matchText
+keeps the page's own case) built in `_searchAllPages` via `_snippetFor`
+(rest of the match's line, capped 36 chars before / 48 after, '… '/' …'
+when cut, whitespace squashed) — search() now stores results and
+derives `_matches` from them; `goToMatch(index)` = currentMatch +
+_showMatch (range-guarded). (2) `PdfPageNumberField`
+(page_number_field.dart, exported) — "N / M" with N an editable
+TextField (key 'pdf-page-number-field', digitsOnly, width from the
+digit count): enter jumps (clamps 1..pageCount, junk/empty resets),
+focus selects all, blur re-syncs, controller changes re-sync only
+while unfocused. (3) `PdfSearchField` + `PdfSearchResultsPanel`
+(search_panel.dart, exported): the field is a slim fixed-width (200)
+rounded TextField (key 'pdf-search-field') with debounced live search
+(350ms Timer; submit searches immediately; emptying clears instantly),
+spinner while searching, clear suffix ('pdf-search-clear'), and
+count 'n/m' + prev/next ('pdf-search-prev'/'-next') outside the box —
+optional external searchController/focusNode for host ⌘F and clearing
+on open. The panel mirrors the properties panel's shape (side
+left-docked by default, resizable, grip 'pdf-search-resize-grip',
+PdfScrollbar 'pdf-search-scrollbar-thumb', bar-clearance padding)
+but takes a PdfViewerController + OPTIONAL PdfEditingPreferences
+(width persists as `searchPanelWidth` only when provided; without
+prefs the dragged width just stays in _dragWidth — don't null it on
+drag end); states: no query → hint, isSearching → spinner, 0 results
+→ 'No matches for "q"', else 'N matches' header + ListView.builder
+of page headers + ListTiles (key 'pdf-search-result-<i>', Text.rich
+bold+searchMatchColor-washed match, selected = currentMatch, tap →
+goToMatch). Known gap: the list doesn't auto-scroll to follow
+next/prev stepping (builder tiles aren't built off-screen).
+Preferences: `showSearchResultsPanel` + `searchPanelWidth`. Example:
+the AppBar 'N / M' text is now PdfPageNumberField; the full-row
+bottom search bar is GONE on wide windows (≥720px: inline
+PdfSearchField + manage_search toggle in actions) and a slim 48px
+bottom row on narrow ones (phones — the inline field would overflow
+the AppBar); results panel docks left of the viewer (keyed, after
+the thumbnail strip). Tests: search_navigation_test.dart (10).
+Gotchas: the demo's page-number field broke demo_test two ways —
+find.text('1') also matches the field's EditableText (counter
+asserts now use a Text-widget predicate) and find.byType(TextField)
+.last hits AppBar fields because Scaffold mounts body BEFORE appBar
+in tree order (the demo note field is keyed 'demo-note' now); the
+panel's page header and a 'Page N' snippet both render the same
+string — findsNWidgets(2). Remaining batch-4: PDF.js corpus.

@@ -225,6 +225,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: TextField(
+                key: const ValueKey('demo-note'),
                 controller: _noteField,
                 decoration: const InputDecoration(
                   hintText: 'Type here - this text box floats above the page',
@@ -335,6 +336,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
   @override
   Widget build(BuildContext context) {
     final editing = _editing;
+    // the inline search field fits a desktop app bar; narrow (phone)
+    // layouts get a slim second row instead
+    final wideBar = MediaQuery.sizeOf(context).width >= 720;
     // shortcuts bubble up the focus tree, so wrapping the scaffold catches
     // them with focus anywhere inside — including on the viewer itself
     return CallbackShortcuts(
@@ -349,20 +353,25 @@ class _ViewerScreenState extends State<ViewerScreen> {
           title: Text(_title.isEmpty ? 'dart-pdf viewer' : _title,
               overflow: TextOverflow.ellipsis),
           actions: [
-            ListenableBuilder(
-              listenable: _controller,
-              builder: (context, _) => _controller.pageCount == 0
-                  ? const SizedBox.shrink()
-                  : Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Center(
-                        child: Text(
-                          '${_controller.currentPage + 1} / '
-                          '${_controller.pageCount}',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ),
-                    ),
+            if (editing != null && wideBar) ...[
+              Center(
+                child: PdfSearchField(
+                  controller: _controller,
+                  searchController: _searchField,
+                  focusNode: _searchFocus,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.manage_search),
+                tooltip: 'Search results',
+                isSelected: _prefs.showSearchResultsPanel,
+                onPressed: () => _prefs.showSearchResultsPanel =
+                    !_prefs.showSearchResultsPanel,
+              ),
+            ],
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Center(child: PdfPageNumberField(controller: _controller)),
             ),
             ListenableBuilder(
               listenable: _controller,
@@ -456,14 +465,28 @@ class _ViewerScreenState extends State<ViewerScreen> {
               onPressed: _pickFile,
             ),
           ],
-          bottom: editing == null
+          bottom: editing == null || wideBar
               ? null
               : PreferredSize(
-                  preferredSize: const Size.fromHeight(56),
-                  child: _SearchBar(
-                      controller: _controller,
-                      field: _searchField,
-                      focusNode: _searchFocus),
+                  preferredSize: const Size.fromHeight(48),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: Row(children: [
+                      PdfSearchField(
+                        controller: _controller,
+                        searchController: _searchField,
+                        focusNode: _searchFocus,
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.manage_search),
+                        tooltip: 'Search results',
+                        isSelected: _prefs.showSearchResultsPanel,
+                        onPressed: () => _prefs.showSearchResultsPanel =
+                            !_prefs.showSearchResultsPanel,
+                      ),
+                    ]),
+                  ),
                 ),
         ),
         body: switch ((editing, _error)) {
@@ -500,6 +523,12 @@ class _ViewerScreenState extends State<ViewerScreen> {
                   controller: session,
                   viewerController: _controller,
                   pageColor: _prefs.pageColor,
+                ),
+              if (_prefs.showSearchResultsPanel)
+                PdfSearchResultsPanel(
+                  key: const ValueKey('search-panel'),
+                  controller: _controller,
+                  preferences: _prefs,
                 ),
               Expanded(
                 key: const ValueKey('viewer'),
@@ -645,73 +674,3 @@ class _CounterControl extends StatelessWidget {
   }
 }
 
-class _SearchBar extends StatelessWidget {
-  const _SearchBar(
-      {required this.controller, required this.field, this.focusNode});
-
-  final PdfViewerController controller;
-  final TextEditingController field;
-  final FocusNode? focusNode;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      child: Row(children: [
-        Expanded(
-          child: TextField(
-            controller: field,
-            focusNode: focusNode,
-            decoration: const InputDecoration(
-              hintText: 'Search document… (⌘F / Ctrl+F)',
-              prefixIcon: Icon(Icons.search),
-              isDense: true,
-              border: OutlineInputBorder(),
-            ),
-            textInputAction: TextInputAction.search,
-            onSubmitted: controller.search,
-          ),
-        ),
-        const SizedBox(width: 8),
-        ListenableBuilder(
-          listenable: controller,
-          builder: (context, _) {
-            if (controller.isSearching) {
-              return const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              );
-            }
-            if (controller.query.isEmpty) return const SizedBox.shrink();
-            return Row(mainAxisSize: MainAxisSize.min, children: [
-              Text(controller.matchCount == 0
-                  ? 'No matches'
-                  : '${controller.currentMatch + 1} of '
-                      '${controller.matchCount}'),
-              IconButton(
-                icon: const Icon(Icons.keyboard_arrow_up),
-                onPressed: controller.matchCount == 0
-                    ? null
-                    : controller.previousMatch,
-              ),
-              IconButton(
-                icon: const Icon(Icons.keyboard_arrow_down),
-                onPressed:
-                    controller.matchCount == 0 ? null : controller.nextMatch,
-              ),
-              IconButton(
-                icon: const Icon(Icons.close),
-                tooltip: 'Clear search',
-                onPressed: () {
-                  field.clear();
-                  controller.clearSearch();
-                },
-              ),
-            ]);
-          },
-        ),
-      ]),
-    );
-  }
-}

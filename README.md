@@ -173,6 +173,18 @@ exactly where they should: the page list is laid out from exact page
 geometry rather than scroll estimates (which drift on long documents
 with mixed page sizes), and jumping while zoomed in accounts for the
 zoom window, placing the target where the user is actually looking.
+Reusable navigation chrome rounds that out: `PdfPageNumberField` is
+the classic "3 / 12" indicator with the page number editable — type a
+number and enter to jump there (out-of-range clamps, junk snaps back);
+`PdfSearchField` is a slim, app-bar-sized search box that searches as
+you type, with the match count, previous/next, and clear riding
+alongside; and `PdfSearchResultsPanel` lists every hit with the text
+around it, grouped by page — the current match highlighted, a tap
+jumps to it, and the panel resizes like the sidebars with its width
+persisted (`PdfEditingPreferences.searchPanelWidth`). Underneath,
+`PdfViewerController.searchResults` exposes each match with its
+context snippet and `goToMatch` jumps to any of them, so custom
+results UIs need no extra plumbing.
 The viewer opens fitted to the whole page like desktop browser viewers
 (`PdfViewer.initialFit`), and draws its own always-visible scrollbar —
 high-contrast, outside the zoom transform so it never scales away, with

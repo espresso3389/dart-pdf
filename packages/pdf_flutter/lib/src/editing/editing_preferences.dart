@@ -59,9 +59,11 @@ class PdfEditingPreferences extends ChangeNotifier {
   PdfColorFormat _colorPickerFormat = PdfColorFormat.hex;
   Color _pageColor = const Color(0xFFFFFFFF);
   bool _showPropertiesPanel = false;
+  bool _showSearchResultsPanel = false;
   double? _thumbnailSidebarWidth;
   double? _annotationSidebarWidth;
   double? _propertiesPanelWidth;
+  double? _searchPanelWidth;
   Color? _textFillColor;
   Color? _textBorderColor;
 
@@ -115,9 +117,14 @@ class PdfEditingPreferences extends ChangeNotifier {
               _annotationSidebarWidth;
       _showPropertiesPanel = store.getBool('${_prefix}showPropertiesPanel') ??
           _showPropertiesPanel;
+      _showSearchResultsPanel =
+          store.getBool('${_prefix}showSearchResultsPanel') ??
+              _showSearchResultsPanel;
       _propertiesPanelWidth =
           store.getDouble('${_prefix}propertiesPanelWidth') ??
               _propertiesPanelWidth;
+      _searchPanelWidth =
+          store.getDouble('${_prefix}searchPanelWidth') ?? _searchPanelWidth;
       final textFill = store.getInt('${_prefix}textFillColor');
       if (textFill != null) _textFillColor = Color(textFill);
       final textBorder = store.getInt('${_prefix}textBorderColor');
@@ -379,6 +386,29 @@ class PdfEditingPreferences extends ChangeNotifier {
     _write((s) => value == null
         ? s.remove('${_prefix}propertiesPanelWidth')
         : s.setDouble('${_prefix}propertiesPanelWidth', value));
+    notifyListeners();
+  }
+
+  /// Whether the host shows the search results panel.
+  bool get showSearchResultsPanel => _showSearchResultsPanel;
+
+  set showSearchResultsPanel(bool value) {
+    if (value == _showSearchResultsPanel) return;
+    _showSearchResultsPanel = value;
+    _write((s) => s.setBool('${_prefix}showSearchResultsPanel', value));
+    notifyListeners();
+  }
+
+  /// The search results panel's user-dragged width, or null while it
+  /// has never been resized.
+  double? get searchPanelWidth => _searchPanelWidth;
+
+  set searchPanelWidth(double? value) {
+    if (value == _searchPanelWidth) return;
+    _searchPanelWidth = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}searchPanelWidth')
+        : s.setDouble('${_prefix}searchPanelWidth', value));
     notifyListeners();
   }
 }

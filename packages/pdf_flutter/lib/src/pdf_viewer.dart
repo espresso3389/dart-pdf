@@ -20,6 +20,30 @@ import 'pdf_page_view.dart';
 import 'scrollbar.dart';
 import 'theme.dart';
 
+/// One search hit with the text around it, ready for a results list
+/// like [PdfSearchResultsPanel].
+class PdfSearchResult {
+  const PdfSearchResult({
+    required this.match,
+    required this.prefix,
+    required this.matchText,
+    required this.suffix,
+  });
+
+  final PdfTextMatch match;
+
+  /// Context before the hit on the same line, '… '-led when truncated.
+  final String prefix;
+
+  /// The matched text as it appears on the page (original case).
+  final String matchText;
+
+  /// Context after the hit on the same line, ' …'-tailed when truncated.
+  final String suffix;
+
+  int get pageIndex => match.pageIndex;
+}
+
 /// Drives a [PdfViewer] and reports its state: current page, zoom, and
 /// search results. Listeners fire on any change.
 class PdfViewerController extends ChangeNotifier {
@@ -29,6 +53,7 @@ class PdfViewerController extends ChangeNotifier {
   int _currentPage = 0;
   bool _searching = false;
   String _query = '';
+  List<PdfSearchResult> _results = const [];
   List<PdfTextMatch> _matches = const [];
   int _currentMatch = -1;
 
@@ -44,6 +69,10 @@ class PdfViewerController extends ChangeNotifier {
   bool get isSearching => _searching;
   String get query => _query;
   int get matchCount => _matches.length;
+
+  /// Every hit of the current [query] in document order, with context
+  /// snippets — what a search results panel lists.
+  List<PdfSearchResult> get searchResults => _results;
 
   String _selectedText = '';
 
@@ -129,26 +158,38 @@ class PdfViewerController extends ChangeNotifier {
     final state = _state;
     if (state == null) return;
     _query = query;
+    _results = const [];
     _matches = const [];
     _currentMatch = -1;
     _searching = query.isNotEmpty;
     notifyListeners();
     if (query.isEmpty) return;
-    final matches = await state._searchAllPages(query);
+    final results = await state._searchAllPages(query);
     if (_query != query) return; // superseded by a newer search
-    _matches = matches;
+    _results = results;
+    _matches = [for (final result in results) result.match];
     _searching = false;
-    _currentMatch = matches.isEmpty ? -1 : 0;
+    _currentMatch = results.isEmpty ? -1 : 0;
     notifyListeners();
-    if (matches.isNotEmpty) state._showMatch(matches[0]);
+    if (_matches.isNotEmpty) state._showMatch(_matches[0]);
   }
 
   void nextMatch() => _stepMatch(1);
 
   void previousMatch() => _stepMatch(-1);
 
+  /// Makes match [index] (into [searchResults]) current and scrolls it
+  /// into view — what tapping a results-panel entry does.
+  void goToMatch(int index) {
+    if (index < 0 || index >= _matches.length) return;
+    _currentMatch = index;
+    notifyListeners();
+    _state?._showMatch(_matches[index]);
+  }
+
   void clearSearch() {
     _query = '';
+    _results = const [];
     _matches = const [];
     _currentMatch = -1;
     _searching = false;
@@ -811,16 +852,40 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     );
   }
 
-  Future<List<PdfTextMatch>> _searchAllPages(String query) async {
-    final matches = <PdfTextMatch>[];
+  Future<List<PdfSearchResult>> _searchAllPages(String query) async {
+    final results = <PdfSearchResult>[];
     for (var i = 0; i < _pages.length; i++) {
       final text =
           _textCache[i] ??= PdfTextExtractor.extract(widget.document, i);
-      matches.addAll(text.findAll(query));
+      for (final match in text.findAll(query)) {
+        results.add(_snippetFor(text, match));
+      }
       // yield between pages so long documents don't freeze the UI
       if (i % 5 == 4) await Future<void>.delayed(Duration.zero);
     }
-    return matches;
+    return results;
+  }
+
+  /// Context for one hit: the rest of its line, capped to a handful of
+  /// words each side with ellipses marking what was cut.
+  static PdfSearchResult _snippetFor(PdfPageText text, PdfTextMatch match) {
+    const beforeChars = 36, afterChars = 48;
+    final s = text.text;
+    final lineStart =
+        match.start == 0 ? 0 : s.lastIndexOf('\n', match.start - 1) + 1;
+    var lineEnd = s.indexOf('\n', match.end);
+    if (lineEnd < 0) lineEnd = s.length;
+    final from = math.max(lineStart, match.start - beforeChars);
+    final to = math.min(lineEnd, match.end + afterChars);
+    String squash(String part) => part.replaceAll(RegExp(r'\s+'), ' ');
+    return PdfSearchResult(
+      match: match,
+      prefix: (from > lineStart ? '… ' : '') +
+          squash(s.substring(from, match.start)).trimLeft(),
+      matchText: s.substring(match.start, match.end),
+      suffix: squash(s.substring(match.end, to)).trimRight() +
+          (to < lineEnd ? ' …' : ''),
+    );
   }
 
   PdfPageText _pageText(int index) =>

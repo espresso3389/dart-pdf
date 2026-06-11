@@ -35,15 +35,20 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
   }
 
+  // plain Text widgets only — find.text would also match the page-number
+  // field's EditableText, whose value is '1' on page 1
+  Finder plainText(String value) =>
+      find.byWidgetPredicate((w) => w is Text && w.data == value);
+
   testWidgets('PDF link increments the Flutter counter badge', (tester) async {
     await openDemo(tester);
-    expect(find.text('0'), findsOneWidget); // the badge overlay
+    expect(plainText('0'), findsOneWidget); // the badge overlay
 
     await tapOnPage(tester, 176, 618); // "Increment the counter" link
-    expect(find.text('1'), findsOneWidget);
+    expect(plainText('1'), findsOneWidget);
 
     await tapOnPage(tester, 176, 618);
-    expect(find.text('2'), findsOneWidget);
+    expect(plainText('2'), findsOneWidget);
   });
 
   testWidgets('PDF link shows an app message with its URI payload',
@@ -72,10 +77,12 @@ void main() {
     // the counter control edits the same state the page-1 link increments
     await tester.tap(find.byIcon(Icons.add));
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('1'), findsWidgets);
+    expect(plainText('1'), findsWidgets);
 
-    // the note field accepts input above the page
-    await tester.enterText(find.byType(TextField).last, 'typed over the PDF');
+    // the note field accepts input above the page (by key — the app bar
+    // hosts TextFields of its own now)
+    await tester.enterText(
+        find.byKey(const ValueKey('demo-note')), 'typed over the PDF');
     expect(find.text('typed over the PDF'), findsOneWidget);
 
     // unmount so the clock's periodic timer is disposed before teardown

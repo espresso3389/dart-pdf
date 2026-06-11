@@ -91,9 +91,19 @@ selects page elements for deletion or
 in-place text replacement), keyboard shortcuts, style controls (stroke
 width, opacity, font size), an annotation list sidebar
 (`PdfAnnotationSidebar` — grouped by page with each annotation's
-author shown; tapping a tile zooms the viewer to the annotation, and
-a long press starts multi-select for deleting a whole set as one
-undo step), a page thumbnail sidebar
+author shown; tapping a tile zooms the viewer to the annotation, a
+long press starts multi-select for deleting a whole set as one
+undo step, and a search field at the top filters the list live by
+type, author, contents, field name or value, and link text or
+target), an annotation properties panel
+(`PdfAnnotationPropertiesPanel` — shows the selection's type, page,
+color, fill, stroke width, opacity, font, contents, author, and
+position/size in page points, and every one of those is editable in
+place: swatches open the color picker, sliders restyle on release,
+text fields commit on enter or focus loss, and the geometry fields
+move or resize the annotation numerically; with several annotations
+selected the style controls act on all of them at once), a page
+thumbnail sidebar
 (`PdfThumbnailSidebar` — tap to jump, drag to reorder pages, delete,
 with a live viewport indicator), a full-spectrum color picker with an
 eyedropper that samples colors from the rendered page — with a live
@@ -281,9 +291,9 @@ page heights instead of the framework's running estimate, which on a
 291-page spec with landscape drawings interleaved would otherwise
 swing by tens of thousands of pixels mid-scroll and make the thumb
 jump around the track.
-The side panels are desktop-grade too. Both sidebars resize by
+The side panels are desktop-grade too. All three panels resize by
 dragging their inner edge (the chosen widths persist on the device
-with the other UI preferences), both keep their content clear of the
+with the other UI preferences), all keep their content clear of the
 overlay scrollbar's lane (no bar over a delete button), the thumbnail
 strip follows the
 viewer — scrolling, search hits, and link jumps bring the current

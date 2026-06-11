@@ -399,6 +399,13 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     !_prefs.showAnnotationSidebar,
               ),
               IconButton(
+                icon: const Icon(Icons.tune),
+                tooltip: 'Properties',
+                isSelected: _prefs.showPropertiesPanel,
+                onPressed: () =>
+                    _prefs.showPropertiesPanel = !_prefs.showPropertiesPanel,
+              ),
+              IconButton(
                 icon: const Icon(Icons.person_outline),
                 tooltip: 'Author name',
                 onPressed: () async {
@@ -515,6 +522,11 @@ class _ViewerScreenState extends State<ViewerScreen> {
                   key: const ValueKey('annotation-sidebar'),
                   controller: session,
                   viewerController: _controller,
+                ),
+              if (_prefs.showPropertiesPanel)
+                PdfAnnotationPropertiesPanel(
+                  key: const ValueKey('properties-panel'),
+                  controller: session,
                 ),
             ]),
         },

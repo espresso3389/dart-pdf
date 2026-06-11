@@ -1014,6 +1014,41 @@ extension PdfAnnotationEditing on PdfEditor {
     _markAnnotationChanged(pageIndex, dict);
   }
 
+  /// Sets [annotation]'s /Contents text in place.
+  ///
+  /// Metadata only: the appearance is untouched, so for subtypes whose
+  /// contents *are* the displayed text (free text, stamps, notes) this
+  /// changes the tooltip/comment without redrawing — rewriting what's
+  /// painted is the controller's text-edit path. An empty string removes
+  /// the entry.
+  void setAnnotationContents(
+      int pageIndex, PdfAnnotation annotation, String contents) {
+    final dict = annotation.dict;
+    if (contents.isEmpty) {
+      dict.entries.remove('Contents');
+    } else {
+      dict['Contents'] = CosString.fromText(contents);
+    }
+    _markAnnotationChanged(pageIndex, dict);
+  }
+
+  /// Sets [annotation]'s author (/T, §12.5.6.2) in place; null or empty
+  /// removes it. Refused for form widgets, where /T is the field's
+  /// partial name, not an author.
+  void setAnnotationAuthor(
+      int pageIndex, PdfAnnotation annotation, String? author) {
+    if (annotation.subtype == 'Widget') {
+      throw ArgumentError('on widgets /T is the field name, not an author');
+    }
+    final dict = annotation.dict;
+    if (author == null || author.isEmpty) {
+      dict.entries.remove('T');
+    } else {
+      dict['T'] = CosString.fromText(author);
+    }
+    _markAnnotationChanged(pageIndex, dict);
+  }
+
   /// Resizes [annotation] so its /Rect becomes [to].
   ///
   /// Squares, circles, and free text get their appearance *regenerated*

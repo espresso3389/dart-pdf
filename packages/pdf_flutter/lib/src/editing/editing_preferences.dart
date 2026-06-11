@@ -58,8 +58,10 @@ class PdfEditingPreferences extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
   PdfColorFormat _colorPickerFormat = PdfColorFormat.hex;
   Color _pageColor = const Color(0xFFFFFFFF);
+  bool _showPropertiesPanel = false;
   double? _thumbnailSidebarWidth;
   double? _annotationSidebarWidth;
+  double? _propertiesPanelWidth;
   Color? _textFillColor;
   Color? _textBorderColor;
 
@@ -111,6 +113,11 @@ class PdfEditingPreferences extends ChangeNotifier {
       _annotationSidebarWidth =
           store.getDouble('${_prefix}annotationSidebarWidth') ??
               _annotationSidebarWidth;
+      _showPropertiesPanel = store.getBool('${_prefix}showPropertiesPanel') ??
+          _showPropertiesPanel;
+      _propertiesPanelWidth =
+          store.getDouble('${_prefix}propertiesPanelWidth') ??
+              _propertiesPanelWidth;
       final textFill = store.getInt('${_prefix}textFillColor');
       if (textFill != null) _textFillColor = Color(textFill);
       final textBorder = store.getInt('${_prefix}textBorderColor');
@@ -349,6 +356,29 @@ class PdfEditingPreferences extends ChangeNotifier {
     if (value == _showAnnotationSidebar) return;
     _showAnnotationSidebar = value;
     _write((s) => s.setBool('${_prefix}showAnnotationSidebar', value));
+    notifyListeners();
+  }
+
+  /// Whether the host shows the annotation properties panel.
+  bool get showPropertiesPanel => _showPropertiesPanel;
+
+  set showPropertiesPanel(bool value) {
+    if (value == _showPropertiesPanel) return;
+    _showPropertiesPanel = value;
+    _write((s) => s.setBool('${_prefix}showPropertiesPanel', value));
+    notifyListeners();
+  }
+
+  /// The properties panel's user-dragged width, or null while it has
+  /// never been resized.
+  double? get propertiesPanelWidth => _propertiesPanelWidth;
+
+  set propertiesPanelWidth(double? value) {
+    if (value == _propertiesPanelWidth) return;
+    _propertiesPanelWidth = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}propertiesPanelWidth')
+        : s.setDouble('${_prefix}propertiesPanelWidth', value));
     notifyListeners();
   }
 }

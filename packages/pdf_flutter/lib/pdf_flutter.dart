@@ -7,6 +7,7 @@ export 'src/editing/editing_controller.dart';
 export 'src/editing/editing_menu.dart';
 export 'src/editing/editing_panel.dart';
 export 'src/editing/editing_preferences.dart';
+export 'src/editing/editing_properties.dart';
 export 'src/editing/editing_sidebar.dart';
 export 'src/editing/editing_signature.dart';
 export 'src/editing/editing_stamps.dart';

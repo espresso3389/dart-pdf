@@ -1489,6 +1489,43 @@ class PdfEditingController extends ChangeNotifier {
     _rewriteSelected(annotation, text);
   }
 
+  /// Sets the (single) selected annotation's /Contents. For subtypes
+  /// whose contents are the displayed text (free text, stamps, notes)
+  /// this rewrites the annotation so the page matches; for everything
+  /// else it's a metadata edit — the comment shown in annotation lists —
+  /// and the artwork is untouched. Returns whether anything changed.
+  bool setSelectedContents(String text) {
+    final annotation = selectedAnnotation;
+    if (annotation == null || _selected.length != 1) return false;
+    if ((annotation.contents ?? '') == text) return false;
+    if (canEditSelectedText) {
+      setSelectedText(text);
+      return true;
+    }
+    final page = _selected.last.$1;
+    // a tooltip/comment edit changes no page's rendering
+    return apply((e) => e.setAnnotationContents(page, annotation, text),
+        pages: const <int>[]);
+  }
+
+  /// Sets the author (/T) on every selected annotation — one revision,
+  /// one undo. Null or empty removes it. Returns whether anything
+  /// changed.
+  bool setSelectedAuthor(String? author) {
+    final value = (author != null && author.isEmpty) ? null : author;
+    final targets = <(int, PdfAnnotation)>[
+      for (final slot in _selected)
+        if (_annotationAt(slot) case final annotation?) (slot.$1, annotation)
+    ];
+    if (targets.isEmpty) return false;
+    if (targets.every((t) => t.$2.author == value)) return false;
+    return apply((e) {
+      for (final (page, annotation) in targets) {
+        e.setAnnotationAuthor(page, annotation, value);
+      }
+    }, pages: const <int>[]);
+  }
+
   void _rewriteSelected(PdfAnnotation annotation, String text,
       {PdfStandardFont? font,
       double? size,

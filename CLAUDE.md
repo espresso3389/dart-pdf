@@ -1214,3 +1214,56 @@ annotation_restyle_test (8), pdf_flutter editing_clipboard_test (16).
 Remaining batch-4: properties panel, annotation-panel search,
 page-number jump field, slimmer search bar + results panel, PDF.js
 corpus.
+Batch 4, session 3 (panels: properties + sidebar search): two
+features. (1) `PdfAnnotationPropertiesPanel` (editing_properties.dart,
+exported) — a third resizable side panel (same shape as the sidebars:
+side/resizable/min/max, width persisted as preference
+`propertiesPanelWidth`, grip key 'pdf-properties-resize-grip',
+PdfScrollbar thumb 'pdf-properties-scrollbar-thumb', bar-clearance
+list padding). Reads the controller's selection: no selection → hint;
+one → type/page header + sections; several → 'N annotations' +
+shared style controls (restyleSelected acts on all). Controls and
+gates: color swatch (canRestyleSelected → showPdfColorPicker →
+restyleSelected(color:)), fill swatch + no-fill button (all selected
+∈ {Square, Circle, FreeText}; FreeText fill reads
+freeTextStyle.fillColor, shapes interiorColor), stroke slider (all ∈
+{Square, Circle, Ink}), opacity slider (all ∈ shapes/ink/markups/
+Stamp), font dropdown + size slider (canRestyleSelectedText →
+restyleSelectedText), Contents/Author text fields, X/Y/W/H geometry
+fields in page points (X/Y → moveSelected; W/H → resizeSelected
+anchored bottom-left, enabled iff canResizeSelected; unparsable input
+snaps the fields back). Field keys 'pdf-prop-color/-fill/-stroke/
+-opacity/-font/-font-size/-contents/-author/-x/-y/-w/-h'. Text-field
+sync: `_syncedFor` = (document identity, primary slot) — fields
+rewrite only when that key changes, so typing never gets clobbered;
+commits run on submit AND Focus(onFocusChange: false). Sliders keep
+the toolbar's dragging-state pattern (one revision per gesture).
+New plumbing: `PdfEditor.setAnnotationContents/setAnnotationAuthor`
+(annotation_editor.dart — in-place dict edits, appearance untouched;
+empty/null removes the entry; author on a Widget throws, /T is the
+field name there) and controller `setSelectedContents` (single
+selection; textEditable subtypes route via setSelectedText so the
+page matches, others are metadata-only with pages: const []) +
+`setSelectedAuthor` (whole selection, one apply, pages: const []).
+Preferences: `showPropertiesPanel` host-chrome flag +
+`propertiesPanelWidth`; example app: tune AppBar button + keyed
+panel after the annotation sidebar. (2) Sidebar search: a compact
+TextField (key 'pdf-annotation-search', clear button '-clear') always
+present above the list (constant tree shape — the session-5 lesson);
+filters tiles case-insensitively against the tile title (_title,
+factored from the tile builder) and _detail subtitle (author,
+contents, field name/value, link text/target); page headers only
+survive with matching tiles; query non-empty + all filtered → 'No
+matching annotations'; the query deliberately survives revisions
+(the document-identity reset clears checkboxes, not the search).
+Tests: pdf_document annotation_metadata_test (3), pdf_flutter
+editing_properties_test (11: 3 controller + 8 panel widget tests),
+editing_sidebar_test +3 search tests. Gotchas: the search TextField
+hosts its own Scrollable — pdf_theme_test's annotation-bar test had
+find.byType(Scrollable).first and silently grabbed the field's; scope
+to find.descendant(of: byKey('pdf-annotation-list')). Panel widget
+tests need a tall surface (tester.view.physicalSize 800×1400 +
+reset) — ListView children below 600px never build, and enterText
+on an unbuilt field fails. receiveAction(TextInputAction.done) fires
+onSubmitted on multiline fields too. Remaining batch-4: page-number
+jump field, slimmer search bar + results panel, PDF.js corpus.

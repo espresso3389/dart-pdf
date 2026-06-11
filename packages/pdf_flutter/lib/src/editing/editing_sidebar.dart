@@ -87,6 +87,11 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
 
   final ScrollController _scroll = ScrollController();
 
+  /// The filter text; tiles whose title or subtitle don't contain it
+  /// (case-insensitive) are hidden. Survives revisions — a search isn't
+  /// invalidated by an edit.
+  final TextEditingController _search = TextEditingController();
+
   /// The document revision the selection state belongs to. Any edit,
   /// undo, or redo can shift /Annots slots, so a new revision drops it.
   PdfDocument? _builtFor;
@@ -128,6 +133,7 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
   void dispose() {
     _preferences.removeListener(_onPreferences);
     _scroll.dispose();
+    _search.dispose();
     super.dispose();
   }
 
@@ -233,6 +239,43 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
         if (!_checked.add(slot)) _checked.remove(slot);
       });
 
+  /// The tile's title, as shown — what the search matches besides the
+  /// subtitle.
+  String _title(PdfAnnotation annotation) => annotation is PdfWidgetAnnotation
+      ? _fieldLabel(annotation.fieldType)
+      : _label(annotation.subtype);
+
+  bool _matches(String query, int pageIndex, PdfAnnotation annotation) {
+    if (query.isEmpty) return true;
+    return _title(annotation).toLowerCase().contains(query) ||
+        _detail(pageIndex, annotation).toLowerCase().contains(query);
+  }
+
+  Widget _searchField(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: TextField(
+        key: const ValueKey('pdf-annotation-search'),
+        controller: _search,
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(
+          hintText: 'Search annotations',
+          isDense: true,
+          prefixIcon: const Icon(Icons.search, size: 18),
+          suffixIcon: _search.text.isEmpty
+              ? null
+              : IconButton(
+                  key: const ValueKey('pdf-annotation-search-clear'),
+                  icon: const Icon(Icons.close, size: 18),
+                  tooltip: 'Clear search',
+                  onPressed: () => setState(_search.clear),
+                ),
+          border: const OutlineInputBorder(),
+        ),
+      ),
+    );
+  }
+
   Widget _tile(BuildContext context, int pageIndex, int index,
       PdfAnnotation annotation) {
     final slot = (pageIndex, index);
@@ -246,9 +289,7 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
               onChanged: selectable ? (_) => _toggle(slot) : null,
             )
           : Icon(_icon(annotation.subtype), size: 20),
-      title: Text(annotation is PdfWidgetAnnotation
-          ? _fieldLabel(annotation.fieldType)
-          : _label(annotation.subtype)),
+      title: Text(_title(annotation)),
       subtitle: detail.isEmpty
           ? null
           : Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -328,7 +369,9 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
                   _selecting = false;
                   _pageTexts.clear();
                 }
+                final query = _search.text.trim().toLowerCase();
                 final children = <Widget>[];
+                var listed = 0;
                 for (var page = 0; page < document.pageCount; page++) {
                   final annotations =
                       widget.controller.pageAt(page).annotations;
@@ -336,6 +379,8 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
                   for (var i = 0; i < annotations.length; i++) {
                     final annotation = annotations[i];
                     if (_unlisted.contains(annotation.subtype)) continue;
+                    listed++;
+                    if (!_matches(query, page, annotation)) continue;
                     tiles.add(_tile(context, page, i, annotation));
                   }
                   if (tiles.isNotEmpty) {
@@ -360,7 +405,10 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
                         ? PdfSidebarResizeGrip.width
                         : 0);
                 final list = children.isEmpty
-                    ? const Center(child: Text('No annotations'))
+                    ? Center(
+                        child: Text(listed > 0 && query.isNotEmpty
+                            ? 'No matching annotations'
+                            : 'No annotations'))
                     : Stack(children: [
                         ScrollConfiguration(
                           behavior: ScrollConfiguration.of(context)
@@ -389,6 +437,7 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
                 // element (the controller would sit attached to two
                 // scroll views for a frame)
                 return Column(children: [
+                  _searchField(context),
                   if (_selecting) _selectionHeader(context),
                   Expanded(
                     key: const ValueKey('pdf-annotation-list'),

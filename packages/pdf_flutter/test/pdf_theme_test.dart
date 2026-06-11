@@ -188,8 +188,11 @@ void main() {
       await tester.pump();
       expect(find.byKey(annotationThumb), findsOneWidget);
 
+      // the search field hosts its own Scrollable — scope to the list
       final position = tester
-          .state<ScrollableState>(find.byType(Scrollable).first)
+          .state<ScrollableState>(find.descendant(
+              of: find.byKey(const ValueKey('pdf-annotation-list')),
+              matching: find.byType(Scrollable)))
           .position;
       expect(position.pixels, 0);
       final gesture = await tester.startGesture(

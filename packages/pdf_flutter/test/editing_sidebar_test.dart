@@ -202,4 +202,84 @@ void main() {
 
     expect(find.text('Hello, world! — https://example.com'), findsOneWidget);
   });
+
+  group('search', () {
+    testWidgets('filters by type, contents, and author', (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(2))
+        ..author = 'Ben'
+        ..addNote(0, 100, 700, 'review this paragraph')
+        ..addRectangle(0, const PdfRect(100, 100, 200, 150))
+        ..addStamp(1, const PdfRect(100, 600, 240, 650), 'DRAFT');
+      addTearDown(editing.dispose);
+      await pumpSidebarOnly(tester, editing);
+      expect(find.text('Note'), findsOneWidget);
+      expect(find.text('Square'), findsOneWidget);
+      expect(find.text('Stamp'), findsOneWidget);
+
+      // by contents
+      await tester.enterText(
+          find.byKey(const ValueKey('pdf-annotation-search')), 'draft');
+      await tester.pump();
+      expect(find.text('Stamp'), findsOneWidget);
+      expect(find.text('Note'), findsNothing);
+      expect(find.text('Square'), findsNothing);
+      // only the matching page's header survives
+      expect(find.text('Page 2'), findsOneWidget);
+      expect(find.text('Page 1'), findsNothing);
+
+      // by type label
+      await tester.enterText(
+          find.byKey(const ValueKey('pdf-annotation-search')), 'square');
+      await tester.pump();
+      expect(find.text('Square'), findsOneWidget);
+      expect(find.text('Stamp'), findsNothing);
+
+      // by author (every tile carries 'Ben — …' except the bare square)
+      await tester.enterText(
+          find.byKey(const ValueKey('pdf-annotation-search')), 'review');
+      await tester.pump();
+      expect(find.text('Note'), findsOneWidget);
+      expect(find.text('Stamp'), findsNothing);
+    });
+
+    testWidgets('no match shows its own message; clear restores the list',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..addNote(0, 100, 700, 'first note');
+      addTearDown(editing.dispose);
+      await pumpSidebarOnly(tester, editing);
+
+      await tester.enterText(
+          find.byKey(const ValueKey('pdf-annotation-search')), 'zzz');
+      await tester.pump();
+      expect(find.text('No matching annotations'), findsOneWidget);
+      expect(find.text('Note'), findsNothing);
+
+      await tester.tap(
+          find.byKey(const ValueKey('pdf-annotation-search-clear')));
+      await tester.pump();
+      expect(find.text('Note'), findsOneWidget);
+      expect(find.text('No matching annotations'), findsNothing);
+    });
+
+    testWidgets('the filter survives an edit', (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..addNote(0, 100, 700, 'keep me')
+        ..addRectangle(0, const PdfRect(100, 100, 200, 150));
+      addTearDown(editing.dispose);
+      await pumpSidebarOnly(tester, editing);
+
+      await tester.enterText(
+          find.byKey(const ValueKey('pdf-annotation-search')), 'note');
+      await tester.pump();
+      expect(find.text('Square'), findsNothing);
+
+      // a new revision rebuilds the list — still filtered
+      editing.addEllipse(0, const PdfRect(300, 100, 400, 150));
+      await tester.pump();
+      expect(find.text('Note'), findsOneWidget);
+      expect(find.text('Square'), findsNothing);
+      expect(find.text('Circle'), findsNothing);
+    });
+  });
 }

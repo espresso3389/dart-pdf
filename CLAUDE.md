@@ -614,3 +614,29 @@ Expanded keyed) AND the scrollbar treats `positions.length != 1` as
 pdf_theme_test.dart (theme plumbing via dynamic painter casts, thumb
 decoration colors, sidebar bar presence/drag — mouse-kind
 startGesture+moveBy, since tester.drag eats slop).
+Color formats (session 6 of batch 2): `PdfColorFormat` {hex, rgb, hsl,
+cmyk} (carries its display `label`), exported from
+editing_color_picker.dart. The picker's value row switches via a
+compact PopupMenuButton (key 'pdf-color-format'); hex stays the
+default and its field is unchanged — the legacy picker test finds
+exactly one TextField and taps 260-wide-layout offsets, so neither
+the default nor the picker width may change. Channel modes show dense
+centered fields (keys 'pdf-color-channel-N', labels below, maxLength
+from the channel max, ZERO horizontal contentPadding — four CMYK
+fields share ~130px and a centered '100' clips with any side padding;
+found in the real app, not in tests). One model (`_hsv`): SV/hue
+drags and format switches rewrite the visible fields (`_syncFields`);
+a channel edit parses the entire visible row (the other fields
+already hold their values) and never rewrites it, so typing isn't
+clobbered — unparsable/emptied input no-ops, values clamp to
+[0, max]. HSL via HSLColor; CMYK is the naive device conversion
+(k = 1−max(r,g,b), no color management — entry/display only, stated
+in the dartdoc). Format persistence: the picker is preferences-free
+(`initialFormat` + `onFormatChanged` params on it and
+showPdfColorPicker); `PdfEditingPreferences.colorPickerFormat` (key
+`colorPickerFormat`, stored by name) is wired by the toolbar's 'More
+colors…' and the example's page-color button — preferences imports
+the enum from the picker, never the reverse. Tests: editing_test.dart
+(per-format round-trips incl. CMYK 100/0/0/0→cyan, drag rewrites the
+fields, empty-field no-op) and the preferences round-trip; verified
+live on macOS incl. format persistence across an app restart.

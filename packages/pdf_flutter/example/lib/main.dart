@@ -382,7 +382,10 @@ class _ViewerScreenState extends State<ViewerScreen> {
               tooltip: 'Page color',
               onPressed: () async {
                 final color = await showPdfColorPicker(context,
-                    initial: _prefs.pageColor);
+                    initial: _prefs.pageColor,
+                    initialFormat: _prefs.colorPickerFormat,
+                    onFormatChanged: (format) =>
+                        _prefs.colorPickerFormat = format);
                 if (color != null) _prefs.pageColor = color;
               },
             ),

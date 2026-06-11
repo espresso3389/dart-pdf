@@ -277,7 +277,11 @@ class PdfEditingToolbar extends StatelessWidget {
                 tooltip: 'More colors…',
                 onPressed: () async {
                   final picked = await showPdfColorPicker(context,
-                      initial: controller.color);
+                      initial: controller.color,
+                      initialFormat:
+                          controller.preferences.colorPickerFormat,
+                      onFormatChanged: (format) =>
+                          controller.preferences.colorPickerFormat = format);
                   if (picked != null) controller.color = picked;
                 },
               ),

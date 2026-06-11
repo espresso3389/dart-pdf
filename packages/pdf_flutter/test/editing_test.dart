@@ -887,5 +887,106 @@ void main() {
       expect('#${hex.text}',
           '#${(last!.toARGB32() & 0xFFFFFF).toRadixString(16).toUpperCase().padLeft(6, '0')}');
     });
+
+    Future<({List<Color> changed, List<PdfColorFormat> formats})> pumpPicker(
+      WidgetTester tester, {
+      Color color = const Color(0xFFE53935),
+    }) async {
+      final changed = <Color>[];
+      final formats = <PdfColorFormat>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: PdfColorPicker(
+              color: color,
+              onChanged: changed.add,
+              onFormatChanged: formats.add,
+            ),
+          ),
+        ),
+      ));
+      return (changed: changed, formats: formats);
+    }
+
+    Future<void> switchFormat(WidgetTester tester, String label) async {
+      await tester.tap(find.byKey(const ValueKey('pdf-color-format')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label).last);
+      await tester.pumpAndSettle();
+    }
+
+    String channelText(WidgetTester tester, int i) => tester
+        .widget<TextField>(find.byKey(ValueKey('pdf-color-channel-$i')))
+        .controller!
+        .text;
+
+    Future<void> enterChannel(WidgetTester tester, int i, String text) =>
+        tester.enterText(
+            find.byKey(ValueKey('pdf-color-channel-$i')), text);
+
+    testWidgets('RGB mode shows the channels and drives onChanged',
+        (tester) async {
+      final calls = await pumpPicker(tester);
+      await switchFormat(tester, 'RGB');
+      expect(calls.formats, [PdfColorFormat.rgb]);
+      expect(channelText(tester, 0), '229');
+      expect(channelText(tester, 1), '57');
+      expect(channelText(tester, 2), '53');
+
+      await enterChannel(tester, 0, '0');
+      await enterChannel(tester, 1, '160');
+      await enterChannel(tester, 2, '64');
+      expect(calls.changed.last, const Color(0xFF00A040));
+    });
+
+    testWidgets('HSL mode round-trips', (tester) async {
+      final calls = await pumpPicker(tester, color: const Color(0xFF00FF00));
+      await switchFormat(tester, 'HSL');
+      expect(channelText(tester, 0), '120');
+      expect(channelText(tester, 1), '100');
+      expect(channelText(tester, 2), '50');
+
+      await enterChannel(tester, 0, '240');
+      expect(calls.changed.last, const Color(0xFF0000FF));
+    });
+
+    testWidgets('CMYK mode round-trips through the naive device conversion',
+        (tester) async {
+      final calls = await pumpPicker(tester, color: const Color(0xFFFF0000));
+      await switchFormat(tester, 'CMYK');
+      expect(channelText(tester, 0), '0');
+      expect(channelText(tester, 1), '100');
+      expect(channelText(tester, 2), '100');
+      expect(channelText(tester, 3), '0');
+
+      await enterChannel(tester, 1, '0');
+      await enterChannel(tester, 2, '0');
+      expect(calls.changed.last, const Color(0xFFFFFFFF));
+      await enterChannel(tester, 0, '100');
+      expect(calls.changed.last, const Color(0xFF00FFFF));
+    });
+
+    testWidgets('picking on the sliders rewrites the visible channel fields',
+        (tester) async {
+      await pumpPicker(tester);
+      await switchFormat(tester, 'RGB');
+      final before = channelText(tester, 0);
+
+      // middle of the hue slider ≈ 180° — far from red, every channel moves
+      final origin = tester.getTopLeft(find.byType(PdfColorPicker));
+      await tester.tapAt(origin + const Offset(130, 160 + 12 + 10));
+      await tester.pump();
+      expect(channelText(tester, 0), isNot(before));
+    });
+
+    testWidgets('an emptied field leaves the color alone until it parses',
+        (tester) async {
+      final calls = await pumpPicker(tester);
+      await switchFormat(tester, 'RGB');
+      await enterChannel(tester, 0, '');
+      expect(calls.changed, isEmpty);
+      await enterChannel(tester, 0, '12');
+      expect(calls.changed.last, const Color(0xFF0C3935));
+    });
   });
 }

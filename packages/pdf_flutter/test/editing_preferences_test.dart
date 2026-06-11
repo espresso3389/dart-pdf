@@ -18,6 +18,7 @@ void main() {
       a.showThumbnailSidebar = true;
       a.showAnnotationSidebar = true;
       a.author = 'Ben';
+      a.colorPickerFormat = PdfColorFormat.cmyk;
       await pumpEventQueue(); // let the unawaited writes land
 
       final b = PdfEditingPreferences();
@@ -30,6 +31,7 @@ void main() {
       expect(b.showThumbnailSidebar, isTrue);
       expect(b.showAnnotationSidebar, isTrue);
       expect(b.author, 'Ben');
+      expect(b.colorPickerFormat, PdfColorFormat.cmyk);
     });
 
     test('empty storage leaves the defaults', () async {
@@ -44,6 +46,7 @@ void main() {
       expect(prefs.showThumbnailSidebar, isFalse);
       expect(prefs.showAnnotationSidebar, isFalse);
       expect(prefs.author, isNull);
+      expect(prefs.colorPickerFormat, PdfColorFormat.hex);
     });
 
     test('a value set while loading is not clobbered by stored data',

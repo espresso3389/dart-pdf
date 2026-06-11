@@ -92,6 +92,12 @@ with a live viewport indicator), a full-spectrum color picker with an
 eyedropper that samples colors from the rendered page — with a live
 swatch-and-hex preview riding beside the pointer
 (`PdfColorPicker`), and a ready-made `PdfEditingToolbar`.
+The picker's value row speaks the standard color formats: hex, RGB,
+HSL, and CMYK (a plain device conversion for print-minded entry),
+switchable in place, with the channel fields, the spectrum area, and
+the swatch all live-synced both ways — and the chosen format persists
+on the device, so the picker reopens the way the user thinks about
+color.
 A signature tool rounds out the annotation suite: draw a signature
 once in a pad dialog (`showPdfSignatureDialog` — pressure-sensitive,
 like the ink tool), and tap pages to stamp it as an Ink annotation;

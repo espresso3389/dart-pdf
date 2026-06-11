@@ -6,6 +6,7 @@ import 'package:flutter/painting.dart';
 import 'package:pdf_document/pdf_document.dart' show PdfStandardFont;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'editing_color_picker.dart' show PdfColorFormat;
 import 'editing_signature.dart';
 import 'editing_stamps.dart';
 
@@ -54,6 +55,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   PdfInkSignature? _signature;
   List<PdfCustomStamp> _customStamps = const [];
   ThemeMode _themeMode = ThemeMode.system;
+  PdfColorFormat _colorPickerFormat = PdfColorFormat.hex;
   Color _pageColor = const Color(0xFFFFFFFF);
   double? _thumbnailSidebarWidth;
   double? _annotationSidebarWidth;
@@ -90,6 +92,11 @@ class PdfEditingPreferences extends ChangeNotifier {
       final themeMode = store.getString('${_prefix}themeMode');
       if (themeMode != null) {
         _themeMode = ThemeMode.values.asNameMap()[themeMode] ?? _themeMode;
+      }
+      final colorPickerFormat = store.getString('${_prefix}colorPickerFormat');
+      if (colorPickerFormat != null) {
+        _colorPickerFormat = PdfColorFormat.values.asNameMap()[colorPickerFormat] ??
+            _colorPickerFormat;
       }
       final pageColor = store.getInt('${_prefix}pageColor');
       if (pageColor != null) _pageColor = Color(pageColor);
@@ -237,6 +244,17 @@ class PdfEditingPreferences extends ChangeNotifier {
     if (value == _themeMode) return;
     _themeMode = value;
     _write((s) => s.setString('${_prefix}themeMode', value.name));
+    notifyListeners();
+  }
+
+  /// The value format the color picker last showed (hex, RGB, HSL, or
+  /// CMYK) — the picker reopens in it.
+  PdfColorFormat get colorPickerFormat => _colorPickerFormat;
+
+  set colorPickerFormat(PdfColorFormat value) {
+    if (value == _colorPickerFormat) return;
+    _colorPickerFormat = value;
+    _write((s) => s.setString('${_prefix}colorPickerFormat', value.name));
     notifyListeners();
   }
 

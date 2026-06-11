@@ -818,4 +818,49 @@ void main() {
     // only page 0 got an overlay
     expect(find.byType(TextButton), findsOneWidget);
   });
+
+  testWidgets('controller survives the host recreating the viewer element',
+      (tester) async {
+    final controller = PdfViewerController();
+    final document = PdfDocument.open(buildMultiPagePdf(3));
+    Widget viewer() => Expanded(
+          child: PdfViewer(
+            initialFit: PdfViewerFit.width,
+            document: document,
+            controller: controller,
+          ),
+        );
+
+    // panels closed: the viewer is the row's only child
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(body: Row(children: [viewer()])),
+    ));
+    await tester.pump();
+    expect(controller.visiblePageRegion(0), isNotNull);
+
+    // panels opening on BOTH sides (the example app right after its async
+    // preference load): both ends of the keyless child list mismatch, so
+    // the framework discards the old viewer element and inflates a fresh
+    // one. The new state attaches to the controller in initState; the old
+    // state's dispose is deferred to tree finalization and must not
+    // detach it again.
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Row(children: [
+          const SizedBox(width: 60),
+          viewer(),
+          const SizedBox(width: 60),
+        ]),
+      ),
+    ));
+    await tester.pump();
+
+    expect(controller.visiblePageRegion(0), isNotNull,
+        reason: 'the replacement viewer must stay attached');
+    unawaited(controller.jumpToPage(2));
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(controller.currentPage, 2,
+        reason: 'jumpToPage must reach the replacement viewer');
+  });
 }

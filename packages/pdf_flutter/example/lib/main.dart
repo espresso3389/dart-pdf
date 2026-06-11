@@ -448,14 +448,19 @@ class _ViewerScreenState extends State<ViewerScreen> {
             ),
           // the editing controller owns the document revisions: rebuild the
           // viewer with the current one whenever the controller notifies
+          // the children are keyed so a panel appearing or disappearing
+          // never recreates the viewer element (which would reset the
+          // reading position and re-run the initial fit)
           (final PdfEditingController session, _) => Row(children: [
               if (_prefs.showThumbnailSidebar)
                 PdfThumbnailSidebar(
+                  key: const ValueKey('thumbnail-sidebar'),
                   controller: session,
                   viewerController: _controller,
                   pageColor: _prefs.pageColor,
                 ),
               Expanded(
+                key: const ValueKey('viewer'),
                 child: ListenableBuilder(
                   listenable: session,
                   builder: (context, _) => PdfViewer(
@@ -470,6 +475,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
               ),
               if (_prefs.showAnnotationSidebar)
                 PdfAnnotationSidebar(
+                  key: const ValueKey('annotation-sidebar'),
                   controller: session,
                   viewerController: _controller,
                 ),

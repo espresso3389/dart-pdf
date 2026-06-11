@@ -611,7 +611,13 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     _lifecycle.dispose();
     _settleTimer?.cancel();
     _scrollSettleTimer?.cancel();
-    _controller._state = null;
+    // when the host recreates the viewer element (e.g. a panel appearing
+    // shifts it to a new slot in a Row), the replacement state attaches in
+    // initState BEFORE this deferred dispose runs — only detach if the
+    // controller still points here, or the new viewer is severed and every
+    // controller call (jumpToPage, visiblePageRegion, search) silently
+    // no-ops
+    if (identical(_controller._state, this)) _controller._state = null;
     if (_ownsController) _controller.dispose();
     _scroll.dispose();
     _transform.dispose();

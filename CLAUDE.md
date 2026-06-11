@@ -562,3 +562,26 @@ for recolored paper too). Contrast tests live in
 editing_panels_test.dart (read the private painter's color via a
 dynamic cast; light and dark asserted in separate tests per the
 AnimatedTheme gotcha).
+Viewer-state clobber (the REAL cause of Ben's invisible indicator —
+contrast was secondary): PdfViewerController delegates through a
+`_state` pointer set in the viewer's initState and cleared in dispose.
+When a host recreates the viewer ELEMENT — the example's keyless Row
+gained panels on BOTH sides when the async preference load completed,
+so updateChildren mismatches at both ends and re-inflates the keyless
+middle — the new state attaches in initState, then the OLD state's
+deferred dispose (tree finalization) nulled `_state` again. Every
+controller round-trip (visiblePageRegion, jumpToPage, showRect,
+search) silently no-ops from then on; values the state PUSHES into
+the controller (currentPage, pageCount) keep working, which masks it.
+Fix: dispose only detaches `if (identical(_controller._state, this))`;
+the example also keys the Row children (panel toggles now preserve the
+viewer element and the reading position). Regression test: "controller
+survives the host recreating the viewer element" (pdf_viewer_test).
+Widget tests can't catch this class of bug when they mount the final
+layout in one pump — the live-app tells were tile taps not navigating
+and dragging the viewer's scrollbar (cliclick + screencapture against
+the running macOS app made it falsifiable). Related cosmetic fix found
+the same way: _PageTile's border was DecoratedBox, whose child is NOT
+inset, so the full-bleed RawImage covered the 1-2px ring (current-page
+outline included) — it's a Container now (decoration padding insets
+the child; the strip's width math already assumed width-26).

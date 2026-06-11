@@ -348,7 +348,11 @@ class _PageTile extends StatelessWidget {
               builder: (context, _) {
                 final current = viewerController.currentPage == pageIndex;
                 final viewport = viewerController.visiblePageRegion(pageIndex);
-                return DecoratedBox(
+                // Container, not DecoratedBox: the border must inset the
+                // child (Container adds the decoration's padding), or the
+                // full-bleed thumbnail paints over the 1-2px ring and
+                // neither the current-page outline nor the hairline shows
+                return Container(
                   decoration: BoxDecoration(
                     border: Border.all(
                       color: current ? scheme.primary : scheme.outlineVariant,

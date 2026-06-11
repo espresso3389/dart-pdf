@@ -41,6 +41,24 @@ to validate changes:
 - Parse check: `cd packages/pdf_document && fvm dart tool/inspect.dart ../../corpus/*.pdf`
 - Render check: `cd packages/pdf_flutter && PDF_PATH=../../corpus/<file>.pdf PDF_PAGE=0 fvm flutter test test/render_smoke_test.dart` (writes /tmp/dart_pdf_render.png)
 
+`test_corpora/ghent/` (checked in) is the Ghent PDF Output Suite V5.0 —
+54 print-conformance PDFs (overprint, DeviceN, spot, ICC v2/v4, 16-bit,
+transparency blend modes, softmasks, optional content, font formats,
+JBIG2/JPX) incl. 3 composite test pages. Two test layers:
+
+- `packages/pdf_graphics/test/ghent_corpus_test.dart` — pure-Dart: every
+  page must interpret without throwing and paint > 0 ops.
+- `packages/pdf_flutter/test/ghent_render_test.dart` — rasterizes every
+  page and diffs against checked-in baselines in
+  `test_corpora/ghent/_baselines` (fail when >0.05% of pixels differ by
+  >8/channel). Missing baselines seed on first run; accept intentional
+  rendering changes with `GHENT_UPDATE=1 fvm flutter test
+  test/ghent_render_test.dart`. Mismatches dump actual+diff PNGs to
+  `test_corpora/ghent/_failures/` (git-ignored). The baselines pin
+  current behavior, not GWG conformance — many patches print their own
+  pass criterion on the page (overprint simulation isn't implemented;
+  GWG173's faint "X" is a known JBIG2 deviation).
+
 ## Roadmap context
 
 See README.md. The pipeline through the viewer is done: interpreter, font

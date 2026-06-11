@@ -110,3 +110,18 @@ fvm flutter pub get          # resolve the whole workspace
 fvm dart analyze
 cd packages/pdf_cos && fvm dart test
 ```
+
+### Rendering test suite
+
+`test_corpora/ghent/` carries the [Ghent PDF Output Suite
+V5.0](https://gwg.org/) — 54 print-conformance PDFs covering overprint,
+DeviceN/spot color, ICC v2/v4, 16-bit images, transparency blend modes,
+softmasks, optional content, font formats, and JBIG2/JPEG 2000
+compression. Two layers run over it:
+
+- `pdf_graphics/test/ghent_corpus_test.dart` interprets every page on
+  the plain Dart VM (parse + paint-op assertions, no rasterization).
+- `pdf_flutter/test/ghent_render_test.dart` rasterizes every page and
+  compares it pixel-wise against checked-in baseline renders;
+  regressions dump actual/diff images for inspection, and
+  `GHENT_UPDATE=1` re-baselines after an intentional change.

@@ -83,7 +83,10 @@ any conforming viewer renders it rotated; a content tool that
 selects page elements for deletion or
 in-place text replacement), keyboard shortcuts, style controls (stroke
 width, opacity, font size), an annotation list sidebar
-(`PdfAnnotationSidebar`), a page thumbnail sidebar
+(`PdfAnnotationSidebar` — grouped by page with each annotation's
+author shown; tapping a tile zooms the viewer to the annotation, and
+a long press starts multi-select for deleting a whole set as one
+undo step), a page thumbnail sidebar
 (`PdfThumbnailSidebar` — tap to jump, drag to reorder pages, delete,
 with a live viewport indicator), a full-spectrum color picker with an
 eyedropper that samples colors from the rendered page — with a live

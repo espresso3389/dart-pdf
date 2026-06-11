@@ -209,6 +209,13 @@ class PdfEditingController extends ChangeNotifier {
 
   int get _colorValue => preferences.color.toARGB32() & 0xFFFFFF;
 
+  /// The author name new annotations carry (/T — shown in
+  /// [PdfAnnotationSidebar] and other viewers' comment lists). Null
+  /// (the default) leaves them unsigned. Persisted.
+  String? get author => preferences.author;
+
+  set author(String? value) => preferences.author = value;
+
   // ---------------------------------------------------------------------
   // eyedropper
 
@@ -292,7 +299,8 @@ class PdfEditingController extends ChangeNotifier {
               color: _colorValue,
               strokeWidth: preferences.strokeWidth,
               opacity: preferences.opacity,
-              pressures: pressures[page]);
+              pressures: pressures[page],
+              author: author);
         }
       });
     });
@@ -319,16 +327,16 @@ class PdfEditingController extends ChangeNotifier {
         switch (kind) {
           case PdfMarkupKind.highlight:
             editor.addHighlight(page, quads,
-                color: _colorValue, opacity: preferences.opacity);
+                color: _colorValue, opacity: preferences.opacity, author: author);
           case PdfMarkupKind.underline:
             editor.addUnderline(page, quads,
-                color: _colorValue, opacity: preferences.opacity);
+                color: _colorValue, opacity: preferences.opacity, author: author);
           case PdfMarkupKind.strikeOut:
             editor.addStrikeOut(page, quads,
-                color: _colorValue, opacity: preferences.opacity);
+                color: _colorValue, opacity: preferences.opacity, author: author);
           case PdfMarkupKind.squiggly:
             editor.addSquiggly(page, quads,
-                color: _colorValue, opacity: preferences.opacity);
+                color: _colorValue, opacity: preferences.opacity, author: author);
         }
       });
     });
@@ -338,25 +346,30 @@ class PdfEditingController extends ChangeNotifier {
       apply((e) => e.addSquare(pageIndex, rect,
           strokeColor: _colorValue,
           strokeWidth: preferences.strokeWidth,
-          opacity: preferences.opacity));
+          opacity: preferences.opacity,
+          author: author));
 
   void addEllipse(int pageIndex, PdfRect rect) =>
       apply((e) => e.addCircle(pageIndex, rect,
           strokeColor: _colorValue,
           strokeWidth: preferences.strokeWidth,
-          opacity: preferences.opacity));
+          opacity: preferences.opacity,
+          author: author));
 
   void addFreeText(int pageIndex, PdfRect rect, String text) =>
       apply((e) => e.addFreeText(pageIndex, rect, text,
-          fontSize: preferences.fontSize, color: _colorValue));
+          fontSize: preferences.fontSize, color: _colorValue, author: author));
 
   void addStamp(int pageIndex, PdfRect rect, String text, {int? color}) =>
       apply((e) => e.addStamp(pageIndex, rect, text,
-          color: color ?? _colorValue, opacity: preferences.opacity));
+          color: color ?? _colorValue,
+          opacity: preferences.opacity,
+          author: author));
 
   /// Adds a sticky note with its top-left corner at ([x], [y]).
   void addNote(int pageIndex, double x, double y, String text) =>
-      apply((e) => e.addNote(pageIndex, x, y, text, color: _colorValue));
+      apply((e) =>
+          e.addNote(pageIndex, x, y, text, color: _colorValue, author: author));
 
   // ---------------------------------------------------------------------
   // signature
@@ -398,7 +411,8 @@ class PdfEditingController extends ChangeNotifier {
         color: signature.color,
         strokeWidth: w / 75, // pen-like: ~2pt at the default width
         opacity: 1,
-        pressures: signature.pressures));
+        pressures: signature.pressures,
+        author: author));
   }
 
   // ---------------------------------------------------------------------
@@ -460,7 +474,8 @@ class PdfEditingController extends ChangeNotifier {
         PdfRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2),
         stamp.text,
         color: stamp.color,
-        opacity: preferences.opacity));
+        opacity: preferences.opacity,
+        author: author));
   }
 
   /// Bakes every page's annotation appearances into its content and
@@ -589,6 +604,25 @@ class PdfEditingController extends ChangeNotifier {
     apply((e) => e.removeAnnotation(pageIndex, annotation));
   }
 
+  /// Removes several annotations — (pageIndex, /Annots slot) pairs — in
+  /// one revision, so a single undo restores them all. Invalid slots are
+  /// skipped. Used by the annotation sidebar's multi-select delete.
+  void deleteAnnotations(Iterable<(int page, int index)> slots) {
+    // resolve every slot before the first removal shifts the others
+    final targets = <(int, PdfAnnotation)>[
+      for (final slot in slots)
+        if (_annotationAt(slot) case final annotation?) (slot.$1, annotation)
+    ];
+    if (targets.isEmpty) return;
+    // surviving annotations may land in different slots
+    _selected = null;
+    apply((e) {
+      for (final (page, annotation) in targets) {
+        e.removeAnnotation(page, annotation);
+      }
+    });
+  }
+
   void clearAnnotationSelection() {
     if (_selected == null) return;
     _selected = null;
@@ -649,6 +683,7 @@ class PdfEditingController extends ChangeNotifier {
     final page = selected.$1;
     final rect = annotation.rect;
     final color = annotation.color;
+    final by = annotation.author; // a text edit doesn't change ownership
     _selected = null;
     apply((e) {
       e.removeAnnotation(page, annotation);
@@ -658,11 +693,13 @@ class PdfEditingController extends ChangeNotifier {
               .firstMatch(annotation.defaultAppearance ?? '');
           e.addFreeText(page, rect, text,
               fontSize: double.tryParse(tf?.group(1) ?? '') ?? preferences.fontSize,
-              color: color ?? 0x000000);
+              color: color ?? 0x000000,
+              author: by);
         case 'Stamp':
-          e.addStamp(page, rect, text, color: color ?? 0xC03030);
+          e.addStamp(page, rect, text, color: color ?? 0xC03030, author: by);
         default: // 'Text'
-          e.addNote(page, rect.left, rect.top, text, color: color ?? 0xFFD100);
+          e.addNote(page, rect.left, rect.top, text,
+              color: color ?? 0xFFD100, author: by);
       }
     });
   }

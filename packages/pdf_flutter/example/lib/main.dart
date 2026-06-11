@@ -297,6 +297,16 @@ class _ViewerScreenState extends State<ViewerScreen> {
               onPressed: () =>
                   _prefs.showAnnotationSidebar = !_prefs.showAnnotationSidebar,
             ),
+            IconButton(
+              icon: const Icon(Icons.person_outline),
+              tooltip: 'Author name',
+              onPressed: () async {
+                final name = await showPdfTextPrompt(context,
+                    title: 'Author name', initial: editing.author ?? '');
+                if (name == null) return;
+                editing.author = name.trim().isEmpty ? null : name.trim();
+              },
+            ),
           ],
           IconButton(
             icon: const Icon(Icons.auto_awesome),

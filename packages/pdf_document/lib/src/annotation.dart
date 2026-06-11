@@ -75,6 +75,14 @@ class PdfAnnotation {
     return c is CosString ? c.text : null;
   }
 
+  /// The author: /T, "the text label … by convention … the annotation's
+  /// author" (§12.5.6.2). Meaningless on widgets, where /T is the form
+  /// field's partial name instead.
+  String? get author {
+    final t = document.cos.resolve(dict['T']);
+    return t is CosString ? t.text : null;
+  }
+
   /// The /C color as 0xRRGGBB, if present. Gray and CMYK component
   /// counts are converted; an empty array (explicit "no color") and
   /// malformed entries resolve to null.

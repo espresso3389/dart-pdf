@@ -47,6 +47,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   bool _fingerDrawsInk = true;
   bool _showThumbnailSidebar = false;
   bool _showAnnotationSidebar = false;
+  String? _author;
   PdfInkSignature? _signature;
   List<PdfCustomStamp> _customStamps = const [];
 
@@ -72,6 +73,7 @@ class PdfEditingPreferences extends ChangeNotifier {
       _showAnnotationSidebar =
           store.getBool('${_prefix}showAnnotationSidebar') ??
               _showAnnotationSidebar;
+      _author = store.getString('${_prefix}author') ?? _author;
       final signature = store.getString('${_prefix}signature');
       if (signature != null) _signature = PdfInkSignature.decode(signature);
       final stamps = store.getStringList('${_prefix}customStamps');
@@ -176,6 +178,19 @@ class PdfEditingPreferences extends ChangeNotifier {
     _customStamps = List.unmodifiable(value);
     _write((s) => s.setStringList('${_prefix}customStamps',
         [for (final stamp in value) stamp.encode()]));
+    notifyListeners();
+  }
+
+  /// The author name new annotations carry (/T), shown in the
+  /// annotation sidebar. Null leaves them unsigned.
+  String? get author => _author;
+
+  set author(String? value) {
+    if (value == _author) return;
+    _author = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}author')
+        : s.setString('${_prefix}author', value));
     notifyListeners();
   }
 

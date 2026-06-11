@@ -17,6 +17,7 @@ void main() {
       a.fingerDrawsInk = false;
       a.showThumbnailSidebar = true;
       a.showAnnotationSidebar = true;
+      a.author = 'Ben';
       await pumpEventQueue(); // let the unawaited writes land
 
       final b = PdfEditingPreferences();
@@ -28,6 +29,7 @@ void main() {
       expect(b.fingerDrawsInk, isFalse);
       expect(b.showThumbnailSidebar, isTrue);
       expect(b.showAnnotationSidebar, isTrue);
+      expect(b.author, 'Ben');
     });
 
     test('empty storage leaves the defaults', () async {
@@ -41,6 +43,7 @@ void main() {
       expect(prefs.fingerDrawsInk, isTrue);
       expect(prefs.showThumbnailSidebar, isFalse);
       expect(prefs.showAnnotationSidebar, isFalse);
+      expect(prefs.author, isNull);
     });
 
     test('a value set while loading is not clobbered by stored data',

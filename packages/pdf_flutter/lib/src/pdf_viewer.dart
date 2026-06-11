@@ -80,6 +80,13 @@ class PdfViewerController extends ChangeNotifier {
 
   Future<void> jumpToPage(int index) async => _state?._jumpToPage(index);
 
+  /// Scrolls — and zooms in when that helps — so [rect] (page space on
+  /// [pageIndex]) sits centered in the viewport, filling around 40% of
+  /// it. Never zooms out below 100% or in past [PdfViewer.maxZoom]. The
+  /// annotation sidebar uses this to zoom to an annotation.
+  Future<void> showRect(int pageIndex, PdfRect rect) async =>
+      _state?._showRect(pageIndex, rect);
+
   final _viewport = _ViewportNotifier();
 
   /// Notifies whenever the visible region changes — scrolling, zooming.
@@ -611,6 +618,65 @@ class _PdfViewerState extends State<PdfViewer>
     final target = _pageOffset(index.clamp(0, _pages.length - 1));
     await _scroll.animateTo(
       target.clamp(0.0, _scroll.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  /// Frames [rect] (page space on page [index]): centers it in the
+  /// viewport and zooms so it fills ~40% of the view, clamped to
+  /// [1, maxZoom] — tiny annotations don't explode, big ones don't
+  /// force a zoom-out.
+  Future<void> _showRect(int index, PdfRect rect) async {
+    if (!_scroll.hasClients || _viewWidth <= 0 || _pages.isEmpty) return;
+    index = index.clamp(0, _pages.length - 1);
+    // transform zoom rides on fit-width pages (see _zoomTo); leave a
+    // zoomed-out layout first, then let the new scroll extents settle
+    if (_layoutZoom < 1) {
+      _setLayoutZoom(1);
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !_scroll.hasClients) return;
+    }
+    final page = _pages[index];
+    final box = page.cropBox;
+    if (box.width <= 0 || box.height <= 0) return;
+    final pageWidth = _viewWidth * _layoutZoom;
+    final geometry = PdfPageGeometry(
+      cropBox: box,
+      rotation: page.rotation,
+      viewSize: Size(pageWidth, _pageHeight(index)),
+    );
+    final target = geometry.toViewRect(rect);
+    // list space: pages are centered horizontally and stacked vertically
+    final center = target.center +
+        Offset((_viewWidth - pageWidth) / 2, _pageOffset(index));
+    final fit = 0.4 *
+        math.min(_viewWidth / math.max(target.width, 8),
+            _viewHeight / math.max(target.height, 8));
+    final scale = fit.clamp(1.0, widget.maxZoom);
+    final scroll = (center.dy - _viewHeight / 2)
+        .clamp(0.0, _scroll.position.maxScrollExtent);
+    final Matrix4 end;
+    if (scale <= 1.01) {
+      end = Matrix4.identity();
+    } else {
+      // the viewport unprojects to list space as (p - t) / s (see
+      // _visibleFractionOf); solve its center = `center` for t, with the
+      // scroll offset the list actually reaches
+      final tx = (_viewWidth / 2 - scale * center.dx)
+          .clamp(_viewWidth * (1 - scale), 0.0);
+      final ty = (scale * (scroll - center.dy) + _viewHeight / 2)
+          .clamp(_viewHeight * (1 - scale), 0.0);
+      end = Matrix4.identity()
+        ..translateByDouble(tx, ty, 0, 1)
+        ..scaleByDouble(scale, scale, scale, 1);
+    }
+    _zoomAnimation = Matrix4Tween(begin: _transform.value, end: end).animate(
+        CurvedAnimation(parent: _zoomAnimator, curve: Curves.easeInOut));
+    _zoomAnimator.forward(from: 0);
+    setState(() => _zoomed = scale > 1.01);
+    await _scroll.animateTo(
+      scroll,
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeInOut,
     );

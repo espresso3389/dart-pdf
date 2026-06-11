@@ -248,3 +248,21 @@ view clockwise = page −CCW: `rotateSelected(-delta*180/pi)`.
 `canRotateSelected` = resizable subtype + has /AP. Tests:
 annotation_editor_test.dart (matrix/rect/ink math, 45+45≡90),
 editing_rotate_test.dart (pixels + handle-drag sign chain).
+Annotation list round (zoom-to, multi-select delete, authors):
+`PdfViewerController.showRect(page, rect)` frames a page rect —
+`_showRect` centers it and zooms to ~40% viewport fill, clamped
+[1, maxZoom] (never zooms out); the transform translation is solved
+against the clamped scroll offset, and both clamp at document edges,
+so near-margin rects sit off-center (tests frame mid-page rects).
+Sidebar (now stateful): tap zooms + selects; long-press enters
+multi-select (checkboxes, header 'N selected' + delete) committed via
+`controller.deleteAnnotations(slots)` — annotations are all resolved
+before the first removal (slots shift), one apply = one undo, clears
+the annotation selection; checked state dies with every revision
+(document-identity check in build). `PdfAnnotation.author` reads /T
+(ignored for Widgets, where /T is the field name);
+`controller.author` (persisted preference `author`) stamps /T on all
+ten creation paths and is preserved across setSelectedText's
+remove+re-add. Tile subtitle is 'author — contents'. Example app:
+person_outline AppBar button prompts for the name. Tests:
+editing_sidebar_test.dart.

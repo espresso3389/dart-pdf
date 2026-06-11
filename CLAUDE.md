@@ -505,9 +505,17 @@ rasterizes tiles via `PdfPageRenderer.renderImage` into a per-sidebar
 LRU (`_ThumbnailCache`, 96 entries, hands out `ui.Image.clone()`s so
 eviction can't pull pixels from a painting tile; key =
 page|stamp|color|pxWidth with 64px width buckets), renders serialized
-through a static future chain (one page per event-loop turn), and
-only per-tile ListenableBuilders watch viewer/viewport changes — the
-outer list rebuilds on controller notifies alone.
+through a future chain on the cache (one page at a time, PER PANEL —
+a static chain strands continuations in a dead async zone once an
+earlier zone, e.g. a previous widget test's FakeAsync, completed the
+tail; every task try/catches everything so one failing page can't
+poison the chain), and only per-tile ListenableBuilders watch
+viewer/viewport changes — the outer list rebuilds on controller
+notifies alone. Stamps restart at 0 per controller, so a session swap
+(opening another document) must drop cached state: the sidebar clears
+the cache and each tile resets its imageKey in didUpdateWidget on
+controller identity change — without that the new document shows the
+old one's thumbnails (keys collide).
 `PdfThumbnailSidebar.debugRasterizations` counts real renders for
 tests. (2) Resizable panels: both sidebars take `side` (which side of
 the viewer they're docked on, `PdfSidebarSide` in editing_panel.dart),
@@ -540,4 +548,6 @@ the backstop timer trips `!timersPending` — that invariant check runs
 BEFORE addTearDown(dispose); never `await viewer.jumpToPage` in a
 widget test (fake-async deadlock — fire it unawaited and pump); a
 queue yield via Future.delayed(zero) leaves stray fake timers, so the
-thumbnail render queue serializes on the rasterize awaits alone.
+thumbnail render queue serializes on the rasterize awaits alone; never
+chain async work through a STATIC Future in widget-tested code — each
+test's FakeAsync zone dies with the test and the chain dies with it.

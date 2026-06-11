@@ -121,6 +121,32 @@ void main() {
       await tester.pump();
       expect(PdfThumbnailSidebar.debugRasterizations, 5);
     });
+
+    testWidgets('a new edit session re-renders — stamps restart at zero',
+        (tester) async {
+      final first = PdfEditingController(buildMultiPagePdf(2));
+      final second = PdfEditingController(buildMultiPagePdf(2));
+      final viewer = PdfViewerController();
+      addTearDown(first.dispose);
+      addTearDown(second.dispose);
+      addTearDown(viewer.dispose);
+      Widget strip(PdfEditingController controller) => MaterialApp(
+            home: Scaffold(
+              body: Row(children: [
+                PdfThumbnailSidebar(
+                    controller: controller, viewerController: viewer),
+                const Expanded(child: SizedBox()),
+              ]),
+            ),
+          );
+      await tester.pumpWidget(strip(first));
+      await waitForRasters(tester, 2);
+
+      // same widget, different session: the cached rasters must not be
+      // served for the new document (stamp keys collide across sessions)
+      await tester.pumpWidget(strip(second));
+      await waitForRasters(tester, 4);
+    });
   });
 
   group('resizable sidebars', () {

@@ -130,6 +130,9 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
       old.controller.preferences.removeListener(_onPreferences);
       _preferences.addListener(_onPreferences);
     }
+    // a different edit session: its render stamps restart at zero, so
+    // cached rasters keyed by the old session's stamps would collide
+    if (!identical(old.controller, widget.controller)) _cache.clear();
   }
 
   @override
@@ -411,12 +414,6 @@ class _PageThumbnail extends StatefulWidget {
 }
 
 class _PageThumbnailState extends State<_PageThumbnail> {
-  /// Renders run strictly one page at a time, shared across every
-  /// sidebar — a burst of fresh tiles never interprets a dozen pages
-  /// at once, and the rasterize await yields the event loop between
-  /// pages.
-  static Future<void> _queue = Future<void>.value();
-
   ui.Image? _image; // this tile's clone; the cache owns the original
   String? _imageKey;
   String? _pendingKey;
@@ -424,6 +421,19 @@ class _PageThumbnailState extends State<_PageThumbnail> {
   /// Raster widths snap to 64px steps so a resize drag doesn't re-render
   /// every page per pixel.
   static int _bucket(double px) => ((px / 64).ceil() * 64).clamp(64, 1024);
+
+  @override
+  void didUpdateWidget(_PageThumbnail old) {
+    super.didUpdateWidget(old);
+    // a different edit session: render stamps restart at zero, so the
+    // new document's keys collide with the shown image's — drop it
+    if (!identical(old.controller, widget.controller)) {
+      _image?.dispose();
+      _image = null;
+      _imageKey = null;
+      _pendingKey = null;
+    }
+  }
 
   @override
   void dispose() {
@@ -439,28 +449,30 @@ class _PageThumbnailState extends State<_PageThumbnail> {
     final pageIndex = widget.pageIndex;
     final pageColor = widget.pageColor;
     final cache = widget.cache;
-    _queue = _queue.then((_) async {
+    cache.enqueue(() async {
       // superseded (newer revision, resize) or already landed — skip
       if (!mounted || _pendingKey != key) return;
-      final page = controller.pageAt(pageIndex);
-      final size = PdfPageRenderer.pageSize(page);
-      if (size.width <= 0 || size.height <= 0) return;
+      // nothing may escape: a single failing page must neither poison
+      // the panel's queue (every later thumbnail would silently never
+      // render) nor surface — it just keeps its blank placeholder
       try {
+        final page = controller.pageAt(pageIndex);
+        final size = PdfPageRenderer.pageSize(page);
+        if (size.width <= 0 || size.height <= 0) return;
         final image = await PdfPageRenderer.renderImage(page,
             pixelRatio: pixelWidth / size.width, pageColor: pageColor);
         PdfThumbnailSidebar.debugRasterizations++;
         cache.put(key, image);
+        if (!mounted || _pendingKey != key) return;
+        setState(() {
+          _pendingKey = null;
+          _image?.dispose();
+          _image = cache.claim(key);
+          _imageKey = key;
+        });
       } catch (_) {
-        // a page the main viewer fails on keeps the blank placeholder
-        return;
+        // keep the placeholder; the queue moves on to the next page
       }
-      if (!mounted || _pendingKey != key) return;
-      setState(() {
-        _pendingKey = null;
-        _image?.dispose();
-        _image = cache.claim(key);
-        _imageKey = key;
-      });
     });
   }
 
@@ -496,14 +508,27 @@ class _PageThumbnailState extends State<_PageThumbnail> {
   }
 }
 
-/// An LRU of rasterized thumbnails, owned by the sidebar. Entries hand
-/// out [ui.Image.clone]s, so an eviction never pulls pixels out from
-/// under a tile that is still painting them.
+/// An LRU of rasterized thumbnails, owned by the sidebar — and the
+/// panel's render queue. Entries hand out [ui.Image.clone]s, so an
+/// eviction never pulls pixels out from under a tile that is still
+/// painting them.
 class _ThumbnailCache {
   static const _capacity = 96;
 
   final Map<String, ui.Image> _images = {};
   bool _disposed = false;
+
+  /// The serialization tail: renders run strictly one page at a time
+  /// per panel, so a burst of fresh tiles never interprets a dozen
+  /// pages at once. Per panel, not static — a process-wide chain would
+  /// strand continuations in a dead async zone once any earlier zone
+  /// (a widget test's FakeAsync, for one) completed the tail.
+  Future<void> _queue = Future<void>.value();
+
+  void enqueue(Future<void> Function() task) {
+    // tasks swallow their own errors, so the chain never fails
+    _queue = _queue.then((_) => task());
+  }
 
   ui.Image? claim(String key) {
     final image = _images.remove(key);
@@ -524,12 +549,18 @@ class _ThumbnailCache {
     }
   }
 
-  void dispose() {
-    _disposed = true;
+  /// Drops every entry — a new document's render stamps restart at
+  /// zero, so stale keys from the old one would collide.
+  void clear() {
     for (final image in _images.values) {
       image.dispose();
     }
     _images.clear();
+  }
+
+  void dispose() {
+    _disposed = true;
+    clear();
   }
 }
 

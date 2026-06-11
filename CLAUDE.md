@@ -585,3 +585,32 @@ the same way: _PageTile's border was DecoratedBox, whose child is NOT
 inset, so the full-bleed RawImage covered the 1-2px ring (current-page
 outline included) — it's a Container now (decoration padding insets
 the child; the strip's width math already assumed width-26).
+Theming round (session 5 of batch 2): `PdfViewerTheme`/
+`PdfViewerThemeData` (theme.dart, exported) — an InheritedWidget; every
+field nullable, null = stock look, widget params (backgroundColor) win
+over the theme. Fields: canvasColor, selectionColor, searchMatchColor,
+currentSearchMatchColor, annotationChromeColor (selection boxes/
+handles/marquee + the inline text editor's border), elementChromeColor,
+flashColor, and scrollbar (`PdfScrollbarThemeData`: thumb/thumbActive/
+outline/track/trackActive). _HighlightPainter and
+_EditingPreviewPainter take `theme` (chrome statics became getters with
+fallbacks; translucent fills derive via withAlpha(0x1A)/(0x14) so a
+custom chrome recolors them too) — both compare it in shouldRepaint.
+The viewer's `_PdfScrollbar` moved to scrollbar.dart as a public
+`PdfScrollbar`: transform now optional (plain mode = scale 1, offset =
+scroll.pixels), onScrollBy optional (null drives the ScrollController
+directly, clamped), `thumbKey` for tests. Both sidebars suppress the
+implicit desktop bar (ScrollConfiguration scrollbars:false) and mount
+it over their lists — thumb keys 'pdf-thumbnail-scrollbar-thumb' /
+'pdf-annotation-scrollbar-thumb', inset by PdfSidebarResizeGrip.width
+when the grip rides the same right edge. The annotation list gained a
+ScrollController, which surfaced a crash class: toggling multi-select
+used to swap `list` ↔ `Column(header, Expanded(list))`, re-inflating
+the ListView — old + new positions both attached for a frame and
+`controller.position` asserts. Fix shape is the session-4 lesson again:
+one tree shape always (Column with the header conditional and the
+Expanded keyed) AND the scrollbar treats `positions.length != 1` as
+"no metrics" instead of touching `.position`. Tests:
+pdf_theme_test.dart (theme plumbing via dynamic painter casts, thumb
+decoration colors, sidebar bar presence/drag — mouse-kind
+startGesture+moveBy, since tester.drag eats slop).

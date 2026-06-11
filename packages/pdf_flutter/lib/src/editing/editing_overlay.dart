@@ -10,6 +10,7 @@ import 'package:pdf_document/pdf_document.dart';
 
 import '../page_geometry.dart';
 import '../renderer.dart';
+import '../theme.dart';
 import 'editing_controller.dart';
 import 'text_prompt.dart';
 
@@ -1147,6 +1148,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
             Positioned.fill(
               child: CustomPaint(
                 painter: _EditingPreviewPainter(
+                  theme: PdfViewerTheme.of(context),
                   tool: _tool,
                   color: _controller.color,
                   strokeWidth: _controller.strokeWidth * _geometry.scale,
@@ -1258,7 +1260,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                       color: widget.pageColor
                           .withValues(alpha: _textEditExisting ? 0.92 : 0.3),
                       border: Border.all(
-                          color: const Color(0xFF1E88E5), width: 1.5),
+                          color: PdfViewerTheme.of(context)
+                                  .annotationChromeColor ??
+                              const Color(0xFF1E88E5),
+                          width: 1.5),
                     ),
                     child: TextField(
                       key: const ValueKey('pdf-freetext-editor'),
@@ -1334,6 +1339,7 @@ class _EyedropperChip extends StatelessWidget {
 
 class _EditingPreviewPainter extends CustomPainter {
   _EditingPreviewPainter({
+    required this.theme,
     required this.tool,
     required this.color,
     required this.strokeWidth,
@@ -1423,9 +1429,13 @@ class _EditingPreviewPainter extends CustomPainter {
   final Rect? flashRect;
   final double flashProgress;
 
-  static const _chrome = Color(0xFF1E88E5);
-  static const _elementChrome = Color(0xFFFB8C00);
-  static const _flash = Color(0xFFFFB300);
+  final PdfViewerThemeData theme;
+
+  Color get _chrome =>
+      theme.annotationChromeColor ?? const Color(0xFF1E88E5);
+  Color get _elementChrome =>
+      theme.elementChromeColor ?? const Color(0xFFFB8C00);
+  Color get _flash => theme.flashColor ?? const Color(0xFFFFB300);
 
   /// Paints one set of page-space ink strokes with the committed
   /// appearance's smoothing and pressure mapping.
@@ -1538,7 +1548,7 @@ class _EditingPreviewPainter extends CustomPainter {
 
     for (final rect in extraSelectionRects) {
       final box = rect.inflate(2);
-      canvas.drawRect(box, Paint()..color = const Color(0x1A1E88E5));
+      canvas.drawRect(box, Paint()..color = _chrome.withAlpha(0x1A));
       canvas.drawRect(
           box,
           Paint()
@@ -1549,7 +1559,7 @@ class _EditingPreviewPainter extends CustomPainter {
 
     final marquee = marqueeRect;
     if (marquee != null) {
-      canvas.drawRect(marquee, Paint()..color = const Color(0x141E88E5));
+      canvas.drawRect(marquee, Paint()..color = _chrome.withAlpha(0x14));
       canvas.drawRect(
           marquee,
           Paint()
@@ -1591,7 +1601,7 @@ class _EditingPreviewPainter extends CustomPainter {
         canvas.translate(-selection.center.dx, -selection.center.dy);
       }
       final box = selection.inflate(2);
-      canvas.drawRect(box, Paint()..color = const Color(0x1A1E88E5));
+      canvas.drawRect(box, Paint()..color = _chrome.withAlpha(0x1A));
       canvas.drawRect(
           box,
           Paint()
@@ -1631,7 +1641,7 @@ class _EditingPreviewPainter extends CustomPainter {
     final element = elementRect;
     if (element != null) {
       final box = element.inflate(2);
-      canvas.drawRect(box, Paint()..color = const Color(0x1AFB8C00));
+      canvas.drawRect(box, Paint()..color = _elementChrome.withAlpha(0x1A));
       canvas.drawRect(
           box,
           Paint()
@@ -1682,6 +1692,7 @@ class _EditingPreviewPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_EditingPreviewPainter oldDelegate) =>
+      oldDelegate.theme != theme ||
       oldDelegate.tool != tool ||
       oldDelegate.color != color ||
       oldDelegate.strokeWidth != strokeWidth ||

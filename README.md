@@ -137,6 +137,15 @@ match the app) — a pure display setting that leaves the document
 untouched, mirrored by the thumbnails and the eyedropper, persisted via
 `PdfEditingPreferences.pageColor`, and exposed in the example app
 through a color-picker button in the app bar.
+Beyond that, the whole viewer chrome is themable: wrap any subtree in
+`PdfViewerTheme` and `PdfViewerThemeData` recolors the canvas, the
+text-selection and search-match highlights, the editing overlay's
+selection chrome (annotation boxes and handles, the content tool's
+element chrome, the zoom-to attention flash), and the scrollbars
+(`PdfScrollbarThemeData`). The viewer-style scrollbar is itself a
+reusable widget (`PdfScrollbar`) and both sidebars use it in place of
+the platform's implicit bar, so every scrollbar in the chrome shares
+one look — themed together, readable in light and dark mode alike.
 The selection model is desktop-grade. With a mouse, selection is the
 default mode: clicking an annotation selects it with no tool armed,
 dragging empty page area grab-pans the document, and the cursor tells

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:pdf_document/pdf_document.dart';
 
 import '../pdf_viewer.dart';
+import '../scrollbar.dart';
 import 'editing_controller.dart';
 import 'editing_panel.dart';
 import 'editing_preferences.dart';
@@ -80,6 +81,8 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
   final Set<(int, int)> _checked = {};
   bool _selecting = false;
 
+  final ScrollController _scroll = ScrollController();
+
   /// The document revision the selection state belongs to. Any edit,
   /// undo, or redo can shift /Annots slots, so a new revision drops it.
   PdfDocument? _builtFor;
@@ -113,6 +116,7 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
   @override
   void dispose() {
     _preferences.removeListener(_onPreferences);
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -278,13 +282,44 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
                       ..addAll(tiles);
                   }
                 }
+                // the viewer-style scrollbar replaces the implicit
+                // desktop bar; it wraps only the list, so the
+                // multi-select header above stays clear of it. Stepped
+                // off the resize grip when the grip rides the same
+                // (right) edge.
                 final list = children.isEmpty
                     ? const Center(child: Text('No annotations'))
-                    : ListView(children: children);
-                if (!_selecting) return list;
+                    : Stack(children: [
+                        ScrollConfiguration(
+                          behavior: ScrollConfiguration.of(context)
+                              .copyWith(scrollbars: false),
+                          child:
+                              ListView(controller: _scroll, children: children),
+                        ),
+                        Positioned(
+                          top: 0,
+                          bottom: 0,
+                          right: widget.resizable &&
+                                  widget.side == PdfSidebarSide.left
+                              ? PdfSidebarResizeGrip.width
+                              : 0,
+                          child: PdfScrollbar(
+                            scroll: _scroll,
+                            thumbKey: const ValueKey(
+                                'pdf-annotation-scrollbar-thumb'),
+                          ),
+                        ),
+                      ]);
+                // one shape for both modes, with the list keyed: the
+                // header appearing must not move the list to a new
+                // element (the controller would sit attached to two
+                // scroll views for a frame)
                 return Column(children: [
-                  _selectionHeader(context),
-                  Expanded(child: list),
+                  if (_selecting) _selectionHeader(context),
+                  Expanded(
+                    key: const ValueKey('pdf-annotation-list'),
+                    child: list,
+                  ),
                 ]);
               },
             ),

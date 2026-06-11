@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 
 import '../pdf_viewer.dart';
 import '../renderer.dart';
+import '../scrollbar.dart';
 import 'editing_controller.dart';
 import 'editing_panel.dart';
 import 'editing_preferences.dart';
@@ -222,27 +223,47 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
             // repaints the per-tile indicators alone
             child: ListenableBuilder(
               listenable: controller,
-              builder: (context, _) => ReorderableListView.builder(
-                scrollController: _scroll,
-                buildDefaultDragHandles: false,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: controller.document.pageCount,
-                onReorderItem: controller.movePage,
-                itemBuilder: (context, index) => _ReorderDragStartListener(
-                  key: ValueKey(index),
-                  index: index,
-                  child: _PageTile(
-                    key: _tileKeys[index] ??= GlobalKey(),
-                    controller: controller,
-                    viewerController: widget.viewerController,
-                    pageIndex: index,
-                    pageColor: widget.pageColor,
-                    cache: _cache,
-                    tileWidth: width - 26,
+              // the implicit desktop scrollbar is replaced by the
+              // viewer-style bar below
+              builder: (context, _) => ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context)
+                    .copyWith(scrollbars: false),
+                child: ReorderableListView.builder(
+                  scrollController: _scroll,
+                  buildDefaultDragHandles: false,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: controller.document.pageCount,
+                  onReorderItem: controller.movePage,
+                  itemBuilder: (context, index) => _ReorderDragStartListener(
+                    key: ValueKey(index),
+                    index: index,
+                    child: _PageTile(
+                      key: _tileKeys[index] ??= GlobalKey(),
+                      controller: controller,
+                      viewerController: widget.viewerController,
+                      pageIndex: index,
+                      pageColor: widget.pageColor,
+                      cache: _cache,
+                      tileWidth: width - 26,
+                    ),
                   ),
                 ),
               ),
             ),
+          ),
+        ),
+        // the same scrollbar the viewer paints, so every bar in the
+        // chrome looks and behaves alike; stepped off the resize grip
+        // when the grip rides the same (right) edge
+        Positioned(
+          top: 0,
+          bottom: 0,
+          right: widget.resizable && widget.side == PdfSidebarSide.left
+              ? PdfSidebarResizeGrip.width
+              : 0,
+          child: PdfScrollbar(
+            scroll: _scroll,
+            thumbKey: const ValueKey('pdf-thumbnail-scrollbar-thumb'),
           ),
         ),
         if (widget.resizable)

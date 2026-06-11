@@ -162,6 +162,12 @@ fvm dart analyze
 cd packages/pdf_cos && fvm dart test
 ```
 
+The example app (`packages/pdf_flutter/example`) runs on all six Flutter
+platforms — macOS, iOS, Android, web, Windows, Linux — with
+platform-native file handling: the system picker to open, and a save
+dialog, browser download, or share sheet to save, whichever the platform
+has.
+
 ### Rendering test suite
 
 `test_corpora/ghent/` carries the [Ghent PDF Output Suite

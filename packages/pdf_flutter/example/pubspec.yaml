@@ -14,11 +14,13 @@ dependencies:
     sdk: flutter
   pdf_document: ^0.1.0
   pdf_flutter: ^0.1.0
+  share_plus: ^13.1.0
 
 dev_dependencies:
   flutter_lints: ^5.0.0
   flutter_test:
     sdk: flutter
+  shared_preferences: ^2.3.0
 
 flutter:
   uses-material-design: true

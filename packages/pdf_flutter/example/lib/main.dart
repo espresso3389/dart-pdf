@@ -1,13 +1,24 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_flutter/pdf_flutter.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'demo_document.dart';
+
+/// One filter, every platform: desktop and web match on the extension,
+/// Android on the MIME type, iOS/macOS on the uniform type identifier —
+/// a type group missing the field a platform filters by throws there.
+const _pdfTypeGroup = XTypeGroup(
+  label: 'PDF documents',
+  extensions: ['pdf'],
+  mimeTypes: ['application/pdf'],
+  uniformTypeIdentifiers: ['com.adobe.pdf'],
+);
 
 void main() => runApp(const ViewerApp());
 
@@ -131,42 +142,51 @@ class _ViewerScreenState extends State<ViewerScreen> {
   void _openDemo() =>
       _openBytes(buildDemoPdf(), 'Interactive demo', isDemo: true);
 
+  /// Pins [child] into a page slot at its design size in PDF points and
+  /// lets it scale with the page, so the overlays hold together at any
+  /// zoom level and on any screen size.
+  Widget _slot(PdfPageGeometry geometry, PdfRect rect, Widget child) =>
+      Positioned.fromRect(
+        rect: geometry.toViewRect(rect),
+        child: FittedBox(
+          child: SizedBox(width: rect.width, height: rect.height, child: child),
+        ),
+      );
+
   /// Flutter widgets pinned into the slots the demo document draws.
   List<Widget> _demoOverlays(
       BuildContext context, int pageIndex, PdfPageGeometry geometry) {
     switch (pageIndex) {
       case 0:
         return [
-          Positioned.fromRect(
-            rect: geometry.toViewRect(DemoLayout.counterBadge),
-            child: _CounterBadge(count: _counter),
-          ),
+          _slot(geometry, DemoLayout.counterBadge,
+              _CounterBadge(count: _counter)),
         ];
       case 1:
         return [
-          Positioned.fromRect(
-            rect: geometry.toViewRect(DemoLayout.clock),
-            child: const _ClockTile(),
-          ),
-          Positioned.fromRect(
-            rect: geometry.toViewRect(DemoLayout.counter),
-            child: _CounterControl(
+          _slot(geometry, DemoLayout.clock, const _ClockTile()),
+          _slot(
+            geometry,
+            DemoLayout.counter,
+            _CounterControl(
               count: _counter,
               onChanged: (value) => setState(() => _counter = value),
             ),
           ),
-          Positioned.fromRect(
-            rect: geometry.toViewRect(DemoLayout.toggle),
-            child: FittedBox(
+          _slot(
+            geometry,
+            DemoLayout.toggle,
+            FittedBox(
               child: Switch(
                 value: _switchOn,
                 onChanged: (value) => setState(() => _switchOn = value),
               ),
             ),
           ),
-          Positioned.fromRect(
-            rect: geometry.toViewRect(DemoLayout.note),
-            child: Material(
+          _slot(
+            geometry,
+            DemoLayout.note,
+            Material(
               color: const Color(0xF2FFFFFF),
               shape: RoundedRectangleBorder(
                 side: BorderSide(color: Colors.indigo.shade200),
@@ -225,34 +245,58 @@ class _ViewerScreenState extends State<ViewerScreen> {
   }
 
   Future<void> _pickFile() async {
-    final file = await openFile(acceptedTypeGroups: const [
-      XTypeGroup(label: 'PDF documents', extensions: ['pdf']),
-    ]);
-    if (file != null) await _openPath(file.path);
+    final file = await openFile(acceptedTypeGroups: const [_pdfTypeGroup]);
+    if (file == null) return;
+    try {
+      _openBytes(await file.readAsBytes(), file.name);
+    } catch (e) {
+      setState(() => _error = 'Could not open ${file.name}\n$e');
+    }
   }
 
   Future<void> _openPath(String path) async {
     try {
-      final bytes = await File(path).readAsBytes();
-      _openBytes(bytes, path.split(Platform.pathSeparator).last);
+      final bytes = await XFile(path).readAsBytes();
+      _openBytes(bytes, path.split(RegExp(r'[/\\]')).last);
     } catch (e) {
       setState(() => _error = 'Could not open $path\n$e');
     }
   }
 
+  /// Saves with whatever the platform offers: a save dialog on desktop,
+  /// a browser download on the web, the share sheet on phones and
+  /// tablets (where apps can't write outside their sandbox directly).
   Future<void> _saveAs(Uint8List bytes) async {
-    final location = await getSaveLocation(
-      suggestedName: 'annotated.pdf',
-      acceptedTypeGroups: const [
-        XTypeGroup(label: 'PDF documents', extensions: ['pdf']),
-      ],
-    );
-    if (location == null) return;
-    try {
-      await File(location.path).writeAsBytes(bytes);
-      _toast('Saved to ${location.path}');
-    } catch (e) {
-      _toast('Save failed: $e');
+    const name = 'annotated.pdf';
+    final file = XFile.fromData(bytes, mimeType: 'application/pdf');
+    if (kIsWeb) {
+      await file.saveTo(name);
+      _toast('Downloaded $name');
+      return;
+    }
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android || TargetPlatform.iOS:
+        final box = context.findRenderObject() as RenderBox?;
+        final origin =
+            box == null ? null : box.localToGlobal(Offset.zero) & box.size;
+        await SharePlus.instance.share(ShareParams(
+          files: [file],
+          fileNameOverrides: const [name],
+          // required on iPad: the share popover anchors to this rect
+          sharePositionOrigin: origin ?? const Rect.fromLTWH(0, 0, 1, 1),
+        ));
+      default:
+        final location = await getSaveLocation(
+          suggestedName: name,
+          acceptedTypeGroups: const [_pdfTypeGroup],
+        );
+        if (location == null) return;
+        try {
+          await file.saveTo(location.path);
+          _toast('Saved to ${location.path}');
+        } catch (e) {
+          _toast('Save failed: $e');
+        }
     }
   }
 

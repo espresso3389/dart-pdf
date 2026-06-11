@@ -388,3 +388,23 @@ is cumulative, not a delta; widget tests can't reproduce the lazy-list
 estimate drift (animateTo lays pages out continuously, so the
 zoomed-search test is the regression gate for jump accuracy — it
 fails by t_y/s ≈ 240px un-fixed).
+Multi-platform example (Ben: "make sure the example runs on all
+platforms"): the example app has shells for all six platforms (ios/
+android/web/windows/linux generated with --org dev.milanko alongside
+the original macos). main.dart is dart:io-free: open uses XFile
+(readAsBytes + file.name), the type filter carries extensions +
+mimeTypes + uniformTypeIdentifiers (each platform throws without its
+field), and _saveAs branches — desktop getSaveLocation+saveTo, web
+XFile.fromData(...).saveTo (browser download), mobile share_plus
+(ShareParams files+fileNameOverrides+sharePositionOrigin; the origin
+rect is required on iPad). Demo overlays pin to slots via _slot
+(FittedBox + SizedBox at PDF-point design size) so they scale with the
+page — the counter Row overflowed its slot at fit-page scale. Verified
+builds: web, macOS, debug APK, iOS simulator. Example test gotchas:
+the example's tests derive the page rect from the viewer's fit-page
+math (viewer rect → zoom = h/(w·aspect), centered) instead of assuming
+fit-width; toolbar taps need scrollUntilVisible scoped to the
+toolbar's Scrollable (the row overflows 800px); dialog-dismiss asserts
+need two pumps (one starts the route pop, one finishes it); tests seed
+SharedPreferences.setMockInitialValues({}) since the mock store is
+process-global.

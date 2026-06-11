@@ -2,98 +2,114 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_flutter/pdf_flutter.dart';
 import 'package:pdf_viewer_example/main.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   Future<void> openDemo(WidgetTester tester) async {
+    // the mock store is process-global: start every test from defaults
+    SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const ViewerApp());
     await tester.pump();
   }
 
-  Future<void> snackbarShows(WidgetTester tester, String text) async {
-    await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text(text), findsOneWidget);
+  /// Demo pages are 612×792pt and the viewer opens fit-page, so the
+  /// on-screen page rect comes from the viewer's own fit math.
+  Rect pageRect(WidgetTester tester) {
+    final viewer = tester.getRect(find.byType(PdfViewer));
+    const aspect = 792 / 612;
+    final zoom = (viewer.height / (viewer.width * aspect)).clamp(0.0, 1.0);
+    final width = viewer.width * zoom;
+    return Rect.fromLTWH(viewer.left + (viewer.width - width) / 2, viewer.top,
+        width, width * aspect);
   }
 
-  testWidgets('rectangle tool drags out a square annotation',
-      (tester) async {
-    await openDemo(tester);
+  /// A view-space point at the given fractions of the first page.
+  Offset onPage(WidgetTester tester, double fx, double fy) {
+    final page = pageRect(tester);
+    return page.topLeft + Offset(page.width * fx, page.height * fy);
+  }
 
-    await tester.tap(find.byTooltip('Rectangle'));
+  /// Taps a toolbar button, scrolling the toolbar's own row to it first —
+  /// the full button set overflows an 800px test window, and with the
+  /// viewer in the tree there are two Scrollables to choose from.
+  Future<void> tapToolbar(WidgetTester tester, String tooltip) async {
+    final button = find.byTooltip(tooltip);
+    await tester.scrollUntilVisible(button, 100,
+        scrollable: find.descendant(
+            of: find.byType(PdfEditingToolbar),
+            matching: find.byType(Scrollable)));
+    await tester.tap(button);
     await tester.pump();
+  }
 
-    final origin = tester.getTopLeft(find.byType(PdfViewer));
-    final gesture =
-        await tester.startGesture(origin + const Offset(200, 150));
+  /// Arms the select tool and taps [position] (waiting out the viewer's
+  /// competing double-tap recognizer).
+  Future<void> selectAt(WidgetTester tester, Offset position) async {
+    await tapToolbar(tester, 'Select');
+    await tester.tapAt(position);
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+
+  /// Adds a rectangle annotation dragged out from 25% across the page and
+  /// returns its view-space center, ready to be selected.
+  Future<Offset> addRectangle(WidgetTester tester) async {
+    await tapToolbar(tester, 'Rectangle');
+    final start = onPage(tester, 0.25, 0.25);
+    final gesture = await tester.startGesture(start);
     await gesture.moveBy(const Offset(30, 20)); // past the drag slop
     await tester.pump();
-    await gesture.moveBy(const Offset(90, 60));
+    await gesture.moveBy(const Offset(70, 50));
     await tester.pump();
     await gesture.up();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400)); // revision reload
+    return start + const Offset(50, 35);
+  }
 
-    await snackbarShows(tester, 'Rectangle added');
-  });
-
-  testWidgets('note tool prompts for text and places a note',
-      (tester) async {
+  testWidgets('rectangle tool drags out an annotation', (tester) async {
     await openDemo(tester);
+    final center = await addRectangle(tester);
 
-    await tester.tap(find.byTooltip('Note'));
-    await tester.pump();
-
-    final origin = tester.getTopLeft(find.byType(PdfViewer));
-    await tester.tapAt(origin + const Offset(300, 200));
-    // single taps wait out the viewer's competing double-tap recognizer
-    await tester.pump(const Duration(milliseconds: 350));
-    await tester.pump(const Duration(milliseconds: 50));
-
-    expect(find.text('New note'), findsOneWidget); // the dialog
-    await tester.enterText(find.byType(TextField).last, 'A test note');
-    await tester.tap(find.text('Add'));
-    await tester.pump();
-
-    await snackbarShows(tester, 'Note added');
+    // committed straight to the document: the select tool finds it
+    await selectAt(tester, center);
+    expect(find.byTooltip('Delete annotation'), findsOneWidget);
   });
 
-  /// Adds a rectangle annotation at (200,150)-(320,230) in view space and
-  /// returns its center, ready to be selected.
-  Future<Offset> addRectangle(WidgetTester tester) async {
-    await tester.tap(find.byTooltip('Rectangle'));
-    await tester.pump();
-    final origin = tester.getTopLeft(find.byType(PdfViewer));
-    final gesture =
-        await tester.startGesture(origin + const Offset(200, 150));
-    await gesture.moveBy(const Offset(30, 20));
-    await tester.pump();
-    await gesture.moveBy(const Offset(90, 60));
-    await tester.pump();
-    await gesture.up();
-    await tester.pump(const Duration(milliseconds: 400)); // snackbar + reload
-    return origin + const Offset(260, 190);
-  }
+  testWidgets('note tool prompts for text and places a note', (tester) async {
+    await openDemo(tester);
+    await tapToolbar(tester, 'Note');
 
-  Future<void> selectAt(WidgetTester tester, Offset center) async {
-    await tester.tap(find.byTooltip('Select annotation'));
-    await tester.pump();
-    await tester.tapAt(center);
+    final position = onPage(tester, 0.4, 0.3);
+    await tester.tapAt(position);
     await tester.pump(const Duration(milliseconds: 350));
     await tester.pump(const Duration(milliseconds: 50));
-  }
 
-  testWidgets('select tool picks an annotation and deletes it',
-      (tester) async {
+    expect(find.byType(AlertDialog), findsOneWidget); // the text prompt
+    await tester.enterText(find.byType(TextField).last, 'A test note');
+    await tester.tap(find.text('OK'));
+    // one frame starts the route pop, the next finishes its transition
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(AlertDialog), findsNothing);
+
+    // the note exists: selecting its icon (20pt, hung down-right of the
+    // tap point) surfaces the annotation buttons
+    final s = pageRect(tester).width / 612;
+    await selectAt(tester, position + Offset(10 * s, 10 * s));
+    expect(find.byTooltip('Delete annotation'), findsOneWidget);
+    expect(find.byTooltip('Edit annotation text'), findsOneWidget);
+  });
+
+  testWidgets('select tool picks an annotation and deletes it', (tester) async {
     await openDemo(tester);
     final center = await addRectangle(tester);
     await selectAt(tester, center);
 
-    final delete = find.byTooltip('Delete annotation');
-    expect(delete, findsOneWidget); // selection chrome buttons appeared
-    await tester.tap(delete);
-    await tester.pump();
+    expect(find.byTooltip('Delete annotation'), findsOneWidget);
+    await tapToolbar(tester, 'Delete annotation');
+    expect(find.byTooltip('Delete annotation'), findsNothing);
 
-    await snackbarShows(tester, 'Annotation deleted');
     // tapping the same spot again selects nothing
-    await tester.pump(const Duration(seconds: 2)); // let the snackbar pass
     await tester.tapAt(center);
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byTooltip('Delete annotation'), findsNothing);
@@ -115,56 +131,53 @@ void main() {
     await gesture.moveBy(const Offset(20, 15));
     await tester.pump();
     await gesture.up();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
-    await snackbarShows(tester, 'Annotation moved');
-    // the selection followed the annotation: its shifted center hits it
-    await tester.pump(const Duration(seconds: 2));
-    await tester.tapAt(center + const Offset(40, 30));
+    // the move landed: tapping the shifted center hits the annotation
+    await tester.tapAt(center + const Offset(59, 30));
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byTooltip('Delete annotation'), findsOneWidget);
   });
 
-  testWidgets('note text can be edited through the selection',
-      (tester) async {
+  testWidgets('note text can be edited through the selection', (tester) async {
     await openDemo(tester);
 
     // place a note
-    await tester.tap(find.byTooltip('Note'));
-    await tester.pump();
-    final origin = tester.getTopLeft(find.byType(PdfViewer));
-    await tester.tapAt(origin + const Offset(300, 200));
+    await tapToolbar(tester, 'Note');
+    final position = onPage(tester, 0.45, 0.35);
+    await tester.tapAt(position);
     await tester.pump(const Duration(milliseconds: 350));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.enterText(find.byType(TextField).last, 'first draft');
-    await tester.tap(find.text('Add'));
+    await tester.tap(find.text('OK'));
     await tester.pump(const Duration(milliseconds: 400));
 
-    // notes hang their 20pt icon down-right of the tap point
-    await selectAt(tester, origin + const Offset(310, 210));
-    final edit = find.byTooltip('Edit annotation text');
-    expect(edit, findsOneWidget);
-    await tester.tap(edit);
+    final s = pageRect(tester).width / 612;
+    await selectAt(tester, position + Offset(10 * s, 10 * s));
+    expect(find.byTooltip('Edit annotation text'), findsOneWidget);
+    await tapToolbar(tester, 'Edit annotation text');
     await tester.pump();
 
     expect(find.widgetWithText(TextField, 'first draft'), findsOneWidget);
     await tester.enterText(find.byType(TextField).last, 'second draft');
-    await tester.tap(find.text('Add'));
-    await tester.pump();
+    await tester.tap(find.text('OK'));
+    await tester.pump(const Duration(milliseconds: 400));
 
-    await snackbarShows(tester, 'Annotation updated');
+    // the selection survived the rewrite: reopening shows the new text
+    await tapToolbar(tester, 'Edit annotation text');
+    await tester.pump();
+    expect(find.widgetWithText(TextField, 'second draft'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
   });
 
   testWidgets('draw tool collects strokes and the check commits them',
       (tester) async {
     await openDemo(tester);
+    await tapToolbar(tester, 'Draw');
 
-    await tester.tap(find.byTooltip('Draw'));
-    await tester.pump();
-
-    final origin = tester.getTopLeft(find.byType(PdfViewer));
-    final gesture =
-        await tester.startGesture(origin + const Offset(150, 250));
+    final start = onPage(tester, 0.3, 0.5);
+    final gesture = await tester.startGesture(start);
     await gesture.moveBy(const Offset(25, 10));
     await tester.pump();
     await gesture.moveBy(const Offset(40, -20));
@@ -173,11 +186,12 @@ void main() {
     await tester.pump();
 
     // a pending stroke surfaces the commit/discard buttons
-    final commit = find.byTooltip('Add ink annotation');
-    expect(commit, findsOneWidget);
-    await tester.tap(commit);
-    await tester.pump();
+    expect(find.byTooltip('Add ink annotation'), findsOneWidget);
+    await tapToolbar(tester, 'Add ink annotation');
+    expect(find.byTooltip('Add ink annotation'), findsNothing);
 
-    await snackbarShows(tester, 'Ink annotation added');
+    // committed: the select tool finds the stroke
+    await selectAt(tester, start + const Offset(30, 0));
+    expect(find.byTooltip('Delete annotation'), findsOneWidget);
   });
 }

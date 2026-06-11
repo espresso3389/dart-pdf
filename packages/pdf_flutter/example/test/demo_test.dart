@@ -2,28 +2,40 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_flutter/pdf_flutter.dart';
 import 'package:pdf_viewer_example/main.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   // the app opens the interactive demo on launch
   Future<void> openDemo(WidgetTester tester) async {
+    // the mock store is process-global: start every test from defaults
+    SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const ViewerApp());
     await tester.pump();
   }
 
-  // demo page is 612pt wide, shown 800px wide in the 800x600 test viewport
-  const s = 800 / 612;
+  /// Demo pages are 612×792pt and the viewer opens fit-page (the whole
+  /// page visible, centered horizontally), so the on-screen page rect is
+  /// derived from the viewer's own fit math — not assumed fit-width.
+  Rect pageRect(WidgetTester tester) {
+    final viewer = tester.getRect(find.byType(PdfViewer));
+    const aspect = 792 / 612;
+    final zoom = (viewer.height / (viewer.width * aspect)).clamp(0.0, 1.0);
+    final width = viewer.width * zoom;
+    return Rect.fromLTWH(viewer.left + (viewer.width - width) / 2, viewer.top,
+        width, width * aspect);
+  }
 
   /// Taps a point given in page 1's PDF coordinates.
   Future<void> tapOnPage(WidgetTester tester, double x, double y) async {
-    final origin = tester.getTopLeft(find.byType(PdfViewer));
-    await tester.tapAt(origin + Offset(x * s, (792 - y) * s));
+    final page = pageRect(tester);
+    final s = page.width / 612;
+    await tester.tapAt(page.topLeft + Offset(x * s, (792 - y) * s));
     // single taps wait out the competing double-tap recognizer
     await tester.pump(const Duration(milliseconds: 350));
     await tester.pump(const Duration(milliseconds: 50));
   }
 
-  testWidgets('PDF link increments the Flutter counter badge',
-      (tester) async {
+  testWidgets('PDF link increments the Flutter counter badge', (tester) async {
     await openDemo(tester);
     expect(find.text('0'), findsOneWidget); // the badge overlay
 
@@ -63,8 +75,7 @@ void main() {
     expect(find.text('1'), findsWidgets);
 
     // the note field accepts input above the page
-    await tester.enterText(
-        find.byType(TextField).last, 'typed over the PDF');
+    await tester.enterText(find.byType(TextField).last, 'typed over the PDF');
     expect(find.text('typed over the PDF'), findsOneWidget);
 
     // unmount so the clock's periodic timer is disposed before teardown

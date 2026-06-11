@@ -179,4 +179,28 @@ void main() {
     expect(saved.length, greaterThan(original.length));
     expect(saved.sublist(0, original.length), original);
   });
+
+  test('multiline: true makes a single-line field wrap', () {
+    const text = 'a value comfortably longer than the name field is wide, '
+        'so wrapping must produce several lines';
+    final doc = fill((e, f) =>
+        e.setTextValue(f.fieldNamed('name')!, text, multiline: true));
+    final field = PdfAcroForm.of(doc)!.fieldNamed('name')!;
+    expect(field.isMultiline, isTrue);
+    expect('Tj'.allMatches(widgetAppearance(doc, field)).length,
+        greaterThanOrEqualTo(2));
+  });
+
+  test('non-Latin-1 values keep /V intact and sanitize the appearance', () {
+    const text = 'checked ✓ 漢字';
+    final doc =
+        fill((e, f) => e.setTextValue(f.fieldNamed('name')!, text));
+    final field = PdfAcroForm.of(doc)!.fieldNamed('name')!;
+    // /V went out as UTF-16BE and reads back verbatim
+    expect(field.value, text);
+    // the byte-encoded appearance font can't show those glyphs: spaces
+    final content = widgetAppearance(doc, field);
+    expect(content, contains('(checked     ) Tj'));
+    expect(content, isNot(contains('?')));
+  });
 }

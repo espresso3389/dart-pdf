@@ -209,8 +209,8 @@ void main() {
       expect(run.transform.f, 720); // Td y
       expect(run.transform.a, 24); // font size on the x axis
       expect(run.transform.d, 24);
-      // 13 chars at the 0.5 em default width
-      expect(run.width, closeTo(6.5, 1e-9));
+      // built-in Helvetica AFM advances (no /Widths in the fixture font)
+      expect(run.width, closeTo(5.501, 1e-9));
     });
 
     test('TJ adjustments shift subsequent runs', () {
@@ -224,8 +224,8 @@ void main() {
       );
       expect(device.texts, hasLength(2));
       expect(device.texts[0].transform.e, 0);
-      // A advances 0.5 em * 10 = 5; adjustment -500/1000 * 10 = 5 more
-      expect(device.texts[1].transform.e, 10);
+      // A advances 667/1000 em * 10 = 6.67; adjustment -500/1000 * 10 = 5
+      expect(device.texts[1].transform.e, closeTo(11.67, 1e-9));
     });
 
     test('invisible text (Tr 3) advances but does not draw', () {
@@ -239,7 +239,8 @@ void main() {
       );
       final run = device.texts.single;
       expect(run.text, 'real');
-      expect(run.transform.e, 25); // advanced past the 5 ghost glyphs
+      // advanced past the ghost glyphs at Helvetica AFM widths
+      expect(run.transform.e, closeTo(24.46, 1e-9));
     });
   });
 

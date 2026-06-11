@@ -10,11 +10,13 @@ import 'content_elements.dart';
 import 'content_writer.dart';
 import 'document.dart';
 import 'form.dart';
+import 'image.dart';
 import 'page.dart';
 import 'rect.dart';
 
 part 'annotation_editor.dart';
 part 'content_editor.dart';
+part 'form_admin.dart';
 part 'form_editor.dart';
 part 'page_editor.dart';
 part 'signature_editor.dart';

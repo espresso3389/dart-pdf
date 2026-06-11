@@ -162,8 +162,8 @@ void main() {
   testWidgets('mouse drag selects text and copy reaches the clipboard',
       (tester) async {
     final controller = await pumpViewer(tester);
-    // fixture text 'Page 1' sits at 72,720..144,720 (24pt) on a 612-wide
-    // page filling the 800px viewport
+    // fixture text 'Page 1' sits at 72,720..148,720 (24pt, Helvetica AFM
+    // advances) on a 612-wide page filling the 800px viewport
     const scale = 800 / 612;
     Offset view(double x, double y) => Offset(x * scale, (792 - y) * scale);
 
@@ -171,7 +171,7 @@ void main() {
     // past its start so the whole string is selected
     final pageViewState = tester.state(find.byType(PdfPageView).first);
 
-    final gesture = await tester.startGesture(view(154, 720),
+    final gesture = await tester.startGesture(view(158, 720),
         kind: PointerDeviceKind.mouse);
     await gesture.moveBy(const Offset(-20, 0)); // pass the drag slop
     await tester.pump();
@@ -213,7 +213,7 @@ void main() {
     expect(controller.selectionPages, isEmpty);
     expect(controller.selectionRectsOn(0), isEmpty);
 
-    final gesture = await tester.startGesture(view(154, 720),
+    final gesture = await tester.startGesture(view(158, 720),
         kind: PointerDeviceKind.mouse);
     await gesture.moveBy(const Offset(-20, 0));
     await tester.pump();

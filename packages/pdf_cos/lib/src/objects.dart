@@ -64,8 +64,27 @@ class CosReal extends CosObject {
 class CosString extends CosObject {
   CosString(this.bytes, {this.isHex = false});
 
-  factory CosString.fromText(String text) =>
-      CosString(Uint8List.fromList(latin1.encode(text)));
+  /// Encodes a text string (§7.9.2.2): Latin-1 when every character fits
+  /// (an approximation of PDFDocEncoding), otherwise UTF-16BE with a BOM.
+  factory CosString.fromText(String text) {
+    var latin1Safe = true;
+    for (final code in text.codeUnits) {
+      if (code > 0xFF) {
+        latin1Safe = false;
+        break;
+      }
+    }
+    if (latin1Safe) return CosString(Uint8List.fromList(text.codeUnits));
+    final codes = text.codeUnits;
+    final bytes = Uint8List(2 + codes.length * 2);
+    bytes[0] = 0xFE;
+    bytes[1] = 0xFF;
+    for (var i = 0; i < codes.length; i++) {
+      bytes[2 + i * 2] = codes[i] >> 8;
+      bytes[3 + i * 2] = codes[i] & 0xFF;
+    }
+    return CosString(bytes);
+  }
 
   final Uint8List bytes;
 

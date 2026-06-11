@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:pdf_cos/pdf_cos.dart';
+import 'package:pdf_document/pdf_document.dart'
+    show helveticaWidths, helveticaBoldWidths, timesRomanWidths;
 
 import 'fonts/cff.dart';
 import 'fonts/encodings.dart';
@@ -157,6 +159,13 @@ class PdfFontInfo {
         if (trueType == null) cff = _loadCff(cos, descriptor);
         symbolic = _isSymbolic(cos, descriptor);
       }
+      // base-14 fonts may omit /Widths entirely (§9.6.2.2) — the viewer
+      // must supply the built-in metrics. Without this, every glyph fell
+      // back to a flat 500, so text measured ~15% wide and selection /
+      // extraction bounds drifted from what was painted.
+      if (widths.isEmpty && subtypeName != 'Type3') {
+        _fillStandardWidths(baseFont, widths);
+      }
     }
 
     Map<int, int>? cffCodeToGid;
@@ -179,6 +188,35 @@ class PdfFontInfo {
       type3Resources: type3Resources,
       type3Matrix: type3Matrix,
     );
+  }
+
+  /// Fills ASCII advance widths (codes 32–126) for the standard-14
+  /// families from their AFM tables. Helvetica/Arial map to the
+  /// Helvetica tables (bold variants to the bold table), Times to
+  /// Times-Roman, Courier to its uniform 600. Italic/oblique reuse the
+  /// upright widths — within a percent of the real AFMs and far closer
+  /// than the flat fallback. Symbol/ZapfDingbats keep the default.
+  static void _fillStandardWidths(String? baseFont, Map<int, double> widths) {
+    if (baseFont == null) return;
+    // strip any ABCDEF+ subset prefix
+    final plus = baseFont.indexOf('+');
+    final name = (plus >= 0 ? baseFont.substring(plus + 1) : baseFont)
+        .toLowerCase();
+    List<int>? table;
+    if (name.startsWith('helvetica') || name.startsWith('arial')) {
+      table = name.contains('bold') ? helveticaBoldWidths : helveticaWidths;
+    } else if (name.startsWith('times')) {
+      table = timesRomanWidths;
+    } else if (name.startsWith('courier')) {
+      for (var code = 32; code <= 126; code++) {
+        widths[code] = 0.6;
+      }
+      return;
+    }
+    if (table == null) return;
+    for (var i = 0; i < table.length && i < 95; i++) {
+      widths[32 + i] = table[i] / 1000;
+    }
   }
 
   /// Maps character codes to /CharProcs streams via /Encoding /Differences.

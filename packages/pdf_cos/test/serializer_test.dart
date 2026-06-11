@@ -39,6 +39,17 @@ void main() {
     expect(out, r'(a\(b\)c\\d)');
   });
 
+  test('text strings beyond Latin-1 encode as UTF-16BE with a BOM', () {
+    // Latin-1 text stays single-byte
+    expect(CosString.fromText('naïve').bytes, [0x6E, 0x61, 0xEF, 0x76, 0x65]);
+    // anything past 0xFF switches the whole string to UTF-16BE
+    const text = 'già ✓ 漢字 🎉';
+    final cos = CosString.fromText(text);
+    expect(cos.bytes[0], 0xFE);
+    expect(cos.bytes[1], 0xFF);
+    expect(cos.text, text); // round-trips through the BOM-sniffing getter
+  });
+
   test('names escape special characters', () {
     final out = String.fromCharCodes(
         CosSerializer.serialize(const CosName('Lime Green')));

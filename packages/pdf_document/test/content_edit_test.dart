@@ -272,6 +272,35 @@ void main() {
       expect(image.rawBytes, jpeg);
     });
 
+    test('a PNG stamps as a Flate image XObject with an /SMask', () {
+      // 2x2 RGBA fixture from png_test.dart: known pixels + alphas
+      final png = base64.decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAGUlEQVR4nGP4z8DwHwgb'
+          'WBgZ/jNyicr7AgA3BAUOTnqjAAAAAABJRU5ErkJggg==');
+      final doc = PdfDocument.open(buildClassicPdf());
+      final editor = PdfEditor(doc)
+        ..stampPage(
+            0,
+            (s) => s.image(PdfEmbeddableImage.decode(png),
+                x: 50, y: 60, height: 100));
+      final out = PdfDocument.open(editor.save());
+      final xobjects = out.cos.resolve(out.page(0).resources['XObject'])
+          as CosDictionary;
+      final image = out.cos.resolve(xobjects['Im1']) as CosStream;
+      expect(image.dictionary['Width'], const CosInteger(2));
+      expect(image.dictionary['Height'], const CosInteger(2));
+      expect(image.dictionary['Filter'], const CosName('FlateDecode'));
+      expect(image.dictionary['ColorSpace'], const CosName('DeviceRGB'));
+      expect(out.cos.decodeStreamData(image),
+          [255, 0, 0, 0, 255, 0, 0, 0, 255, 10, 20, 30]);
+      final smask =
+          out.cos.resolve(image.dictionary['SMask']) as CosStream;
+      expect(smask.dictionary['ColorSpace'], const CosName('DeviceGray'));
+      expect(out.cos.decodeStreamData(smask), [255, 128, 0, 77]);
+      // square pixels, height 100 → width 100
+      expect(pageText(out), contains('100 0 0 100 50 60 cm'));
+    });
+
     test('stamps compose with element deletion in one session', () {
       final doc = PdfDocument.open(buildContentPdf(richContent));
       final elements = PdfPageElements.of(doc, 0);

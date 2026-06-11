@@ -75,6 +75,47 @@ class PdfAcroForm {
     return null;
   }
 
+  /// One [PdfFormFieldInfo] per terminal field: the metadata a form
+  /// editor or template pipeline persists (name, type, page, rect)
+  /// without touching values. Lenient — malformed widgets yield
+  /// pageIndex −1 and a null rect rather than failing the whole list.
+  List<PdfFormFieldInfo> describeFields() => [
+        for (final field in fields)
+          PdfFormFieldInfo(
+            name: field.name,
+            type: field.type,
+            pageIndex: field.widgetPageIndex(0),
+            rect: field.widgetRect(0),
+          ),
+      ];
+
+  List<CosDictionary>? _pageDicts;
+
+  /// Page dictionaries by index, resolved once per form instance.
+  List<CosDictionary> get _pages => _pageDicts ??= [
+        for (var i = 0; i < document.pageCount; i++) document.page(i).dict,
+      ];
+
+  /// The page index of [widget]: its /P entry when present, otherwise
+  /// the first page whose /Annots lists it. −1 when no page claims it.
+  int _pageIndexOf(CosDictionary widget) {
+    final cos = document.cos;
+    final p = cos.resolve(widget['P']);
+    if (p is CosDictionary) {
+      for (var i = 0; i < _pages.length; i++) {
+        if (identical(_pages[i], p)) return i;
+      }
+    }
+    for (var i = 0; i < _pages.length; i++) {
+      final annots = cos.resolve(_pages[i]['Annots']);
+      if (annots is! CosArray) continue;
+      for (final item in annots.items) {
+        if (identical(cos.resolve(item), widget)) return i;
+      }
+    }
+    return -1;
+  }
+
   /// A node with /T-carrying kids is an internal node; a node whose kids
   /// are all widgets (no /T) is a terminal field (§12.7.4.2).
   void _collect(CosDictionary node, String prefix, List<PdfFormField> out,
@@ -104,6 +145,31 @@ class PdfAcroForm {
       out.add(PdfFormField._(this, node, name));
     }
   }
+}
+
+/// Persistable metadata for one terminal field — what a template editor
+/// stores about a form without reading values (see
+/// [PdfAcroForm.describeFields]).
+class PdfFormFieldInfo {
+  const PdfFormFieldInfo({
+    required this.name,
+    required this.type,
+    required this.pageIndex,
+    required this.rect,
+  });
+
+  /// Fully qualified field name.
+  final String name;
+
+  final PdfFieldType type;
+
+  /// The page showing the field's first widget, or −1 when no page
+  /// claims it (malformed or orphaned widgets).
+  final int pageIndex;
+
+  /// The first widget's rectangle in page space (bottom-left origin,
+  /// point units), or null when the widget has no parseable /Rect.
+  final PdfRect? rect;
 }
 
 /// One terminal field of the form: a value plus the widget annotations
@@ -223,9 +289,22 @@ class PdfFormField {
     return [dict];
   }
 
-  /// The rectangle of widget [index] in page space.
-  PdfRect? widgetRect(int index) =>
-      pdfRectFrom(_cos, widgets[index]['Rect']);
+  /// The rectangle of widget [index] in page space, or null when the
+  /// widget is malformed.
+  PdfRect? widgetRect(int index) {
+    final all = widgets;
+    if (index < 0 || index >= all.length) return null;
+    return pdfRectFrom(_cos, all[index]['Rect']);
+  }
+
+  /// The page index displaying widget [index]: the widget's /P entry
+  /// when it resolves to a page, otherwise the first page whose /Annots
+  /// array lists the widget. −1 when no page claims it.
+  int widgetPageIndex(int index) {
+    final all = widgets;
+    if (index < 0 || index >= all.length) return -1;
+    return form._pageIndexOf(all[index]);
+  }
 
   /// The on-state names a button's widgets define: the keys of each
   /// /AP /N state dictionary except 'Off'. A plain check box has one

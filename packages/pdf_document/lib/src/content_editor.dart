@@ -311,28 +311,29 @@ class PdfStamp {
     required double y,
     double? width,
     double? height,
+  }) =>
+      image(PdfEmbeddableImage.jpeg(jpeg),
+          x: x, y: y, width: width, height: height);
+
+  /// Places a decoded [PdfEmbeddableImage] (JPEG or PNG — including PNG
+  /// transparency) with its bottom-left corner at ([x], [y]). Sizing
+  /// follows the [jpegImage] rules.
+  void image(
+    PdfEmbeddableImage img, {
+    required double x,
+    required double y,
+    double? width,
+    double? height,
   }) {
-    final info = _jpegInfo(jpeg);
-    final w = width ?? (height == null
-        ? info.width.toDouble()
-        : height * info.width / info.height);
-    final h = height ?? w * info.height / info.width;
+    final w = width ??
+        (height == null
+            ? img.width.toDouble()
+            : height * img.width / img.height);
+    final h = height ?? w * img.height / img.width;
 
     final name = _freeName(_xobjects, 'Im');
-    _xobjects[name] = _editor._updater.addObject(CosStream(
-      CosDictionary({
-        'Type': const CosName('XObject'),
-        'Subtype': const CosName('Image'),
-        'Width': CosInteger(info.width),
-        'Height': CosInteger(info.height),
-        'ColorSpace':
-            CosName(info.components == 1 ? 'DeviceGray' : 'DeviceRGB'),
-        'BitsPerComponent': const CosInteger(8),
-        'Filter': const CosName('DCTDecode'),
-        'Length': CosInteger(jpeg.length),
-      }),
-      jpeg,
-    ));
+    _xobjects[name] = _editor._updater.addObject(
+        img.toXObject((smask) => _editor._updater.addObject(smask)));
 
     content.save();
     content.concatMatrix(w, 0, 0, h, x, y);
@@ -385,48 +386,3 @@ class PdfStamp {
   }
 }
 
-class _JpegInfo {
-  _JpegInfo(this.width, this.height, this.components);
-  final int width;
-  final int height;
-  final int components;
-}
-
-/// Reads dimensions from a JPEG's start-of-frame marker.
-_JpegInfo _jpegInfo(Uint8List bytes) {
-  if (bytes.length < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8) {
-    throw ArgumentError('not a JPEG (missing SOI marker)');
-  }
-  var p = 2;
-  while (p + 9 < bytes.length) {
-    if (bytes[p] != 0xFF) {
-      p++;
-      continue;
-    }
-    final marker = bytes[p + 1];
-    // standalone markers without a length
-    if (marker == 0xD8 || marker == 0x01 || (marker >= 0xD0 && marker <= 0xD7)) {
-      p += 2;
-      continue;
-    }
-    final length = (bytes[p + 2] << 8) | bytes[p + 3];
-    final isSof = marker >= 0xC0 &&
-        marker <= 0xCF &&
-        marker != 0xC4 &&
-        marker != 0xC8 &&
-        marker != 0xCC;
-    if (isSof) {
-      final components = bytes[p + 9];
-      if (components == 4) {
-        throw ArgumentError('CMYK JPEGs are not supported for stamping');
-      }
-      return _JpegInfo(
-        (bytes[p + 7] << 8) | bytes[p + 8],
-        (bytes[p + 5] << 8) | bytes[p + 6],
-        components,
-      );
-    }
-    p += 2 + length;
-  }
-  throw ArgumentError('no JPEG start-of-frame marker found');
-}

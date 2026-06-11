@@ -976,7 +976,13 @@ extension PdfAnnotationEditing on PdfEditor {
   ///
   /// Annotations without a paintable appearance — hidden or no-view ones,
   /// popups, and any without /AP — are left in place untouched.
-  void flattenAnnotations(int pageIndex) {
+  void flattenAnnotations(int pageIndex) =>
+      _flattenAnnotations(pageIndex, (_) => true);
+
+  /// [flattenAnnotations] restricted to annotations matching [select]
+  /// (used by [PdfFormAdmin.flattenForm] to take widgets only).
+  void _flattenAnnotations(
+      int pageIndex, bool Function(PdfAnnotation) select) {
     final cos = document.cos;
     final page = document.page(pageIndex);
 
@@ -999,6 +1005,7 @@ extension PdfAnnotationEditing on PdfEditor {
     final flattened = <CosDictionary>{};
     var index = 0;
     for (final annot in page.annotations) {
+      if (!select(annot)) continue;
       if (annot.isHidden || annot.isNoView || annot.subtype == 'Popup') {
         continue;
       }

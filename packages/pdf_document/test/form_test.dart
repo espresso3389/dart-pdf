@@ -24,6 +24,36 @@ void main() {
     expect(f.fieldNamed('size')!.type, PdfFieldType.comboBox);
   });
 
+  test('describeFields reports name, type, page, and rect per field', () {
+    final infos = form().describeFields();
+    expect([for (final i in infos) i.name],
+        ['name', 'address', 'agree', 'color', 'size', 'serial']);
+    final name = infos[0];
+    expect(name.type, PdfFieldType.text);
+    // the fixture's widgets carry no /P — the page resolves through the
+    // /Annots fallback
+    expect(name.pageIndex, 0);
+    expect(name.rect, const PdfRect(72, 700, 300, 724));
+    final color = infos[3];
+    expect(color.type, PdfFieldType.radioGroup);
+    expect(color.pageIndex, 0, reason: 'kid widget found via /Annots');
+    expect(color.rect, const PdfRect(72, 500, 92, 520));
+  });
+
+  test('a widget no page claims reports index -1', () {
+    // strip the widget from the page /Annots so it only exists in the
+    // AcroForm tree — no /P and no page lists it
+    final doc = PdfDocument.open(buildAcroFormPdf());
+    final field = PdfAcroForm.of(doc)!.fieldNamed('name')!;
+    final page = doc.page(0);
+    final annots = doc.cos.resolve(page.dict['Annots']) as CosArray;
+    annots.items.removeWhere(
+        (item) => identical(doc.cos.resolve(item), field.dict));
+    expect(field.widgetPageIndex(0), -1);
+    expect(field.widgetPageIndex(99), -1, reason: 'index out of range');
+    expect(field.widgetRect(99), isNull);
+  });
+
   test('flags surface read-only and multiline', () {
     final f = form();
     expect(f.fieldNamed('serial')!.isReadOnly, isTrue);

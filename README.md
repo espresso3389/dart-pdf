@@ -49,7 +49,13 @@ core runs on servers and in plain Dart tests.
    shapes, free text, notes, stamps), and flattening
 9. ✅ AcroForm: field model (text, check box, radio, choice), filling
    with regenerated appearances (auto-size, multiline wrap, quadding,
-   /MK decorations)
+   /MK decorations), and a full template-editing API — field metadata
+   (`describeFields`: name, type, page index, widget rect), creating
+   fields on any document, renaming, deleting, retyping
+   (`changeFieldType` rebuilds at the same spot, keeping the name),
+   image-filled push buttons (`setButtonImage` — the conventional
+   carrier for signatures and logos; JPEG or PNG with transparency),
+   and fault-tolerant whole-form flattening (`flattenForm`)
 10. ✅ Page manipulation: reorder/move, remove, merge with cross-document
     object copying (`appendPagesFrom`), and split (`extractPages` writes a
     standalone file; extracting from an encrypted document decrypts)
@@ -59,7 +65,8 @@ core runs on servers and in plain Dart tests.
     adbe.pkcs7.detached, RSA-SHA256, verified interoperable with
     OpenSSL and poppler)
 12. ✅ Content editing tiers: stamping (`stampPage` — text, shapes,
-    JPEG images over existing content), element deletion
+    JPEG and PNG images over existing content; PNG decoding is pure
+    Dart and alpha becomes a soft mask), element deletion
     (`PdfPageElements` enumerates text runs/paths/images with
     approximate bounds; `deleteElements` rewrites the stream), and text
     editing (`replaceText` — single-byte fonts, within one shown string;

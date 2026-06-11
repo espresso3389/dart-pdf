@@ -13,10 +13,55 @@ extension PdfFormFilling on PdfEditor {
   /// Sets a text field's value and regenerates its appearance: wrapped
   /// for multiline fields, auto-sized when the /DA font size is 0, and
   /// aligned per /Q quadding.
-  void setTextValue(PdfFormField field, String value) {
+  ///
+  /// [multiline] toggles the field's multiline flag (/Ff bit 13) before
+  /// the appearance regenerates — pass true to let long values wrap in
+  /// fields authored as single-line. Null leaves the flag alone.
+  ///
+  /// /V stores [value] verbatim (UTF-16BE when it leaves Latin-1); the
+  /// generated appearance replaces characters the byte-encoded
+  /// appearance fonts cannot show with spaces.
+  void setTextValue(PdfFormField field, String value, {bool? multiline}) {
     _checkFillable(field, const {PdfFieldType.text});
+    if (multiline != null && multiline != field.isMultiline) {
+      field.dict['Ff'] = CosInteger(multiline
+          ? field.flags | PdfFormField.multilineFlag
+          : field.flags & ~PdfFormField.multilineFlag);
+    }
     field.dict['V'] = CosString.fromText(value);
     _regenerateVariableText(field, value);
+    _finishFieldEdit(field);
+  }
+
+  /// Fills a push-button field with an image (the conventional way PDF
+  /// forms carry signatures and logos): each widget's normal appearance
+  /// becomes the image scaled to fit its rectangle, centered, over the
+  /// widget's /MK background and border.
+  void setButtonImage(PdfFormField field, PdfEmbeddableImage image) {
+    _checkFillable(field, const {PdfFieldType.pushButton});
+    final imageRef = _updater
+        .addObject(image.toXObject((smask) => _updater.addObject(smask)));
+    for (final widget in field.widgets) {
+      final rect = pdfRectFrom(document.cos, widget['Rect']);
+      if (rect == null || rect.width <= 0 || rect.height <= 0) continue;
+      final w = rect.width, h = rect.height;
+      final scale = math.min(w / image.width, h / image.height);
+      final dw = image.width * scale, dh = image.height * scale;
+
+      final writer = ContentWriter();
+      _paintWidgetDecorations(writer, widget, w, h);
+      writer
+        ..save()
+        ..concatMatrix(dw, 0, 0, dh, (w - dw) / 2, (h - dh) / 2)
+        ..drawXObject('Img0')
+        ..restore();
+
+      final form = _widgetForm(w, h, writer,
+          resources:
+              CosDictionary({'XObject': CosDictionary({'Img0': imageRef})}));
+      _setNormalAppearance(widget, form);
+      if (!identical(widget, field.dict)) _stageFormDict(field, widget);
+    }
     _finishFieldEdit(field);
   }
 
@@ -131,7 +176,18 @@ extension PdfFormFilling on PdfEditor {
   // ---------------------------------------------------------------------
   // variable text (§12.7.3.3)
 
-  void _regenerateVariableText(PdfFormField field, String text) {
+  /// The appearance fonts are byte-encoded simple fonts, so code units
+  /// past 0xFF can never reach the page — swap them for spaces (the
+  /// trax/desktop-filler convention) instead of letting the writer
+  /// emit '?'. /V keeps the original text.
+  static String sanitizeFieldText(String text) {
+    if (text.codeUnits.every((c) => c <= 0xFF)) return text;
+    return String.fromCharCodes(
+        [for (final c in text.codeUnits) c <= 0xFF ? c : 0x20]);
+  }
+
+  void _regenerateVariableText(PdfFormField field, String rawText) {
+    final text = sanitizeFieldText(rawText);
     final cos = document.cos;
     final da = _parseDefaultAppearance(field.defaultAppearance);
     final fontDict = _formFont(field.form, da.fontName);

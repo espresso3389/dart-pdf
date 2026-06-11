@@ -445,3 +445,50 @@ addPointer — moveTo somewhere first or the cursor assert reads the
 initial value; tapAt(kind: PointerDeviceKind.mouse) resolves without
 the 350ms double-tap wait (that recognizer is touch/stylus-only); the
 hover-test "empty area" points must sit inside the 800×600 viewport.
+Annotation interaction polish (session 2 of batch 2): four features.
+(1) Rotated selection chrome: `PdfAnnotation.appearanceQuad`
+(annotation.dart) — BBox corners through the form /Matrix then the
+§12.5.5 fit onto /Rect, page space, BBox order (ll lr ur ul); equals
+the rect corners for unrotated appearances. The overlay derives
+`_selectionChrome` = (base rect from quad edge lengths about the quad
+center, resting angle = view direction of the ll→lr edge,
+canvas.rotate convention) and the painter's `rotation` is now
+resting + drag delta (the ghost gets `ghostRotation` = delta only —
+its appearance already carries the resting rotation; `ghostTo` split
+from `selectionRect` for the same reason). Rotate-drag snap is on the
+TOTAL angle (`_rotateResting` captured at drag start), so rotated
+annotations snap back to square; the knob hit-test rotates its
+position (`_rotatePoint`). Resize handles are suppressed when resting
+≠ 0 (a /Rect resize would shear rotated artwork).
+(2) Post-edit flash fix: `PdfPageView.onRasterReady` fires when a
+full-page raster for the current page object lands; `_PdfViewerPage`
+(now stateful) tracks `_rastered` (false from every page-identity
+swap) and hands the overlay `rasterCurrent`. On commit the overlay
+captures an afterimage — `_commitWithGhost` (move/resize/rotate: takes
+ownership of the ghost picture, paints it at the committed rect via
+paintAnnotationDragPreview at opacity 1), `_afterShape` (rect/ellipse
+drag preview), `_afterText` (a Positioned Text mirroring the inline
+editor, pageColor-washed for existing-text edits), `_afterSignature`,
+and controller-side `committedInkOn(page)` (finishInk runs on a timer,
+so the controller keeps the strokes + the committing revision) — and
+keeps painting it until rasterCurrent goes true or the document moves
+past `_afterDocument`. Painter: `extraInk` (List of stroke sets with
+own color/width — committed ink + signature previews), `afterGhost`,
+`afterShape`; `_paintInk` is the factored stroke painter.
+(3) Ink auto-commit: `inkCommitDelay` (default 800ms, null = manual)
+— addInkStroke (re)arms a Timer firing finishInk; `beginInkStroke()`
+(called from the overlay's ink pan-start) holds it mid-stroke so slow
+drawings don't split. Toolbar check/discard buttons only show in
+manual mode (`inkAutoCommits`). finishInk/discardInk/dispose cancel.
+(4) Signature preview: `signaturePlacement(page, x, y)` exposes
+placeSignature's layout (page-space strokes, pressures, color, width);
+the overlay previews it at 0.55 alpha riding hover (mouse) or a
+press-drag (`_signatureDrag`, release places at the last position —
+taps still place as before). Test gotchas (editing_polish_test.dart):
+don't pixel-sample a selection edge midpoint (the white resize handle
+sits there); after undo the OLD raster legitimately still shows the
+undone edit (PdfPageView keeps the previous image until re-render) so
+assert the afterimage source (committedInkOn == null), not pixels; any
+touch gesture on the viewer leaves the double-tap recognizer's 40ms
+timer — end such tests with pump(400ms); an Ink annotation's rect hugs
+the strokes (pen-width padded), not the placement box.

@@ -192,7 +192,9 @@ class PdfEditingToolbar extends StatelessWidget {
                   onPressed: () =>
                       controller.fingerDrawsInk = !controller.fingerDrawsInk,
                 ),
-              if (controller.hasPendingInk) ...[
+              // with auto-commit (the default) strokes land on their own
+              // and undo covers regret — confirm buttons are manual-mode
+              if (controller.hasPendingInk && !controller.inkAutoCommits) ...[
                 IconButton(
                   icon: const Icon(Icons.check),
                   tooltip: 'Add ink annotation',

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:pdf_document/pdf_document.dart';
@@ -94,6 +96,7 @@ class PdfEditingController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _inkTimer?.cancel();
     preferences.removeListener(notifyListeners);
     super.dispose();
   }
@@ -279,6 +282,60 @@ class PdfEditingController extends ChangeNotifier {
 
   final Map<int, List<List<(double, double)>>> _ink = {};
   final Map<int, List<List<double>?>> _inkPressures = {};
+  Timer? _inkTimer;
+
+  /// How long after the last stroke the buffer auto-commits as one Ink
+  /// annotation — strokes drawn within the window aggregate (dotting an
+  /// i, crossing a t), so a multi-stroke drawing still lands as a single
+  /// annotation and a single undo step. Null restores fully manual
+  /// commits ([finishInk] — the toolbar shows its confirm buttons then).
+  Duration? inkCommitDelay = const Duration(milliseconds: 800);
+
+  /// Whether drawn strokes commit on their own ([inkCommitDelay] is set).
+  bool get inkAutoCommits => inkCommitDelay != null;
+
+  /// Holds the auto-commit while a stroke is in flight, so a slow
+  /// drawing isn't split mid-stroke. The page overlay calls this on
+  /// pen-down; the stroke's [addInkStroke] re-arms the timer.
+  void beginInkStroke() {
+    _inkTimer?.cancel();
+    _inkTimer = null;
+  }
+
+  /// The strokes of the most recent ink commit, while [document] is
+  /// still the revision they landed in — the page overlay keeps painting
+  /// them until that revision's raster is on screen, so the drawing
+  /// doesn't blink out for the render's duration.
+  ({
+    PdfDocument document,
+    Map<int, List<List<(double, double)>>> strokes,
+    Map<int, List<List<double>?>> pressures,
+    Color color,
+    double strokeWidth,
+  })? _committedInk;
+
+  /// The just-committed ink on [pageIndex] (see [_committedInk]), or
+  /// null once the document has moved past the committing revision.
+  ({
+    List<List<(double, double)>> strokes,
+    List<List<double>?> pressures,
+    Color color,
+    double strokeWidth,
+  })? committedInkOn(int pageIndex) {
+    final committed = _committedInk;
+    if (committed == null || !identical(committed.document, _document)) {
+      return null;
+    }
+    final strokes = committed.strokes[pageIndex];
+    if (strokes == null || strokes.isEmpty) return null;
+    return (
+      strokes: strokes,
+      pressures: committed.pressures[pageIndex] ??
+          List<List<double>?>.filled(strokes.length, null),
+      color: committed.color,
+      strokeWidth: committed.strokeWidth,
+    );
+  }
 
   /// Whether touch pointers draw with the ink tool. When false they
   /// scroll and zoom as usual and only stylus (and mouse) input draws —
@@ -300,7 +357,8 @@ class PdfEditingController extends ChangeNotifier {
 
   bool get hasPendingInk => _ink.values.any((s) => s.isNotEmpty);
 
-  /// Buffers one drawn stroke; [finishInk] commits the buffer.
+  /// Buffers one drawn stroke; the buffer commits on its own after
+  /// [inkCommitDelay], or through [finishInk].
   /// [pressures], when given, must hold one 0–1 value per stroke point.
   void addInkStroke(int pageIndex, List<(double, double)> stroke,
       {List<double>? pressures}) {
@@ -310,17 +368,22 @@ class PdfEditingController extends ChangeNotifier {
     _inkPressures
         .putIfAbsent(pageIndex, () => [])
         .add(pressures == null ? null : List.of(pressures));
+    _inkTimer?.cancel();
+    final delay = inkCommitDelay;
+    _inkTimer = delay == null ? null : Timer(delay, finishInk);
     notifyListeners();
   }
 
   /// Commits the buffered strokes as one Ink annotation per page.
   void finishInk() {
+    _inkTimer?.cancel();
+    _inkTimer = null;
     if (!hasPendingInk) return;
     final strokes = Map.of(_ink);
     final pressures = Map.of(_inkPressures);
     _ink.clear();
     _inkPressures.clear();
-    apply((editor) {
+    final committed = apply((editor) {
       strokes.forEach((page, pageStrokes) {
         if (pageStrokes.isNotEmpty) {
           editor.addInk(page, pageStrokes,
@@ -332,10 +395,22 @@ class PdfEditingController extends ChangeNotifier {
         }
       });
     });
+    if (committed) {
+      _committedInk = (
+        document: _document,
+        strokes: strokes,
+        pressures: pressures,
+        color: preferences.color
+            .withValues(alpha: preferences.opacity.clamp(0.0, 1.0)),
+        strokeWidth: preferences.strokeWidth,
+      );
+    }
   }
 
   /// Throws away the buffered strokes.
   void discardInk() {
+    _inkTimer?.cancel();
+    _inkTimer = null;
     if (_ink.isEmpty) return;
     _ink.clear();
     _inkPressures.clear();
@@ -419,13 +494,19 @@ class PdfEditingController extends ChangeNotifier {
 
   set signature(PdfInkSignature? value) => preferences.signature = value;
 
-  /// Stamps [signature] as an Ink annotation centered on ([x], [y]) in
-  /// page space, [width] points wide (clamped, with the center, so the
-  /// whole signature stays on the page). Keeps the signature's own ink
-  /// color and pen pressures. Returns false when none is saved.
-  bool placeSignature(int pageIndex, double x, double y, {double width = 160}) {
+  /// The layout [placeSignature] would commit for a tap at ([x], [y]):
+  /// the page-space strokes, pressures, ink color, and stroke width —
+  /// what the signature tool's live preview paints under the pointer.
+  /// Null when no signature is saved.
+  ({
+    List<List<(double, double)>> strokes,
+    List<List<double>?> pressures,
+    int color,
+    double strokeWidth,
+  })? signaturePlacement(int pageIndex, double x, double y,
+      {double width = 160}) {
     final signature = preferences.signature;
-    if (signature == null) return false;
+    if (signature == null) return null;
     final box = _page(pageIndex).cropBox;
     final aspect = signature.aspect > 0 ? signature.aspect : 2.0;
     var w = width.clamp(8.0, box.width * 0.9);
@@ -437,18 +518,32 @@ class PdfEditingController extends ChangeNotifier {
     final cx = x.clamp(box.left + w / 2, box.right - w / 2);
     final cy = y.clamp(box.bottom + h / 2, box.top - h / 2);
     final left = cx - w / 2, top = cy + h / 2;
-    final strokes = [
-      for (final stroke in signature.strokes)
-        [
-          // normalized pad space is y-down; page space is y-up
-          for (final (nx, ny) in stroke) (left + nx * w, top - ny * h)
-        ]
-    ];
-    return apply((e) => e.addInk(pageIndex, strokes,
-        color: signature.color,
-        strokeWidth: w / 75, // pen-like: ~2pt at the default width
+    return (
+      strokes: [
+        for (final stroke in signature.strokes)
+          [
+            // normalized pad space is y-down; page space is y-up
+            for (final (nx, ny) in stroke) (left + nx * w, top - ny * h)
+          ]
+      ],
+      pressures: signature.pressures,
+      color: signature.color,
+      strokeWidth: w / 75, // pen-like: ~2pt at the default width
+    );
+  }
+
+  /// Stamps [signature] as an Ink annotation centered on ([x], [y]) in
+  /// page space, [width] points wide (clamped, with the center, so the
+  /// whole signature stays on the page). Keeps the signature's own ink
+  /// color and pen pressures. Returns false when none is saved.
+  bool placeSignature(int pageIndex, double x, double y, {double width = 160}) {
+    final placement = signaturePlacement(pageIndex, x, y, width: width);
+    if (placement == null) return false;
+    return apply((e) => e.addInk(pageIndex, placement.strokes,
+        color: placement.color,
+        strokeWidth: placement.strokeWidth,
         opacity: 1,
-        pressures: signature.pressures,
+        pressures: placement.pressures,
         author: author));
   }
 

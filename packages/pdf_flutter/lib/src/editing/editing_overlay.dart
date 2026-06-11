@@ -29,6 +29,7 @@ class EditingPageOverlay extends StatefulWidget {
     required this.textPrompt,
     this.pageColor = const Color(0xFFFFFFFF),
     this.onPanViewport,
+    this.rasterCurrent = true,
   });
 
   final PdfEditingController controller;
@@ -46,9 +47,25 @@ class EditingPageOverlay extends StatefulWidget {
   /// selection co-existing in the select tool.
   final void Function(Offset delta)? onPanViewport;
 
+  /// Whether the page raster on screen already shows the controller's
+  /// current revision. While false (an edit just committed and the
+  /// re-render is in flight), the overlay keeps painting the committed
+  /// edit's preview — its afterimage — so the edit never blinks out.
+  final bool rasterCurrent;
+
   @override
   State<EditingPageOverlay> createState() => _EditingPageOverlayState();
 }
+
+/// A set of strokes the preview painter draws beyond the pending ink:
+/// committed-ink afterimages and the signature tool's live preview.
+/// Strokes are page-space; [strokeWidth] is view pixels.
+typedef _InkPaint = ({
+  List<List<(double, double)>> strokes,
+  List<List<double>?> pressures,
+  Color color,
+  double strokeWidth,
+});
 
 /// Which sides of the selection a resize handle moves: -1 left/top edge,
 /// +1 right/bottom edge, 0 leaves that axis alone. (View space, y down.)
@@ -123,9 +140,37 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   bool _viewportPanning = false;
 
   // rotate drag: the pointer's start angle about the selection center,
-  // and the current delta (view space, clockwise positive — y is down)
+  // the annotation's resting rotation when the drag started, and the
+  // current delta (view space, clockwise positive — y is down)
   double? _rotateStartAngle;
+  double _rotateResting = 0;
   double _rotateDelta = 0;
+
+  // signature tool: the pointer position the live preview rides (hover
+  // for a mouse, press-and-drag for touch), and whether a drag-place is
+  // in flight
+  Offset? _signaturePreview;
+  bool _signatureDrag = false;
+
+  // afterimage of the last commit, painted until the new revision's
+  // raster lands ([widget.rasterCurrent]) — without it the preview
+  // clears frames before the page re-renders and the edit blinks out
+  PdfDocument? _afterDocument;
+  ui.Picture? _afterGhost;
+  Rect? _afterGhostFrom;
+  Rect? _afterGhostTo;
+  double _afterGhostRotation = 0;
+  ({Rect rect, PdfEditTool tool, Color color, double strokeWidth})?
+      _afterShape;
+  ({
+    Rect rect,
+    String text,
+    PdfStandardFont font,
+    double size,
+    Color color,
+    bool washed,
+  })? _afterText;
+  _InkPaint? _afterSignature;
 
   // live drag preview: the selected annotation's appearance, rendered
   // once per (revision, selection) and drawn stretched while dragging
@@ -205,6 +250,90 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
               _geometry.toViewRect(annotation.rect)
       ];
 
+  /// The primary selection's appearance quad in view space (BBox corner
+  /// order: ll, lr, ur, ul), or null without an appearance stream.
+  List<Offset>? get _selectedViewQuad {
+    if (_controller.selectedPage != widget.pageIndex) return null;
+    final quad = _controller.selectedAnnotation?.appearanceQuad;
+    if (quad == null) return null;
+    return [for (final (x, y) in quad) _geometry.toViewOffset(x, y)];
+  }
+
+  /// The view-space rotation of [quad]'s bottom edge — the angle the
+  /// selection chrome spins by (canvas.rotate convention: clockwise
+  /// positive). Numeric noise within ~0.3° reads as unrotated.
+  static double _quadAngle(List<Offset> quad) {
+    final edge = quad[1] - quad[0];
+    if (edge.distance <= 0) return 0;
+    final angle = edge.direction;
+    return angle.abs() < 0.005 ? 0 : angle;
+  }
+
+  /// The selection chrome's box and resting rotation: the axis-aligned
+  /// view rect for an unrotated appearance, otherwise the quad's own
+  /// (pre-rotation) rectangle — the painter spins it back into place,
+  /// so the chrome hugs the rotated artwork instead of boxing its
+  /// axis-aligned bounds.
+  (Rect, double)? get _selectionChrome {
+    final selected = _selectedViewRect;
+    if (selected == null) return null;
+    final quad = _selectedViewQuad;
+    if (quad == null) return (selected, 0);
+    final angle = _quadAngle(quad);
+    if (angle == 0) return (selected, 0);
+    final center = Offset(
+        (quad[0].dx + quad[2].dx) / 2, (quad[0].dy + quad[2].dy) / 2);
+    return (
+      Rect.fromCenter(
+        center: center,
+        width: (quad[1] - quad[0]).distance,
+        height: (quad[3] - quad[0]).distance,
+      ),
+      angle,
+    );
+  }
+
+  static Offset _rotatePoint(Offset p, Offset center, double angle) {
+    final d = p - center;
+    final c = math.cos(angle), s = math.sin(angle);
+    return center + Offset(d.dx * c - d.dy * s, d.dx * s + d.dy * c);
+  }
+
+  /// Drops the afterimage (and its ghost picture, which the state owns).
+  void _clearAfterimage() {
+    _afterGhost?.dispose();
+    _afterGhost = null;
+    _afterGhostFrom = null;
+    _afterGhostTo = null;
+    _afterGhostRotation = 0;
+    _afterShape = null;
+    _afterText = null;
+    _afterSignature = null;
+    _afterDocument = null;
+  }
+
+  /// Runs [commit] and, when it produced a new revision, keeps the
+  /// current ghost painted at [to] (spun by [rotation]) as the
+  /// afterimage — the move/resize/rotate result stays visible while the
+  /// page re-renders. The ghost's ownership transfers to the afterimage;
+  /// [_ensureGhost] re-renders a fresh one for the new revision.
+  void _commitWithGhost(VoidCallback commit, {Rect? to, double rotation = 0}) {
+    final from = _selectedViewRect;
+    final ghost = _ghost;
+    final before = _controller.document;
+    commit();
+    if (identical(before, _controller.document)) return;
+    if (ghost == null || from == null || to == null) return;
+    _clearAfterimage();
+    _ghost = null;
+    _ghostKey = null;
+    _afterGhost = ghost;
+    _afterGhostFrom = from;
+    _afterGhostTo = to;
+    _afterGhostRotation = rotation;
+    _afterDocument = _controller.document;
+  }
+
   /// The selected content element's view rect when it lives on this page.
   Rect? get _selectedElementViewRect {
     if (_controller.selectedElementPage != widget.pageIndex) return null;
@@ -256,6 +385,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       ..dispose();
     _textEditText.dispose();
     _ghost?.dispose();
+    _afterGhost?.dispose();
     super.dispose();
   }
 
@@ -275,17 +405,25 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     return null;
   }
 
-  Offset _rotateHandleCenter(Rect rect) =>
-      Offset(rect.center.dx, rect.top - _rotateHandleDistance);
+  /// The rotate knob's view position: above the chrome box's top edge,
+  /// riding the annotation's resting [rotation] about the box center.
+  Offset _rotateHandleCenter(Rect rect, double rotation) => _rotatePoint(
+        Offset(rect.center.dx, rect.top - _rotateHandleDistance),
+        rect.center,
+        rotation,
+      );
 
   /// Resize handles get first claim (the top-center knob sits close),
   /// so this is only consulted after [_handleAt] misses.
-  bool _hitsRotateHandle(Rect rect, Offset position) =>
+  bool _hitsRotateHandle(Rect rect, double rotation, Offset position) =>
       _controller.canRotateSelected &&
-      (position - _rotateHandleCenter(rect)).distance <= _handleHitRadius;
+      (position - _rotateHandleCenter(rect, rotation)).distance <=
+          _handleHitRadius;
 
   /// The drag's rotation delta for the pointer at [position]: the angle
-  /// swept about the selection center, snapped near 45° multiples.
+  /// swept about the selection center. The *total* rotation (resting +
+  /// delta) snaps near 45° multiples, so a rotated annotation can snap
+  /// back to square.
   double _rotationDelta(Rect selected, Offset position) {
     var delta = (position - selected.center).direction - _rotateStartAngle!;
     while (delta > math.pi) {
@@ -294,8 +432,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     while (delta <= -math.pi) {
       delta += 2 * math.pi;
     }
-    final snapped = (delta / (math.pi / 4)).round() * (math.pi / 4);
-    return (delta - snapped).abs() <= _rotateSnapRadians ? snapped : delta;
+    final total = _rotateResting + delta;
+    final snapped = (total / (math.pi / 4)).round() * (math.pi / 4);
+    return (total - snapped).abs() <= _rotateSnapRadians
+        ? snapped - _rotateResting
+        : delta;
   }
 
   Rect _resizedRect(Rect from, _Handle handle, Offset delta) {
@@ -355,7 +496,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     if (rect == null) return;
     final text = _textEditText.text.trimRight();
     final existing = _textEditExisting;
+    final font = _textEditFont;
+    final size = _textEditSize;
+    final color = _textEditColor;
     _closeTextEditor();
+    final before = _controller.document;
     if (existing) {
       if (text.isNotEmpty && text != _controller.selectedText) {
         _controller.setSelectedText(text);
@@ -364,6 +509,19 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       _controller.addFreeText(
           widget.pageIndex, _geometry.toPageRect(rect), text);
     }
+    if (identical(before, _controller.document)) return;
+    // the editor's rendering, frozen until the new revision's raster
+    // lands — otherwise the text vanishes for the render's duration
+    _clearAfterimage();
+    _afterText = (
+      rect: rect,
+      text: text,
+      font: font,
+      size: size,
+      color: color,
+      washed: existing,
+    );
+    _afterDocument = _controller.document;
   }
 
   void _cancelTextEdit() => _closeTextEditor();
@@ -402,6 +560,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       case PdfEditTool.select:
         break; // handled by _selectPanStart above
       case PdfEditTool.ink:
+        // hold the auto-commit while this stroke is on the page
+        _controller.beginInkStroke();
         final pressure = _pointerPressure;
         setState(() {
           _activeStroke = [_geometry.toPagePoint(position)];
@@ -417,7 +577,16 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
           _dragStart = position;
           _dragCurrent = position;
         });
-      case PdfEditTool.note || PdfEditTool.content || PdfEditTool.signature:
+      case PdfEditTool.signature:
+        // press-drag-release placement: the preview rides the pointer
+        // (touch has no hover), release commits where it landed
+        if (_controller.signature != null) {
+          setState(() {
+            _signatureDrag = true;
+            _signaturePreview = position;
+          });
+        }
+      case PdfEditTool.note || PdfEditTool.content:
         break; // driven by taps
     }
   }
@@ -430,8 +599,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   void _selectPanStart(DragStartDetails details) {
     final position = details.localPosition;
     final selected = _selectedViewRect;
+    final chrome = _selectionChrome;
+    final resting = chrome?.$2 ?? 0;
     if (selected != null) {
-      final handle = _handleAt(selected, position);
+      // resizing a rotated annotation would stretch it along the page
+      // axes (§12.5.5 maps the appearance onto /Rect) — shearing the
+      // artwork — so a rotated selection moves and rotates only
+      final handle = resting == 0 ? _handleAt(selected, position) : null;
       if (handle != null) {
         setState(() {
           _resizeHandle = handle;
@@ -441,9 +615,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
         });
         return;
       }
-      if (_hitsRotateHandle(selected, position)) {
+      if (chrome != null &&
+          _hitsRotateHandle(chrome.$1, resting, position)) {
         setState(() {
           _rotateStartAngle = (position - selected.center).direction;
+          _rotateResting = resting;
           _rotateDelta = 0;
         });
         return;
@@ -493,6 +669,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       setState(() => _marqueeCurrent = position);
       return;
     }
+    if (_signatureDrag) {
+      setState(() => _signaturePreview = position);
+      return;
+    }
     if (_rotateStartAngle != null) {
       final selected = _selectedViewRect;
       if (selected == null) return;
@@ -531,6 +711,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
         : null;
     final marqueeAdd = _marqueeAdd;
     final panned = _viewportPanning;
+    final signaturePlace = _signatureDrag ? _signaturePreview : null;
     setState(() {
       _activeStroke = null;
       _activeStrokePressures = null;
@@ -546,9 +727,14 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       _marqueeCurrent = null;
       _marqueeAdd = false;
       _viewportPanning = false;
+      _signatureDrag = false;
     });
 
     if (panned) return;
+    if (signaturePlace != null) {
+      _placeSignature(signaturePlace);
+      return;
+    }
     if (marquee != null) {
       if (marquee.width < 4 && marquee.height < 4) return; // a click
       _controller.selectAnnotationsIn(
@@ -559,15 +745,21 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     if (rotating) {
       // view-space clockwise (y down) is page-space clockwise, and PDF
       // rotation is counterclockwise-positive — hence the sign flip
-      _controller.rotateSelected(-rotateDelta * 180 / math.pi);
+      _commitWithGhost(
+          () => _controller.rotateSelected(-rotateDelta * 180 / math.pi),
+          to: _selectedViewRect,
+          rotation: rotateDelta);
     } else if (resizeRect != null) {
-      _controller.resizeSelected(_geometry.toPageRect(resizeRect));
+      _commitWithGhost(
+          () => _controller.resizeSelected(_geometry.toPageRect(resizeRect)),
+          to: resizeRect);
     } else if (moveStart != null && moveCurrent != null) {
       if ((moveCurrent - moveStart).distance < 2) return; // a click
       // mapping both endpoints keeps the delta correct on rotated pages
       final (x0, y0) = _geometry.toPagePoint(moveStart);
       final (x1, y1) = _geometry.toPagePoint(moveCurrent);
-      _controller.moveSelected(x1 - x0, y1 - y0);
+      _commitWithGhost(() => _controller.moveSelected(x1 - x0, y1 - y0),
+          to: _selectedViewRect?.shift(moveCurrent - moveStart));
     } else if (stroke != null && stroke.isNotEmpty) {
       _controller.addInkStroke(widget.pageIndex, stroke,
           pressures: strokePressures);
@@ -578,17 +770,55 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
         // type into the box just dragged out, instead of a dialog
         _openTextEditor(viewRect, existing: false);
       } else {
-        _commitRect(_geometry.toPageRect(viewRect));
+        _commitRect(viewRect);
       }
     }
   }
 
-  Future<void> _commitRect(PdfRect rect) async {
+  /// Places the saved signature at the view-space [position] and keeps
+  /// its preview painted as the afterimage while the page re-renders.
+  void _placeSignature(Offset position) {
+    final (x, y) = _geometry.toPagePoint(position);
+    final placement =
+        _controller.signaturePlacement(widget.pageIndex, x, y);
+    if (placement == null) return;
+    final before = _controller.document;
+    _controller.placeSignature(widget.pageIndex, x, y);
+    if (identical(before, _controller.document)) return;
+    _clearAfterimage();
+    _afterSignature = (
+      strokes: placement.strokes,
+      pressures: placement.pressures,
+      color: Color(0xFF000000 | placement.color),
+      strokeWidth: placement.strokeWidth * _geometry.scale,
+    );
+    _afterDocument = _controller.document;
+    // the next hover re-arms the preview; touch shouldn't keep a stale one
+    _signaturePreview = null;
+  }
+
+  Future<void> _commitRect(Rect viewRect) async {
+    final rect = _geometry.toPageRect(viewRect);
     switch (_tool) {
-      case PdfEditTool.rectangle:
-        _controller.addRectangle(widget.pageIndex, rect);
-      case PdfEditTool.ellipse:
-        _controller.addEllipse(widget.pageIndex, rect);
+      case PdfEditTool.rectangle || PdfEditTool.ellipse:
+        final tool = _tool!;
+        final before = _controller.document;
+        if (tool == PdfEditTool.rectangle) {
+          _controller.addRectangle(widget.pageIndex, rect);
+        } else {
+          _controller.addEllipse(widget.pageIndex, rect);
+        }
+        if (identical(before, _controller.document)) return;
+        // the drag preview, frozen until the new revision renders
+        _clearAfterimage();
+        _afterShape = (
+          rect: viewRect,
+          tool: tool,
+          color: _controller.color
+              .withValues(alpha: _controller.opacity.clamp(0.0, 1.0)),
+          strokeWidth: _controller.strokeWidth * _geometry.scale,
+        );
+        _afterDocument = _controller.document;
       case PdfEditTool.stamp:
         final stamp = _controller.activeStamp;
         if (stamp != null) {
@@ -700,7 +930,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
         if (text == null || text.isEmpty) return;
         _controller.addNote(widget.pageIndex, x, y, text);
       case PdfEditTool.signature:
-        _controller.placeSignature(widget.pageIndex, x, y);
+        _placeSignature(details.localPosition);
       case PdfEditTool.stamp:
         // no-op without an active custom stamp (the classic flow drags)
         _controller.placeStamp(widget.pageIndex, x, y);
@@ -716,8 +946,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       cursor = SystemMouseCursors.precise;
     } else if (_selectMode) {
       final selected = _selectedViewRect;
-      final handle =
-          selected == null ? null : _handleAt(selected, event.localPosition);
+      final chrome = _selectionChrome;
+      final resting = chrome?.$2 ?? 0;
+      final handle = selected == null || resting != 0
+          ? null
+          : _handleAt(selected, event.localPosition);
       if (handle != null) {
         cursor = switch ((handle.dx, handle.dy)) {
           (0, _) => SystemMouseCursors.resizeUpDown,
@@ -725,8 +958,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
           (-1, -1) || (1, 1) => SystemMouseCursors.resizeUpLeftDownRight,
           _ => SystemMouseCursors.resizeUpRightDownLeft,
         };
-      } else if (selected != null &&
-          _hitsRotateHandle(selected, event.localPosition)) {
+      } else if (chrome != null &&
+          _hitsRotateHandle(chrome.$1, resting, event.localPosition)) {
         cursor = SystemMouseCursors.grab;
       } else if (_selectedViewRects
           .any((rect) => rect.contains(event.localPosition))) {
@@ -742,6 +975,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       }
     } else if (_tool == PdfEditTool.note) {
       cursor = SystemMouseCursors.click;
+    } else if (_tool == PdfEditTool.signature) {
+      // the live preview rides the mouse; a click commits it
+      if (_controller.signature != null &&
+          event.localPosition != _signaturePreview) {
+        setState(() => _signaturePreview = event.localPosition);
+      }
+      cursor = SystemMouseCursors.precise;
     } else if (_tool == PdfEditTool.content) {
       final (x, y) = _geometry.toPagePoint(event.localPosition);
       cursor =
@@ -765,6 +1005,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   @override
   Widget build(BuildContext context) {
     _ensureGhost();
+    // the afterimage has served once the committed revision's raster is
+    // on screen — or is stale once the document moved past that revision
+    if (_afterDocument != null &&
+        (widget.rasterCurrent ||
+            !identical(_afterDocument, _controller.document))) {
+      _clearAfterimage();
+    }
     // switching tools mid-edit commits the text, like leaving the ink tool
     if (_textEditRect != null && _tool != _textEditTool) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -774,6 +1021,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
       });
     }
     final selected = _selectedViewRect;
+    final chrome = _selectionChrome;
+    final restingRotation = chrome?.$2 ?? 0;
     final moveDelta =
         _resizeHandle == null && _moveStart != null && _moveCurrent != null
             ? _moveCurrent! - _moveStart!
@@ -790,6 +1039,37 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
     final rotating = _rotateStartAngle != null;
     final dragging =
         _resizeHandle != null || moveDelta != Offset.zero || rotating;
+    // strokes beyond the pending ink: the committed-ink afterimage (held
+    // until the new raster lands) and the signature tool's live preview
+    final committedInk = widget.rasterCurrent
+        ? null
+        : _controller.committedInkOn(widget.pageIndex);
+    _InkPaint? signaturePreview;
+    if (_signaturePreview != null && _tool == PdfEditTool.signature) {
+      final (x, y) = _geometry.toPagePoint(_signaturePreview!);
+      final placement =
+          _controller.signaturePlacement(widget.pageIndex, x, y);
+      if (placement != null) {
+        signaturePreview = (
+          strokes: placement.strokes,
+          pressures: placement.pressures,
+          color: Color(0xFF000000 | placement.color)
+              .withValues(alpha: 0.55),
+          strokeWidth: placement.strokeWidth * _geometry.scale,
+        );
+      }
+    }
+    final extraInk = <_InkPaint>[
+      if (committedInk != null)
+        (
+          strokes: committedInk.strokes,
+          pressures: committedInk.pressures,
+          color: committedInk.color,
+          strokeWidth: committedInk.strokeWidth * _geometry.scale,
+        ),
+      if (_afterSignature != null) _afterSignature!,
+      if (signaturePreview != null) signaturePreview,
+    ];
     // warm the eyedropper's raster so the first preview is instant-ish
     if (_controller.isPickingColor) unawaited(_ensureSampler());
     final preview = _controller.isPickingColor ? _pickPosition : null;
@@ -824,10 +1104,14 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
           cursor: _cursor,
           onHover: _onHover,
           onExit: (_) {
-            if (_pickPosition == null) return;
+            if (_pickPosition == null &&
+                (_signaturePreview == null || _signatureDrag)) {
+              return;
+            }
             setState(() {
               _pickPosition = null;
               _pickPreview = null;
+              if (!_signatureDrag) _signaturePreview = null;
             });
           },
           child: Stack(children: [
@@ -851,16 +1135,32 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
                       : null,
                   selectionRect: _resizeHandle != null
                       ? _resizeRect
-                      : selected?.shift(moveDelta),
+                      : chrome?.$1.shift(moveDelta),
                   extraSelectionRects: extraSelected,
                   marqueeRect: _marqueeStart != null && _marqueeCurrent != null
                       ? Rect.fromPoints(_marqueeStart!, _marqueeCurrent!)
                       : null,
                   ghost: _ghost,
                   ghostFrom: selected,
+                  ghostTo: _resizeHandle != null
+                      ? _resizeRect
+                      : selected?.shift(moveDelta),
                   dragging: dragging,
-                  rotation: rotating ? _rotateDelta : 0,
+                  rotation:
+                      restingRotation + (rotating ? _rotateDelta : 0),
+                  ghostRotation: rotating ? _rotateDelta : 0,
+                  extraInk: extraInk,
+                  afterGhost: _afterGhost != null
+                      ? (
+                          picture: _afterGhost!,
+                          from: _afterGhostFrom!,
+                          to: _afterGhostTo!,
+                          rotation: _afterGhostRotation,
+                        )
+                      : null,
+                  afterShape: _afterShape,
                   showHandles: selected != null &&
+                      restingRotation == 0 &&
                       _controller.canResizeSelected &&
                       _moveStart == null,
                   showRotateHandle: selected != null &&
@@ -871,6 +1171,31 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
                 size: Size.infinite,
               ),
             ),
+            // a just-committed text edit, frozen until the page raster
+            // catches up (same wash the inline editor painted over old
+            // renderings, so nothing shows through meanwhile)
+            if (_afterText case final after?)
+              Positioned.fromRect(
+                rect: after.rect,
+                child: IgnorePointer(
+                  child: Container(
+                    color: after.washed
+                        ? widget.pageColor.withValues(alpha: 0.92)
+                        : null,
+                    padding: EdgeInsets.all(3 * _geometry.scale),
+                    alignment: Alignment.topLeft,
+                    child: Text(
+                      after.text,
+                      style: TextStyle(
+                        color: after.color,
+                        fontSize: after.size * _geometry.scale,
+                        height: 1.2,
+                        fontFamily: _uiFamily(after.font),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             if (preview != null)
               Positioned(
                 left: preview.dx + 14,
@@ -987,8 +1312,13 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.marqueeRect,
     required this.ghost,
     required this.ghostFrom,
+    required this.ghostTo,
     required this.dragging,
     required this.rotation,
+    required this.ghostRotation,
+    required this.extraInk,
+    required this.afterGhost,
+    required this.afterShape,
     required this.showHandles,
     required this.showRotateHandle,
     required this.elementRect,
@@ -1015,15 +1345,34 @@ class _EditingPreviewPainter extends CustomPainter {
   final Rect? marqueeRect;
 
   /// The selected annotation's appearance in page raster space, and its
-  /// resting view rect — drawn stretched onto [selectionRect] while
+  /// resting view rect — drawn stretched onto [ghostTo] while
   /// [dragging], so the user sees the move/resize result live.
   final ui.Picture? ghost;
   final Rect? ghostFrom;
+  final Rect? ghostTo;
   final bool dragging;
 
-  /// A rotate drag's current sweep (view radians, clockwise positive):
-  /// the ghost and the chrome spin by it about the selection center.
+  /// The chrome's total rotation (view radians, clockwise positive):
+  /// the annotation's resting rotation plus a rotate drag's sweep — the
+  /// selection box hugs rotated artwork instead of boxing its bounds.
   final double rotation;
+
+  /// A rotate drag's sweep alone: the ghost's appearance already carries
+  /// the resting rotation, so only the delta spins it.
+  final double ghostRotation;
+
+  /// Stroke sets beyond the pending ink: committed-ink afterimages and
+  /// the signature tool's live preview.
+  final List<_InkPaint> extraInk;
+
+  /// A just-committed move/resize/rotate, kept painted at full strength
+  /// until the new revision's raster lands.
+  final ({ui.Picture picture, Rect from, Rect to, double rotation})?
+      afterGhost;
+
+  /// A just-committed shape's drag preview, same deal.
+  final ({Rect rect, PdfEditTool tool, Color color, double strokeWidth})?
+      afterShape;
 
   final bool showHandles;
   final bool showRotateHandle;
@@ -1035,8 +1384,14 @@ class _EditingPreviewPainter extends CustomPainter {
   static const _chrome = Color(0xFF1E88E5);
   static const _elementChrome = Color(0xFFFB8C00);
 
-  @override
-  void paint(Canvas canvas, Size size) {
+  /// Paints one set of page-space ink strokes with the committed
+  /// appearance's smoothing and pressure mapping.
+  void _paintInk(
+      Canvas canvas,
+      List<List<(double, double)>> strokes,
+      List<List<double>?> pressures,
+      Color color,
+      double strokeWidth) {
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
@@ -1047,6 +1402,7 @@ class _EditingPreviewPainter extends CustomPainter {
     for (var s = 0; s < strokes.length; s++) {
       final stroke = strokes[s];
       final pressure = s < pressures.length ? pressures[s] : null;
+      if (stroke.isEmpty) continue;
       if (stroke.length == 1) {
         final p = geometry.toViewOffset(stroke.single.$1, stroke.single.$2);
         final width = pressure == null
@@ -1093,22 +1449,48 @@ class _EditingPreviewPainter extends CustomPainter {
       }
       canvas.drawPath(path, paint);
     }
+  }
+
+  void _paintShapePreview(
+      Canvas canvas, Rect rect, PdfEditTool? tool, Color color, double width) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = width
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    switch (tool) {
+      case PdfEditTool.ellipse:
+        canvas.drawOval(rect, paint);
+      case PdfEditTool.freeText || PdfEditTool.stamp:
+        canvas.drawRect(
+            rect,
+            Paint()
+              ..color = color.withValues(alpha: 0.7)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1);
+      default:
+        canvas.drawRect(rect, paint);
+    }
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    _paintInk(canvas, strokes, pressures, color, strokeWidth);
+    for (final ink in extraInk) {
+      _paintInk(canvas, ink.strokes, ink.pressures, ink.color,
+          ink.strokeWidth);
+    }
+
+    final after = afterShape;
+    if (after != null) {
+      _paintShapePreview(
+          canvas, after.rect, after.tool, after.color, after.strokeWidth);
+    }
 
     final rect = dragRect;
     if (rect != null) {
-      switch (tool) {
-        case PdfEditTool.ellipse:
-          canvas.drawOval(rect, paint);
-        case PdfEditTool.freeText || PdfEditTool.stamp:
-          canvas.drawRect(
-              rect,
-              Paint()
-                ..color = color.withValues(alpha: 0.7)
-                ..style = PaintingStyle.stroke
-                ..strokeWidth = 1);
-        default:
-          canvas.drawRect(rect, paint);
-      }
+      _paintShapePreview(canvas, rect, tool, color, strokeWidth);
     }
 
     for (final rect in extraSelectionRects) {
@@ -1133,16 +1515,30 @@ class _EditingPreviewPainter extends CustomPainter {
             ..strokeWidth = 1);
     }
 
+    final committed = afterGhost;
+    if (committed != null) {
+      // full strength: this *is* the committed result, standing in for
+      // the raster that hasn't landed yet
+      paintAnnotationDragPreview(canvas,
+          picture: committed.picture,
+          from: committed.from,
+          to: committed.to,
+          scale: geometry.scale,
+          rotation: committed.rotation,
+          opacity: 1);
+    }
+
     final selection = selectionRect;
     final ghost = this.ghost;
     final ghostFrom = this.ghostFrom;
-    if (dragging && selection != null && ghost != null && ghostFrom != null) {
+    final ghostTo = this.ghostTo;
+    if (dragging && ghostTo != null && ghost != null && ghostFrom != null) {
       paintAnnotationDragPreview(canvas,
           picture: ghost,
           from: ghostFrom,
-          to: selection,
+          to: ghostTo,
           scale: geometry.scale,
-          rotation: rotation);
+          rotation: ghostRotation);
     }
     if (selection != null) {
       canvas.save();
@@ -1202,6 +1598,27 @@ class _EditingPreviewPainter extends CustomPainter {
     }
   }
 
+  /// Cheap inequality for the extra ink sets: counts plus each set's
+  /// first point catch both new sets and a moving signature preview.
+  static bool _inkChanged(List<_InkPaint> a, List<_InkPaint> b) {
+    if (a.length != b.length) return true;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].strokes.length != b[i].strokes.length ||
+          a[i].color != b[i].color ||
+          a[i].strokeWidth != b[i].strokeWidth) {
+        return true;
+      }
+      if (a[i].strokes.isNotEmpty &&
+          b[i].strokes.isNotEmpty &&
+          (a[i].strokes.first.isEmpty != b[i].strokes.first.isEmpty ||
+              (a[i].strokes.first.isNotEmpty &&
+                  a[i].strokes.first.first != b[i].strokes.first.first))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   bool shouldRepaint(_EditingPreviewPainter oldDelegate) =>
       oldDelegate.tool != tool ||
@@ -1213,8 +1630,13 @@ class _EditingPreviewPainter extends CustomPainter {
       oldDelegate.marqueeRect != marqueeRect ||
       oldDelegate.ghost != ghost ||
       oldDelegate.ghostFrom != ghostFrom ||
+      oldDelegate.ghostTo != ghostTo ||
       oldDelegate.dragging != dragging ||
       oldDelegate.rotation != rotation ||
+      oldDelegate.ghostRotation != ghostRotation ||
+      _inkChanged(oldDelegate.extraInk, extraInk) ||
+      oldDelegate.afterGhost != afterGhost ||
+      oldDelegate.afterShape != afterShape ||
       oldDelegate.showHandles != showHandles ||
       oldDelegate.showRotateHandle != showRotateHandle ||
       oldDelegate.elementRect != elementRect ||
@@ -1230,8 +1652,10 @@ class _EditingPreviewPainter extends CustomPainter {
 /// view rect [from] onto [to], the live preview of a move/resize drag.
 /// [scale] is the view's pixels-per-point.
 ///
-/// Drawn at ~75% opacity: solid enough to judge the result, light
-/// enough to read as a preview over the still-rendered original.
+/// Drawn at ~75% [opacity] by default: solid enough to judge the
+/// result, light enough to read as a preview over the still-rendered
+/// original. The post-commit afterimage paints at 1.0 — it *is* the
+/// committed result, standing in until the new raster lands.
 ///
 /// [rotation] (view radians, clockwise positive) additionally spins the
 /// preview about [to]'s center — the rotate handle's live feedback.
@@ -1243,6 +1667,7 @@ void paintAnnotationDragPreview(
   required Rect to,
   required double scale,
   double rotation = 0,
+  double opacity = 0.75,
 }) {
   if (from.width <= 0 || from.height <= 0) return;
   final bounds = rotation == 0
@@ -1250,7 +1675,11 @@ void paintAnnotationDragPreview(
       : Rect.fromCircle(
           center: to.center,
           radius: Offset(to.width, to.height).distance / 2 + 4);
-  canvas.saveLayer(bounds, Paint()..color = const Color(0xBFFFFFFF));
+  canvas.saveLayer(
+      bounds,
+      Paint()
+        ..color = const Color(0xFFFFFFFF)
+            .withValues(alpha: opacity.clamp(0.0, 1.0)));
   if (rotation != 0) {
     canvas.translate(to.center.dx, to.center.dy);
     canvas.rotate(rotation);

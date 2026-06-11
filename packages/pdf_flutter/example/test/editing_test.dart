@@ -171,7 +171,7 @@ void main() {
     await tester.pump();
   });
 
-  testWidgets('draw tool collects strokes and the check commits them',
+  testWidgets('draw tool collects strokes and they auto-commit',
       (tester) async {
     await openDemo(tester);
     await tapToolbar(tester, 'Draw');
@@ -185,10 +185,9 @@ void main() {
     await gesture.up();
     await tester.pump();
 
-    // a pending stroke surfaces the commit/discard buttons
-    expect(find.byTooltip('Add ink annotation'), findsOneWidget);
-    await tapToolbar(tester, 'Add ink annotation');
+    // auto-commit: no confirm button — the stroke lands on its own
     expect(find.byTooltip('Add ink annotation'), findsNothing);
+    await tester.pump(const Duration(seconds: 1));
 
     // committed: the select tool finds the stroke
     await selectAt(tester, start + const Offset(30, 0));

@@ -1648,7 +1648,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   }
 }
 
-class _PdfViewerPage extends StatelessWidget {
+class _PdfViewerPage extends StatefulWidget {
   const _PdfViewerPage({
     required this.page,
     required this.index,
@@ -1678,26 +1678,50 @@ class _PdfViewerPage extends StatelessWidget {
   final void Function(Offset delta) onPanViewport;
 
   @override
+  State<_PdfViewerPage> createState() => _PdfViewerPageState();
+}
+
+class _PdfViewerPageState extends State<_PdfViewerPage> {
+  /// Whether the on-screen raster shows the current [widget.page] (this
+  /// revision). False from the moment an edit swaps the document until
+  /// PdfPageView's new render lands — the window the editing overlay
+  /// keeps its just-committed preview painted over.
+  bool _rastered = false;
+
+  @override
+  void didUpdateWidget(_PdfViewerPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.page, widget.page)) _rastered = false;
+  }
+
+  void _onRasterReady() {
+    if (_rastered || !mounted) return;
+    setState(() => _rastered = true);
+  }
+
+  @override
   Widget build(BuildContext context) {
     // the Stack is always present — toggling it when highlights appear
     // would reshape the element tree and recreate PdfPageView's state
     // (dropping its rendered image: a white flash)
-    final builder = overlayBuilder;
+    final builder = widget.overlayBuilder;
+    final editing = widget.editing;
     return Stack(children: [
       PdfPageView(
-        page: page,
-        scale: scale,
-        settleGeneration: settleGeneration,
-        pageColor: pageColor,
+        page: widget.page,
+        scale: widget.scale,
+        settleGeneration: widget.settleGeneration,
+        pageColor: widget.pageColor,
+        onRasterReady: _onRasterReady,
       ),
       Positioned.fill(
         child: CustomPaint(
           painter: _HighlightPainter(
-            box: page.cropBox,
-            rotation: page.rotation,
-            matches: matches,
-            currentMatch: currentMatch,
-            selection: selection,
+            box: widget.page.cropBox,
+            rotation: widget.page.rotation,
+            matches: widget.matches,
+            currentMatch: widget.currentMatch,
+            selection: widget.selection,
           ),
         ),
       ),
@@ -1705,31 +1729,32 @@ class _PdfViewerPage extends StatelessWidget {
         Positioned.fill(
           child: LayoutBuilder(builder: (context, constraints) {
             final geometry = PdfPageGeometry(
-              cropBox: page.cropBox,
-              rotation: page.rotation,
+              cropBox: widget.page.cropBox,
+              rotation: widget.page.rotation,
               viewSize: constraints.biggest,
             );
             return Stack(children: [
-              if (builder != null) ...builder(context, index, geometry),
+              if (builder != null) ...builder(context, widget.index, geometry),
               // the editing layer sits topmost so an armed tool's
               // gestures win over app overlays underneath
               if (editing != null)
                 ListenableBuilder(
-                  listenable: editing!,
+                  listenable: editing,
                   // mounted for an armed tool, the eyedropper, or a
                   // default-mode (mouse click) annotation selection
-                  builder: (context, _) => editing!.tool == null &&
-                          !editing!.isPickingColor &&
-                          !editing!.hasAnnotationSelection
+                  builder: (context, _) => editing.tool == null &&
+                          !editing.isPickingColor &&
+                          !editing.hasAnnotationSelection
                       ? const SizedBox.shrink()
                       : Positioned.fill(
                           child: EditingPageOverlay(
-                            controller: editing!,
-                            pageIndex: index,
+                            controller: editing,
+                            pageIndex: widget.index,
                             geometry: geometry,
-                            textPrompt: editingTextPrompt,
-                            pageColor: pageColor,
-                            onPanViewport: onPanViewport,
+                            textPrompt: widget.editingTextPrompt,
+                            pageColor: widget.pageColor,
+                            onPanViewport: widget.onPanViewport,
+                            rasterCurrent: _rastered,
                           ),
                         ),
                 ),

@@ -148,6 +148,21 @@ tool in play it selects the page's text instead). A multi-selection
 moves as a group and deletes as a group — one undo step — and while
 the select tool is armed, touch drags on empty page area still scroll
 the document, so selecting and getting around never fight each other.
+Annotation interactions have desktop-app polish. The selection chrome
+follows a rotated annotation — box, knob, and all spin with the artwork
+instead of boxing its axis-aligned bounds, and the next rotate drag
+snaps the *total* angle to 45° steps, so a rotated annotation clicks
+back to square. Edits never flash: when a commit lands, the overlay
+keeps the committed preview painted (the moved annotation's artwork at
+its new place, the just-drawn ink, the typed text) until the page's
+re-render actually reaches the screen, so nothing blinks out for a few
+frames the way most viewers do. Ink commits itself — strokes drawn in
+quick succession aggregate (dot an i, cross a t) and the drawing lands
+as one annotation, one undo step, about a second after the pen lifts;
+no confirm button (set `inkCommitDelay` to null for the old manual
+flow). And the signature tool shows the signature riding the pointer —
+hover with a mouse, press-and-drag on touch — at exactly the size and
+position a tap or release will stamp.
 Text boxes are written and edited in place, like a desktop editor:
 dragging out the free-text tool opens an inline editor right on the
 page — same font, size, and color the committed annotation will have —

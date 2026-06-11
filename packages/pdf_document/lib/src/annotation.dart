@@ -148,6 +148,61 @@ class PdfAnnotation {
     return n is CosStream ? n : null;
   }
 
+  /// The page-space corners of the normal appearance's /BBox after its
+  /// /Matrix and the §12.5.5 fit onto [rect], in BBox corner order:
+  /// lower-left, lower-right, upper-right, upper-left.
+  ///
+  /// For an appearance whose matrix carries no rotation these are just
+  /// [rect]'s corners; after [PdfEditor.rotateAnnotation] they trace the
+  /// rotated artwork, so a viewer can draw selection chrome that hugs it
+  /// instead of the axis-aligned /Rect bounds. Null without an
+  /// appearance stream or a usable /BBox.
+  List<(double x, double y)>? get appearanceQuad {
+    final form = normalAppearance;
+    if (form == null) return null;
+    final cos = document.cos;
+    final bbox = pdfRectFrom(cos, form.dictionary['BBox']);
+    if (bbox == null) return null;
+    var m = const <double>[1, 0, 0, 1, 0, 0];
+    final raw = cos.resolve(form.dictionary['Matrix']);
+    if (raw is CosArray && raw.length >= 6) {
+      final values = <double>[];
+      for (var i = 0; i < 6; i++) {
+        final n = cos.resolve(raw[i]);
+        values.add(n is CosInteger
+            ? n.value.toDouble()
+            : n is CosReal
+                ? n.value
+                : (i == 0 || i == 3 ? 1.0 : 0.0));
+      }
+      m = values;
+    }
+    final corners = [
+      for (final (x, y) in [
+        (bbox.left, bbox.bottom),
+        (bbox.right, bbox.bottom),
+        (bbox.right, bbox.top),
+        (bbox.left, bbox.top),
+      ])
+        (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5])
+    ];
+    var minX = double.infinity, minY = double.infinity;
+    var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
+    for (final (x, y) in corners) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    if (maxX - minX < 1e-9 || maxY - minY < 1e-9) return null;
+    final sx = rect.width / (maxX - minX);
+    final sy = rect.height / (maxY - minY);
+    return [
+      for (final (x, y) in corners)
+        (rect.left + (x - minX) * sx, rect.bottom + (y - minY) * sy)
+    ];
+  }
+
   static PdfGoToAction? _destAsGoTo(PdfDocument document, CosObject? raw) {
     final destination = PdfDestination.parse(document, raw);
     return destination == null ? null : PdfGoToAction(destination);

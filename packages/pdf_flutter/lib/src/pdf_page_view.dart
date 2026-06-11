@@ -21,9 +21,15 @@ class PdfPageView extends StatefulWidget {
     this.scale = 1,
     this.settleGeneration = 0,
     this.pageColor = const Color(0xFFFFFFFF),
+    this.onRasterReady,
   });
 
   final PdfPage page;
+
+  /// Called whenever a full-page raster for the current [page] object
+  /// lands on screen. Lets the editing overlay hold its just-committed
+  /// preview exactly until the new revision is actually visible.
+  final VoidCallback? onRasterReady;
 
   /// The paper color the page renders on (see
   /// [PdfPageRenderer.renderPicture]). Changing it re-renders the page.
@@ -164,6 +170,7 @@ class _PdfPageViewState extends State<PdfPageView> {
       _image?.dispose();
       _image = image;
     });
+    widget.onRasterReady?.call();
     await _updateDetail();
   }
 

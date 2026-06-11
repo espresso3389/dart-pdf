@@ -52,8 +52,10 @@ void main() {
     expect(pasted.color, 0xE53935);
     expect(pasted.borderWidth, 4);
     expect(pasted.appearanceOpacity, closeTo(0.5, 1e-6));
-    // identity-bound entries don't travel
-    expect(pasted.dict['NM'], isNull);
+    // identity-bound entries don't travel — a pasted copy is a new
+    // annotation and mints its own fresh /NM
+    expect(pasted.name, isNotNull);
+    expect(pasted.name, isNot(original.name));
     expect(pasted.dict['P'], isNull);
     // the appearance traveled byte for byte (§12.5.5 maps its BBox onto
     // the shifted /Rect, so the content needs no rewrite)

@@ -83,6 +83,18 @@ class PdfAnnotation {
     return t is CosString ? t.text : null;
   }
 
+  /// The annotation name: /NM, "a text string uniquely identifying it
+  /// among all the annotations on its page" (§12.5.2).
+  ///
+  /// The editor stamps a generated UUID on every annotation it creates
+  /// and preserves it through restyles and rewrites, which makes /NM the
+  /// durable handle for syncing annotations across documents and devices
+  /// — slots shift, names don't.
+  String? get name {
+    final nm = document.cos.resolve(dict['NM']);
+    return nm is CosString ? nm.text : null;
+  }
+
   /// The /C color as 0xRRGGBB, if present. Gray and CMYK component
   /// counts are converted; an empty array (explicit "no color") and
   /// malformed entries resolve to null.

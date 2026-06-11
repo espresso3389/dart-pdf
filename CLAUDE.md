@@ -1374,3 +1374,52 @@ BOTH; the corpus test's unopenable branch pins "CosParseException or
 pageCount == 0". Known gaps the corpus documents but doesn't close:
 predefined CJK CMaps (noembed-sjis/eucjp, issue3521 render blank),
 JBIG2 Huffman/refinement (decode-fails gracefully, image skipped).
+Batch 5, session 1 (annotation sync surface, for the trax PSPDFKit
+replacement — gaps 1-3 of the feat/pspdfkit assessment): three layers.
+(1) /NM identity: `_addAnnotation` stamps a v4 UUID /NM on every
+created annotation (single funnel for all ten creators; each creator
+gained an optional `name:` that wins over generation — pass it ONLY
+when rewriting/replaying), `PdfAnnotation.name` reads it,
+`setAnnotationName` edits in place, `nameAnnotations()` stamps all
+unnamed non-Popup/Widget/Link annots (legacy-file onboarding). In-place
+ops (restyle/resize/slice/rotate/move) keep /NM for free; the
+controller's `_rewriteSelected` (remove+re-add) passes `name:
+annotation.name` through addFreeText/addStamp/addNote. pasteAnnotation
+mints a fresh /NM when the snapshot lacks one (clipboard captures drop
+it — a paste is a NEW annotation; annotation_clipboard_test's "NM is
+null" expectation updated). (2) Serializable snapshots:
+`capture(keepName: true)` keeps /NM (sync identity), `snapshot.name`,
+`toJson()`/`fromJson()` — tagged COS encoding ({'n'} name, {'s' b64,
+'h'} string, {'d'} dict, {'d','b'} stream, natives map natively),
+version field v:1, appearance streams travel as base64 so replay is
+byte-identical. (3) Diff + replay: `pdfDiffAnnotations(before, after,
+pages:)` (annotation_sync.dart, new part of editor.dart) — keyed on
+/NM; anonymous annots key on content fingerprint (jsonEncode of
+toJson), so unchanged ones match and edited ones split into
+removed+created; cross-page moves are `modified` (page is part of the
+comparison); Popup/Widget/Link skipped (capture returns null).
+`PdfEditor.upsertAnnotation(page, snapshot)` (remove-by-name then
+paste; throws on nameless) + `removeAnnotationByName(name,
+pageIndex: hint)`. Controller: `annotationChanges` (lazy broadcast
+stream of per-revision List<PdfAnnotationChange>; apply/undo/redo all
+emit; `pages: const []` metadata edits diff ALL pages — author/contents
+change annotations without repainting), `applyRemoteChange` (one
+revision, `_applyingRemote` suppresses the echo, pages: the touched
+set, selection slots on touched pages dropped), `ensureAnnotationNames`
+(silent — baseline is the explicit hand-off), `annotationBaseline()`
+(whole state as created-changes), `findAnnotationByName`. CRITICAL
+gotcha (cost two test-debug rounds): PdfEditor MUTATES the in-memory
+COS of the document it runs on, so a diff's "before" must be a FRESH
+PdfDocument.open of the prior revision's bytes — the controller's
+`_emitAnnotationChanges` takes beforeLength and reopens the prefix
+(only when the feed has a listener); pdf_document diff tests use an
+editBytes helper for the same reason. Number formatting also differs
+between in-memory CosReal and reparsed CosInteger, so an aliased diff
+reads phantom `modified`s. Remote applies join the undo stack (byte
+prefixes can't skip revisions) — undoing past one reverts it locally
+and re-broadcasts the revert; documented, deliberate. Tests:
+pdf_document/test/annotation_sync_test.dart (17),
+pdf_flutter/test/editing_sync_test.dart (9 — incl. two piped
+controllers converging both ways). Remaining trax gaps: per-annotation
+read-only enforcement (host predicate + /F readOnly), hide-all
+annotations viewer toggle.

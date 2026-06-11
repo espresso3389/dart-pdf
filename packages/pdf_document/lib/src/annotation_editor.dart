@@ -301,6 +301,28 @@ List<PdfRect>? _axisAlignedQuads(PdfAnnotation annotation) {
   return quads;
 }
 
+/// A random version-4 UUID for an annotation's /NM. Random.secure() where
+/// the platform provides it, falling back to a time-seeded generator
+/// (identity needs uniqueness, not unpredictability).
+String _generateAnnotationName() {
+  math.Random random;
+  try {
+    random = math.Random.secure();
+  } on UnsupportedError {
+    random = math.Random(DateTime.now().microsecondsSinceEpoch);
+  }
+  final b = Uint8List(16);
+  for (var i = 0; i < 16; i++) {
+    b[i] = random.nextInt(256);
+  }
+  b[6] = (b[6] & 0x0F) | 0x40; // version 4
+  b[8] = (b[8] & 0x3F) | 0x80; // RFC 4122 variant
+  final hex =
+      [for (final byte in b) byte.toRadixString(16).padLeft(2, '0')].join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+      '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+}
+
 /// Annotation authoring (§12.5): each method creates an annotation with a
 /// generated appearance stream (/AP → /N), so the result displays the same
 /// in this renderer and in other viewers.
@@ -308,6 +330,11 @@ List<PdfRect>? _axisAlignedQuads(PdfAnnotation annotation) {
 /// Colors are `0xRRGGBB` ints; coordinates are PDF user space (origin at
 /// the page's bottom-left, y up). Annotations are staged on the editor and
 /// written by [PdfEditor.save].
+///
+/// Every creator takes an optional `name` — the /NM unique identifier
+/// (§12.5.2, see [PdfAnnotation.name]). Omitted, a UUID is generated;
+/// pass a name only to preserve identity through a rewrite or when
+/// replaying a synced annotation.
 extension PdfAnnotationEditing on PdfEditor {
   /// Adds a text-markup highlight over [quads] (one rect per marked word,
   /// line, or column slice).
@@ -321,39 +348,45 @@ extension PdfAnnotationEditing on PdfEditor {
     double opacity = 1,
     String? contents,
     String? author,
+    String? name,
   }) =>
       _addTextMarkup(
-          'Highlight', pageIndex, quads, color, opacity, contents, author);
+          'Highlight', pageIndex, quads, color, opacity, contents, author,
+          name);
 
   /// Adds an underline beneath each quad in [quads].
   void addUnderline(int pageIndex, List<PdfRect> quads,
           {int color = 0x10A010,
           double opacity = 1,
           String? contents,
-          String? author}) =>
+          String? author,
+          String? name}) =>
       _addTextMarkup(
-          'Underline', pageIndex, quads, color, opacity, contents, author);
+          'Underline', pageIndex, quads, color, opacity, contents, author, name);
 
   /// Adds a strike-out through each quad in [quads].
   void addStrikeOut(int pageIndex, List<PdfRect> quads,
           {int color = 0xD02020,
           double opacity = 1,
           String? contents,
-          String? author}) =>
+          String? author,
+          String? name}) =>
       _addTextMarkup(
-          'StrikeOut', pageIndex, quads, color, opacity, contents, author);
+          'StrikeOut', pageIndex, quads, color, opacity, contents, author, name);
 
   /// Adds a squiggly (jagged) underline beneath each quad in [quads].
   void addSquiggly(int pageIndex, List<PdfRect> quads,
           {int color = 0xD02020,
           double opacity = 1,
           String? contents,
-          String? author}) =>
+          String? author,
+          String? name}) =>
       _addTextMarkup(
-          'Squiggly', pageIndex, quads, color, opacity, contents, author);
+          'Squiggly', pageIndex, quads, color, opacity, contents, author, name);
 
   void _addTextMarkup(String subtype, int pageIndex, List<PdfRect> quads,
-      int color, double opacity, String? contents, String? author) {
+      int color, double opacity, String? contents, String? author,
+      String? name) {
     final rect = _boundsOf(quads);
     final (w, gs) = _markupContent(subtype, quads, color, opacity);
     _addAnnotation(
@@ -361,6 +394,7 @@ extension PdfAnnotationEditing on PdfEditor {
       _markupDict(subtype, rect, color, contents, author)
         ..['QuadPoints'] = _quadPoints(quads),
       _form(rect, w, resources: _resources(extGState: gs)),
+      name: name,
     );
   }
 
@@ -435,6 +469,7 @@ extension PdfAnnotationEditing on PdfEditor {
     List<List<double>?>? pressures,
     String? contents,
     String? author,
+    String? name,
   }) {
     if (strokes.isEmpty || strokes.any((s) => s.isEmpty)) {
       throw ArgumentError.value(strokes, 'strokes', 'must be non-empty');
@@ -459,6 +494,7 @@ extension PdfAnnotationEditing on PdfEditor {
         ..['BS'] = _borderStyle(strokeWidth)
         ..['InkList'] = _inkListArray(strokes),
       _form(rect, w, resources: _resources(extGState: gs)),
+      name: name,
     );
   }
 
@@ -704,9 +740,10 @@ extension PdfAnnotationEditing on PdfEditor {
     double opacity = 1,
     String? contents,
     String? author,
+    String? name,
   }) =>
       _addShape('Square', pageIndex, rect, strokeColor, strokeWidth, fillColor,
-          opacity, contents, author);
+          opacity, contents, author, name);
 
   /// Adds an ellipse annotation inscribed in [rect]. At least one of
   /// [strokeColor] and [fillColor] must be given.
@@ -719,9 +756,10 @@ extension PdfAnnotationEditing on PdfEditor {
     double opacity = 1,
     String? contents,
     String? author,
+    String? name,
   }) =>
       _addShape('Circle', pageIndex, rect, strokeColor, strokeWidth, fillColor,
-          opacity, contents, author);
+          opacity, contents, author, name);
 
   /// Adds a free-text annotation: [text] rendered directly on the page in
   /// [font] (12pt Helvetica by default), wrapped to fit [rect] and
@@ -742,6 +780,7 @@ extension PdfAnnotationEditing on PdfEditor {
     int? borderColor,
     double borderWidth = 1,
     String? author,
+    String? name,
   }) {
     final w = _freeTextContent(rect, text,
         fontSize: fontSize,
@@ -767,6 +806,7 @@ extension PdfAnnotationEditing on PdfEditor {
       pageIndex,
       dict,
       _form(rect, w, resources: _resources(font: _standardFont(font))),
+      name: name,
     );
   }
 
@@ -828,6 +868,7 @@ extension PdfAnnotationEditing on PdfEditor {
     String contents, {
     int color = 0xFFD100,
     String? author,
+    String? name,
   }) {
     const size = 20.0;
     final rect = PdfRect(x, y - size, x + size, y);
@@ -836,6 +877,7 @@ extension PdfAnnotationEditing on PdfEditor {
       _markupDict('Text', rect, color, contents, author)
         ..['Name'] = const CosName('Comment'),
       _form(rect, _noteContent(rect, color)),
+      name: name,
     );
   }
 
@@ -873,6 +915,7 @@ extension PdfAnnotationEditing on PdfEditor {
     int color = 0xC03030,
     double opacity = 1,
     String? author,
+    String? name,
   }) {
     final (w, gs) = _stampContent(rect, text, color, opacity);
     _addAnnotation(
@@ -881,6 +924,7 @@ extension PdfAnnotationEditing on PdfEditor {
       _form(rect, w,
           resources: _resources(
               extGState: gs, font: _helvetica(bold: true, name: 'HelvB'))),
+      name: name,
     );
   }
 
@@ -1047,6 +1091,41 @@ extension PdfAnnotationEditing on PdfEditor {
       dict['T'] = CosString.fromText(author);
     }
     _markAnnotationChanged(pageIndex, dict);
+  }
+
+  /// Sets [annotation]'s /NM unique name in place; null or empty removes
+  /// it. The name is sync identity ([PdfAnnotation.name]) — rewrites that
+  /// remove + re-add an annotation use this to carry it across.
+  void setAnnotationName(
+      int pageIndex, PdfAnnotation annotation, String? name) {
+    final dict = annotation.dict;
+    if (name == null || name.isEmpty) {
+      dict.entries.remove('NM');
+    } else {
+      dict['NM'] = CosString.fromText(name);
+    }
+    _markAnnotationChanged(pageIndex, dict);
+  }
+
+  /// Stamps a generated /NM on every annotation in the document that
+  /// lacks one, so a pre-existing (or foreign) file can join name-keyed
+  /// sync — call once before listening to a change feed. Popups, links,
+  /// and form widgets are skipped: they can't be captured as
+  /// [PdfAnnotationSnapshot]s, so names would buy them nothing. Returns
+  /// how many annotations were named.
+  int nameAnnotations() {
+    var named = 0;
+    for (var pageIndex = 0; pageIndex < document.pageCount; pageIndex++) {
+      for (final annotation in document.page(pageIndex).annotations) {
+        if (const {'Popup', 'Widget', 'Link'}.contains(annotation.subtype)) {
+          continue;
+        }
+        if (annotation.name != null) continue;
+        setAnnotationName(pageIndex, annotation, _generateAnnotationName());
+        named++;
+      }
+    }
+    return named;
   }
 
   /// Resizes [annotation] so its /Rect becomes [to].
@@ -1826,6 +1905,7 @@ extension PdfAnnotationEditing on PdfEditor {
     double opacity,
     String? contents,
     String? author,
+    String? name,
   ) {
     if (strokeColor == null && fillColor == null) {
       throw ArgumentError('strokeColor and fillColor are both null');
@@ -1844,7 +1924,8 @@ extension PdfAnnotationEditing on PdfEditor {
       ]);
     }
     _addAnnotation(
-        pageIndex, dict, _form(rect, w, resources: _resources(extGState: gs)));
+        pageIndex, dict, _form(rect, w, resources: _resources(extGState: gs)),
+        name: name);
   }
 
   /// The shape appearance content: a rectangle or inscribed ellipse,
@@ -1915,7 +1996,15 @@ extension PdfAnnotationEditing on PdfEditor {
 
   /// Stages [annot] (with its appearance [form]) and links it into the
   /// page's /Annots array.
-  void _addAnnotation(int pageIndex, CosDictionary annot, CosStream form) {
+  ///
+  /// Every created annotation gets an /NM (§12.5.2): [name] when given,
+  /// else a generated UUID — the durable identity that survives slot
+  /// shifts and revisions (see [PdfAnnotation.name]).
+  void _addAnnotation(int pageIndex, CosDictionary annot, CosStream form,
+      {String? name}) {
+    if (!annot.entries.containsKey('NM')) {
+      annot['NM'] = CosString.fromText(name ?? _generateAnnotationName());
+    }
     annot['AP'] = CosDictionary({'N': _updater.addObject(form)});
     final page = document.page(pageIndex);
     final annotRef = _updater.addObject(annot);

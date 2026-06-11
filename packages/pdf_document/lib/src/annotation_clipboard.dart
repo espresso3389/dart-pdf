@@ -24,8 +24,9 @@ class PdfAnnotationSnapshot {
   final PdfRect rect;
 
   /// Entries that don't travel: the page link (/P), reply threads and
-  /// popups (whose /Parent points back into the source document), the
-  /// unique name, struct-tree and optional-content wiring.
+  /// popups (whose /Parent points back into the source document),
+  /// struct-tree and optional-content wiring. /NM drops too unless
+  /// [capture] is told to keep it.
   static const _dropped = {
     'P', 'Popup', 'Parent', 'IRT', 'RT', 'NM', 'StructParent', 'OC', //
   };
@@ -35,21 +36,132 @@ class PdfAnnotationSnapshot {
   /// Popups belong to their parent annotation, and links and form
   /// widgets are interactive objects whose targets (destinations, the
   /// AcroForm field tree) cannot travel with a copy — those return null.
+  ///
+  /// [keepName] keeps the /NM unique identifier in the snapshot. The
+  /// clipboard leaves it false — a pasted copy is a new annotation and
+  /// mints its own name. Sync payloads set it true: the name *is* the
+  /// identity the snapshot travels under (see
+  /// [PdfAnnotationSyncEditing.upsertAnnotation]).
   static PdfAnnotationSnapshot? capture(
-      PdfDocument document, PdfAnnotation annotation) {
+      PdfDocument document, PdfAnnotation annotation,
+      {bool keepName = false}) {
     if (const {'Popup', 'Widget', 'Link'}.contains(annotation.subtype)) {
       return null;
     }
     final copier = _SnapshotCopier(document);
     final out = CosDictionary();
     annotation.dict.entries.forEach((key, value) {
-      if (_dropped.contains(key)) return;
+      if (_dropped.contains(key) && !(keepName && key == 'NM')) return;
       out[key] = copier.copy(value);
     });
     return PdfAnnotationSnapshot._(out, annotation.subtype, annotation.rect);
   }
 
+  /// The /NM identity captured with `keepName: true`, if any.
+  String? get name {
+    final nm = _dict['NM'];
+    return nm is CosString ? nm.text : null;
+  }
+
+  /// Encodes the snapshot as plain JSON-compatible data — appearance
+  /// streams travel as base64 — so it can live in a database or cross
+  /// the wire and come back through [fromJson] rendering byte-identically.
+  Map<String, dynamic> toJson() => {
+        'v': 1,
+        'subtype': subtype,
+        'rect': [rect.left, rect.bottom, rect.right, rect.top],
+        'dict': _encodeCos(_dict),
+      };
+
+  /// Decodes a [toJson] payload. Throws [FormatException] on malformed
+  /// or version-incompatible data.
+  static PdfAnnotationSnapshot fromJson(Map<String, dynamic> json) {
+    if (json['v'] != 1) {
+      throw FormatException('unsupported snapshot version: ${json['v']}');
+    }
+    final subtype = json['subtype'];
+    final rect = json['rect'];
+    final dict = _decodeCos(json['dict']);
+    if (subtype is! String ||
+        rect is! List ||
+        rect.length != 4 ||
+        rect.any((v) => v is! num) ||
+        dict is! CosDictionary) {
+      throw const FormatException('malformed annotation snapshot');
+    }
+    return PdfAnnotationSnapshot._(
+      dict,
+      subtype,
+      PdfRect((rect[0] as num).toDouble(), (rect[1] as num).toDouble(),
+          (rect[2] as num).toDouble(), (rect[3] as num).toDouble()),
+    );
+  }
+
   CosDictionary _materialize() => _copyDetached(_dict) as CosDictionary;
+}
+
+/// JSON encoding of a detached COS tree. Dictionaries and streams share
+/// the `d` tag (a stream adds `b`, its raw bytes); names tag `n`,
+/// strings `s` (base64 of the exact bytes, `h` marking hex strings);
+/// numbers, booleans, null, and arrays map natively.
+Object? _encodeCos(CosObject value) {
+  switch (value) {
+    case CosStream stream:
+      return {
+        'd': {
+          for (final e in stream.dictionary.entries.entries)
+            e.key: _encodeCos(e.value),
+        },
+        'b': base64Encode(stream.rawBytes),
+      };
+    case CosDictionary dict:
+      return {
+        'd': {for (final e in dict.entries.entries) e.key: _encodeCos(e.value)}
+      };
+    case CosArray array:
+      return [for (final item in array.items) _encodeCos(item)];
+    case CosName name:
+      return {'n': name.value};
+    case CosString string:
+      return {'s': base64Encode(string.bytes), if (string.isHex) 'h': true};
+    case CosInteger(:final value):
+      return value;
+    case CosReal(:final value):
+      return value;
+    case CosBoolean(:final value):
+      return value;
+    default:
+      return null; // CosNull (references can't survive capture)
+  }
+}
+
+CosObject _decodeCos(Object? value) {
+  switch (value) {
+    case null:
+      return CosNull.instance;
+    case bool b:
+      return CosBoolean(b);
+    case int i:
+      return CosInteger(i);
+    case num n:
+      return CosReal(n.toDouble());
+    case List list:
+      return CosArray([for (final item in list) _decodeCos(item)]);
+    case Map map when map.containsKey('n'):
+      return CosName(map['n'] as String);
+    case Map map when map.containsKey('s'):
+      return CosString(base64Decode(map['s'] as String),
+          isHex: map['h'] == true);
+    case Map map when map.containsKey('d'):
+      final dict = CosDictionary();
+      (map['d'] as Map).forEach((key, item) {
+        dict[key as String] = _decodeCos(item);
+      });
+      final bytes = map['b'];
+      return bytes is String ? CosStream(dict, base64Decode(bytes)) : dict;
+    default:
+      throw FormatException('malformed snapshot node: $value');
+  }
 }
 
 /// Pure structural copy of an already-detached tree (no references to
@@ -147,6 +259,11 @@ extension PdfAnnotationClipboard on PdfEditor {
   void pasteAnnotation(int pageIndex, PdfAnnotationSnapshot snapshot,
       {double dx = 0, double dy = 0}) {
     final dict = snapshot._materialize();
+    // pasted copies are new annotations and get a fresh identity; a
+    // sync snapshot captured with keepName pastes under its own /NM
+    if (dict['NM'] is! CosString) {
+      dict['NM'] = CosString.fromText(_generateAnnotationName());
+    }
     final rect = snapshot.rect;
     dict['Rect'] = _rectArray(PdfRect(
       rect.left + dx,

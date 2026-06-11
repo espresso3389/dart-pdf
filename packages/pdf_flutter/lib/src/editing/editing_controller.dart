@@ -116,6 +116,7 @@ class PdfEditingController extends ChangeNotifier {
   void dispose() {
     _inkTimer?.cancel();
     _flashTimer?.cancel();
+    _changeFeed?.close();
     preferences.removeListener(notifyListeners);
     super.dispose();
   }
@@ -175,17 +176,23 @@ class PdfEditingController extends ChangeNotifier {
 
   void undo() {
     if (!canUndo) return;
+    final beforeLength = _revisions[_cursor];
+    final pages = _revisionPages[_cursor];
     // reverting revision N un-renders exactly the pages N touched
-    _bumpRenderStamps(_revisionPages[_cursor]);
+    _bumpRenderStamps(pages);
     _cursor--;
     _reopen();
+    _emitAnnotationChanges(beforeLength, pages);
   }
 
   void redo() {
     if (!canRedo) return;
+    final beforeLength = _revisions[_cursor];
     _cursor++;
-    _bumpRenderStamps(_revisionPages[_cursor]);
+    final pages = _revisionPages[_cursor];
+    _bumpRenderStamps(pages);
     _reopen();
+    _emitAnnotationChanges(beforeLength, pages);
   }
 
   void _reopen() {
@@ -210,6 +217,7 @@ class PdfEditingController extends ChangeNotifier {
     edit(editor);
     if (!editor.hasChanges) return false;
     final saved = editor.save();
+    final beforeLength = _revisions[_cursor];
     final touched = pages == null ? null : Set<int>.unmodifiable(pages);
     _revisions.removeRange(_cursor + 1, _revisions.length);
     _revisionPages.removeRange(_cursor + 1, _revisionPages.length);
@@ -229,8 +237,146 @@ class PdfEditingController extends ChangeNotifier {
           if (_annotationAt(slot) != null) slot
       ]);
     _invalidateElements();
+    _emitAnnotationChanges(beforeLength, touched);
     notifyListeners();
     return true;
+  }
+
+  // ---------------------------------------------------------------------
+  // annotation sync (the change feed and its replay half)
+
+  StreamController<List<PdfAnnotationChange>>? _changeFeed;
+  bool _applyingRemote = false;
+
+  /// A live feed of annotation diffs: after every edit, undo, and redo,
+  /// one batch of [PdfAnnotationChange]s describing what happened to the
+  /// document's annotations, keyed on their /NM identity
+  /// ([PdfAnnotation.name]). Nothing is computed while nobody listens.
+  ///
+  /// This is the outbound half of annotation sync: serialize each
+  /// change's snapshot ([PdfAnnotationSnapshot.toJson]) into your store
+  /// (Firestore, a server, ...) and replay batches from other devices
+  /// through [applyRemoteChange] — remote applies don't re-emit, so
+  /// there is no echo to suppress.
+  ///
+  /// Caveats: open pre-existing documents with [ensureAnnotationNames] +
+  /// [annotationBaseline] so every annotation has a durable identity
+  /// first, and remember that remote applies join the revision (undo)
+  /// stack — undoing past one reverts it locally and broadcasts the
+  /// revert as a local change.
+  Stream<List<PdfAnnotationChange>> get annotationChanges =>
+      (_changeFeed ??= StreamController.broadcast()).stream;
+
+  /// Diffs the revision that was [beforeLength] bytes long against the
+  /// current document and emits the result. The before state reopens
+  /// from its bytes (a prefix of the live buffer): the editor mutates
+  /// the in-memory COS of the document it ran on, so the pre-edit
+  /// [PdfDocument] object is already contaminated with the edit.
+  void _emitAnnotationChanges(int beforeLength, Iterable<int>? pages) {
+    final feed = _changeFeed;
+    if (feed == null || !feed.hasListener || _applyingRemote) return;
+    final before = PdfDocument.open(
+        Uint8List.sublistView(_bytes, 0, beforeLength),
+        password: _password);
+    // `pages` names render-changed pages; metadata edits (contents,
+    // author) pass an empty set because nothing repaints, yet the
+    // annotation content did change — diff everything for those.
+    final diffPages = pages != null && pages.isEmpty ? null : pages;
+    final changes = pdfDiffAnnotations(before, _document, pages: diffPages);
+    if (changes.isNotEmpty) feed.add(changes);
+  }
+
+  /// Replays one change from another device or session: upserts the
+  /// snapshot of a created/modified change, removes by name for a
+  /// removed one. Returns whether the document changed.
+  ///
+  /// The edit is a normal revision (rendering, thumbnails, and undo all
+  /// see it) but is never re-emitted on [annotationChanges].
+  bool applyRemoteChange(PdfAnnotationChange change) {
+    final snapshot = change.snapshot;
+    _applyingRemote = true;
+    try {
+      switch (change.kind) {
+        case PdfAnnotationChangeKind.created:
+        case PdfAnnotationChangeKind.modified:
+          final name = snapshot?.name;
+          if (snapshot == null || name == null) return false;
+          if (change.pageIndex < 0 ||
+              change.pageIndex >= _document.pageCount) {
+            return false;
+          }
+          // the upsert may also remove the annotation's previous
+          // incarnation from the page it used to live on
+          final existing = findAnnotationByName(name);
+          final touched = {change.pageIndex, if (existing != null) existing.$1};
+          // slots on the touched pages shift under the remove + append
+          _selected.removeWhere((slot) => touched.contains(slot.$1));
+          return apply((e) => e.upsertAnnotation(change.pageIndex, snapshot),
+              pages: touched);
+        case PdfAnnotationChangeKind.removed:
+          final name = change.name;
+          if (name == null) return false;
+          final existing = findAnnotationByName(name);
+          if (existing == null) return false;
+          _selected.removeWhere((slot) => slot.$1 == existing.$1);
+          return apply((e) {
+            e.removeAnnotation(existing.$1, existing.$2);
+          }, pages: [existing.$1]);
+      }
+    } finally {
+      _applyingRemote = false;
+    }
+  }
+
+  /// Stamps a generated /NM on every annotation that lacks one (see
+  /// [PdfAnnotationEditing.nameAnnotations]) — run once when opening a
+  /// document for sync, before [annotationBaseline]. Returns how many
+  /// were named. Emits nothing: the baseline is the explicit hand-off.
+  int ensureAnnotationNames() {
+    var named = 0;
+    _applyingRemote = true; // names are identity, not an annotation edit
+    try {
+      apply((e) => named = e.nameAnnotations(), pages: const <int>[]);
+    } finally {
+      _applyingRemote = false;
+    }
+    return named;
+  }
+
+  /// The current document's whole annotation state as created-changes —
+  /// what a sync layer uploads to seed its store when a document joins
+  /// sync. Annotations without /NM (call [ensureAnnotationNames] first)
+  /// and non-captureable subtypes (popups, links, widgets) are skipped.
+  List<PdfAnnotationChange> annotationBaseline() {
+    final changes = <PdfAnnotationChange>[];
+    for (var pageIndex = 0; pageIndex < _document.pageCount; pageIndex++) {
+      for (final annotation in _page(pageIndex).annotations) {
+        if (annotation.name == null) continue;
+        final snapshot = PdfAnnotationSnapshot.capture(_document, annotation,
+            keepName: true);
+        if (snapshot == null) continue;
+        changes.add(PdfAnnotationChange(
+          kind: PdfAnnotationChangeKind.created,
+          pageIndex: pageIndex,
+          name: annotation.name,
+          snapshot: snapshot,
+        ));
+      }
+    }
+    return changes;
+  }
+
+  /// Finds the annotation whose /NM is [name] in the current revision,
+  /// or null. Pair with [PdfViewerController.showRect] to navigate to a
+  /// synced annotation.
+  (int pageIndex, PdfAnnotation annotation)? findAnnotationByName(
+      String name) {
+    for (var pageIndex = 0; pageIndex < _document.pageCount; pageIndex++) {
+      for (final annotation in _page(pageIndex).annotations) {
+        if (annotation.name == name) return (pageIndex, annotation);
+      }
+    }
+    return null;
   }
 
   // ---------------------------------------------------------------------
@@ -1537,6 +1683,7 @@ class PdfEditingController extends ChangeNotifier {
     final rect = annotation.rect;
     final color = annotation.color;
     final by = annotation.author; // a text edit doesn't change ownership
+    final nm = annotation.name; // ... nor identity (sync tracks /NM)
     _selected.clear();
     apply((e) {
       e.removeAnnotation(page, annotation);
@@ -1555,12 +1702,14 @@ class PdfEditingController extends ChangeNotifier {
               borderColor: border != null ? border.$1 : parsed?.borderColor,
               borderWidth: borderWidth ??
                   ((parsed?.borderWidth ?? 0) > 0 ? parsed!.borderWidth : 1),
-              author: by);
+              author: by,
+              name: nm);
         case 'Stamp':
-          e.addStamp(page, rect, text, color: color ?? 0xC03030, author: by);
+          e.addStamp(page, rect, text,
+              color: color ?? 0xC03030, author: by, name: nm);
         default: // 'Text'
           e.addNote(page, rect.left, rect.top, text,
-              color: color ?? 0xFFD100, author: by);
+              color: color ?? 0xFFD100, author: by, name: nm);
       }
     }, pages: [page]);
     // the rewritten annotation lands in the last /Annots slot — keep it

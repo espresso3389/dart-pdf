@@ -16,6 +16,7 @@ import 'rect.dart';
 
 part 'annotation_clipboard.dart';
 part 'annotation_editor.dart';
+part 'annotation_sync.dart';
 part 'content_editor.dart';
 part 'form_admin.dart';
 part 'form_editor.dart';

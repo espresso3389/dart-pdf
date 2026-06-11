@@ -291,6 +291,26 @@ blending, rotated artwork keeps its turn), and because the rewrite
 keeps object numbers, the selection, z-order, author, and comments
 all survive. Free text maps the palette color to its text color, with
 fill and border still on their own swatch rows.
+
+Annotations sync through any external store — Firestore, a server, a
+message bus — with first-class machinery rather than event
+reverse-engineering. Every authored annotation carries a generated
+/NM name (the spec's own unique identifier, §12.5.2) that survives
+moves, restyles, resizes, slicing, and text rewrites, so identity is
+durable where slot indices are not. `PdfAnnotationSnapshot` serializes
+to plain JSON (`toJson`/`fromJson`) with the appearance stream riding
+along, so a synced annotation renders pixel-identically on every
+device. The editing controller exposes the whole loop:
+`annotationChanges` is a stream of per-revision diffs
+(created/modified/removed, keyed by name, undo and redo included —
+nothing is computed while nobody listens), `applyRemoteChange` replays
+a change from another device as a normal revision without echoing it
+back into the stream, and `ensureAnnotationNames` +
+`annotationBaseline` onboard pre-existing documents by naming every
+annotation and handing back the full state as created-changes to seed
+the store. Two controllers piped together converge; the host's sync
+glue is a Firestore listener and a stream subscription, not a
+suppression-flag state machine.
 Fast scrolling stays smooth on heavy documents: pages flying past
 during a fling defer their first interpretation — the expensive part
 of rendering — until the scroll settles, showing the paper color

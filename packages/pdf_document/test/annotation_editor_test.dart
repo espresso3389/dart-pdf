@@ -368,6 +368,52 @@ void main() {
     expect(reopened.page(0).annotations.length, before - 1);
   });
 
+  test('bringAnnotationsToFront moves entries to the end of /Annots', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150))
+      ..addNote(0, 300, 700, 'middle')
+      ..addCircle(0, const PdfRect(250, 100, 350, 150));
+    final doc = PdfDocument.open(first.save());
+    expect([for (final a in doc.page(0).annotations) a.subtype],
+        ['Square', 'Text', 'Circle']);
+
+    final editor = PdfEditor(doc)
+      ..bringAnnotationsToFront(0, [doc.page(0).annotations.first]);
+    final reopened = PdfDocument.open(editor.save());
+    expect([for (final a in reopened.page(0).annotations) a.subtype],
+        ['Text', 'Circle', 'Square']);
+  });
+
+  test('sendAnnotationsToBack moves entries to the start, keeping order',
+      () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150))
+      ..addNote(0, 300, 700, 'middle')
+      ..addCircle(0, const PdfRect(250, 100, 350, 150));
+    final doc = PdfDocument.open(first.save());
+
+    // the middle and last move back together: relative order preserved
+    final annots = doc.page(0).annotations;
+    final editor = PdfEditor(doc)
+      ..sendAnnotationsToBack(0, [annots[1], annots[2]]);
+    final reopened = PdfDocument.open(editor.save());
+    expect([for (final a in reopened.page(0).annotations) a.subtype],
+        ['Text', 'Circle', 'Square']);
+  });
+
+  test('reordering to where an annotation already sits stages nothing', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addSquare(0, const PdfRect(100, 100, 200, 150))
+      ..addNote(0, 300, 700, 'top');
+    final doc = PdfDocument.open(first.save());
+    final annots = doc.page(0).annotations;
+
+    final editor = PdfEditor(doc)
+      ..bringAnnotationsToFront(0, [annots.last])
+      ..sendAnnotationsToBack(0, [annots.first]);
+    expect(editor.hasChanges, isFalse);
+  });
+
   test('moveAnnotation shifts rect, quad points, and ink lists', () {
     final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
       ..addHighlight(0, const [PdfRect(72, 700, 200, 712)])

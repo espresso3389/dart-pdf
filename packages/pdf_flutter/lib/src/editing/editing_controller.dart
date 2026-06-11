@@ -923,6 +923,82 @@ class PdfEditingController extends ChangeNotifier {
     }, pages: [for (final (page, _) in targets) page]);
   }
 
+  /// Whether [bringSelectedToFront] would change anything: some selected
+  /// annotation has another one above it in its page's /Annots order.
+  bool get canBringSelectedToFront => _reorderChangesSlots(toFront: true);
+
+  /// Whether [sendSelectedToBack] would change anything.
+  bool get canSendSelectedToBack => _reorderChangesSlots(toFront: false);
+
+  /// Moves the selected annotations to the top of their pages' z-order
+  /// (the end of /Annots — later entries paint on top), preserving their
+  /// relative order. One revision, one undo; the selection follows the
+  /// annotations to their new slots.
+  void bringSelectedToFront() => _reorderSelected(toFront: true);
+
+  /// Moves the selected annotations behind everything else on their
+  /// pages (the start of /Annots).
+  void sendSelectedToBack() => _reorderSelected(toFront: false);
+
+  /// Simulates the /Annots reorder slot-by-slot: unmoved entries keep
+  /// their relative order, the moved block lands at the top or bottom —
+  /// exactly what the editor does to the array, expressed on slots.
+  Map<(int, int), (int, int)> _reorderRemap({required bool toFront}) {
+    final remap = <(int, int), (int, int)>{};
+    final byPage = <int, Set<int>>{};
+    for (final (page, slot) in _selected) {
+      byPage.putIfAbsent(page, () => {}).add(slot);
+    }
+    for (final MapEntry(key: page, value: moving) in byPage.entries) {
+      final count = _page(page).annotations.length;
+      final rest = [
+        for (var i = 0; i < count; i++)
+          if (!moving.contains(i)) i
+      ];
+      final block = [
+        for (var i = 0; i < count; i++)
+          if (moving.contains(i)) i
+      ];
+      final order = toFront ? [...rest, ...block] : [...block, ...rest];
+      for (var newSlot = 0; newSlot < order.length; newSlot++) {
+        remap[(page, order[newSlot])] = (page, newSlot);
+      }
+    }
+    return remap;
+  }
+
+  bool _reorderChangesSlots({required bool toFront}) {
+    if (_selected.isEmpty) return false;
+    return _reorderRemap(toFront: toFront)
+        .entries
+        .any((entry) => entry.key != entry.value);
+  }
+
+  void _reorderSelected({required bool toFront}) {
+    if (!_reorderChangesSlots(toFront: toFront)) return;
+    final remap = _reorderRemap(toFront: toFront);
+    // resolve everything before the edit, grouped per page
+    final byPage = <int, List<PdfAnnotation>>{};
+    for (final slot in _selected) {
+      final annotation = _annotationAt(slot);
+      if (annotation != null) {
+        byPage.putIfAbsent(slot.$1, () => []).add(annotation);
+      }
+    }
+    if (byPage.isEmpty) return;
+    // remap before apply: its post-save validation reads these slots
+    for (var i = 0; i < _selected.length; i++) {
+      _selected[i] = remap[_selected[i]] ?? _selected[i];
+    }
+    apply((e) {
+      for (final MapEntry(key: page, value: annotations) in byPage.entries) {
+        toFront
+            ? e.bringAnnotationsToFront(page, annotations)
+            : e.sendAnnotationsToBack(page, annotations);
+      }
+    }, pages: byPage.keys);
+  }
+
   void clearAnnotationSelection() {
     if (_selected.isEmpty) return;
     _selected.clear();

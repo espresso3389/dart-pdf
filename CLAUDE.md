@@ -759,3 +759,36 @@ editing_text_edit_test.dart additions. Gotchas: the style menu is
 IconButton needs 1px swatch padding (2px overflowed by 2); a bare
 EditingPageOverlay mounts fine in a SizedBox for unit-style overlay
 tests (geometry built by hand, textPrompt: showPdfTextPrompt).
+Batch 3, session 3 (context menu & z-order): right-click on an
+annotation opens a context menu; z-order ops reorder /Annots (later
+entries paint on top, §12.5.2). Editor:
+`bringAnnotationsToFront`/`sendAnnotationsToBack(pageIndex, annots)`
+(annotation_editor.dart) partition the array items by dict identity
+(Set.identity — CosDictionary has no value ==) into moved/rest and
+reassemble; identical-order result stages nothing. Controller:
+`bringSelectedToFront`/`sendSelectedToBack` + `canBring…`/`canSend…`
+gates — `_reorderRemap` simulates the same partition on slot indices
+(parsed-annotations order == /Annots order restricted to parseable
+entries, so the simulation matches the editor exactly); the remap is
+applied to `_selected` BEFORE `apply()` because apply's post-save
+validation reads the slots against the new document. Whole selection
+moves in one apply (one undo), grouped per page, `pages:` named.
+Menu API (editing_menu.dart, exported): `showPdfAnnotationMenu`
+builds stock entries (front/back/delete, keys
+'pdf-annot-menu-front'/'-back'/'-delete'; z-order entries disable via
+the can-gates) + host extras from `PdfViewer.annotationMenuBuilder`
+(`PdfAnnotationMenuBuilder` → `List<PdfAnnotationMenuItem>`, shown
+below a PopupMenuDivider). `PdfAnnotationMenuRequest` snapshots the
+selection at open (slots/annotations/primary/controller) and is handed
+to every item's `onSelected` — custom items are self-contained.
+Viewer: `onSecondaryTapUp` on the main GestureDetector (the overlay's
+recognizers only claim primary, so right-click works in every mode
+incl. armed tools); the handler selects the hit annotation unless it's
+already in the selection (multi-selection survives), tool untouched.
+The example adds a conditional 'Copy text' action. Tests:
+editing_menu_test.dart (controller remap/undo/gates + widget
+right-clicks via `tapAt(kind: mouse, buttons: kSecondaryMouseButton)`)
+and annotation_editor_test.dart reorder tests. Gotcha: with every
+annotation on a page selected, ANY reorder is the identity — both
+menu entries disable; multi-select menu tests need a third,
+unselected annotation for the action to do anything.

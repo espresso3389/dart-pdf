@@ -117,6 +117,24 @@ class _ViewerScreenState extends State<ViewerScreen> {
     });
   }
 
+  /// The app's own entries in the annotation right-click menu — here a
+  /// "Copy text" action when the clicked annotation carries any.
+  List<PdfAnnotationMenuItem> _annotationMenuActions(
+      BuildContext context, PdfAnnotationMenuRequest request) {
+    final contents = request.primary?.contents;
+    if (contents == null || contents.isEmpty) return const [];
+    return [
+      PdfAnnotationMenuItem(
+        label: 'Copy text',
+        icon: Icons.copy_outlined,
+        onSelected: (request) {
+          Clipboard.setData(ClipboardData(text: contents));
+          _toast('Annotation text copied');
+        },
+      ),
+    ];
+  }
+
   void _toast(String message) {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
@@ -472,6 +490,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     onAction: _onAction,
                     pageOverlayBuilder: _isDemo ? _demoOverlays : null,
                     editing: session,
+                    annotationMenuBuilder: _annotationMenuActions,
                     pageColor: _prefs.pageColor,
                   ),
                 ),

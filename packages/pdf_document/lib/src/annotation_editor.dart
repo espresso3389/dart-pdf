@@ -477,6 +477,52 @@ extension PdfAnnotationEditing on PdfEditor {
     }
   }
 
+  /// Moves [annotations] to the end of the page's /Annots array,
+  /// preserving their relative order. Later entries paint on top
+  /// (§12.5.2's painter's model), so this brings them to the front.
+  void bringAnnotationsToFront(
+          int pageIndex, Iterable<PdfAnnotation> annotations) =>
+      _reorderAnnotations(pageIndex, annotations, toFront: true);
+
+  /// Moves [annotations] to the start of the page's /Annots array,
+  /// preserving their relative order — behind everything else.
+  void sendAnnotationsToBack(
+          int pageIndex, Iterable<PdfAnnotation> annotations) =>
+      _reorderAnnotations(pageIndex, annotations, toFront: false);
+
+  void _reorderAnnotations(int pageIndex, Iterable<PdfAnnotation> annotations,
+      {required bool toFront}) {
+    final cos = document.cos;
+    final page = document.page(pageIndex);
+    final raw = page.dict['Annots'];
+    final array = cos.resolve(raw);
+    if (array is! CosArray) return;
+    final targets = Set<CosDictionary>.identity()
+      ..addAll([for (final annotation in annotations) annotation.dict]);
+    final moved = <CosObject>[];
+    final rest = <CosObject>[];
+    for (final item in array.items) {
+      final resolved = cos.resolve(item);
+      (resolved is CosDictionary && targets.contains(resolved) ? moved : rest)
+          .add(item);
+    }
+    if (moved.isEmpty) return;
+    final reordered = toFront ? [...rest, ...moved] : [...moved, ...rest];
+    var same = true;
+    for (var i = 0; i < array.items.length && same; i++) {
+      same = identical(array.items[i], reordered[i]);
+    }
+    if (same) return;
+    array.items
+      ..clear()
+      ..addAll(reordered);
+    if (raw is CosReference) {
+      _updater.replaceObject(raw.objectNumber, array);
+    } else {
+      _updater.markChanged(page.dict);
+    }
+  }
+
   /// Translates [annotation] by ([dx], [dy]) in page space.
   ///
   /// Shifts /Rect and the absolute-coordinate entries that travel with it

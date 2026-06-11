@@ -11,6 +11,7 @@ import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 
 import 'editing/editing_controller.dart';
+import 'editing/editing_menu.dart';
 import 'editing/editing_overlay.dart';
 import 'editing/text_prompt.dart';
 import 'page_geometry.dart';
@@ -238,6 +239,7 @@ class PdfViewer extends StatefulWidget {
     this.pageOverlayBuilder,
     this.editing,
     this.editingTextPrompt,
+    this.annotationMenuBuilder,
     this.pageSpacing = 12,
     this.initialFit = PdfViewerFit.page,
     this.minZoom = 0.25,
@@ -277,6 +279,13 @@ class PdfViewer extends StatefulWidget {
   /// How the editing tools ask for annotation text (free text, notes,
   /// stamps). Defaults to [showPdfTextPrompt], a Material dialog.
   final PdfTextPrompt? editingTextPrompt;
+
+  /// Adds the app's own entries to the annotation context menu (the
+  /// right-click menu — z-order and delete come stock). Called when the
+  /// menu opens, with the selection it acts on; the custom entries
+  /// appear below a divider. Needs [editing] — without a controller
+  /// there is no context menu.
+  final PdfAnnotationMenuBuilder? annotationMenuBuilder;
 
   final double pageSpacing;
 
@@ -864,6 +873,30 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
         editing.selectAnnotationAt(point.$1, point.$2, point.$3);
       }
     }
+  }
+
+  /// Right-click (or two-finger tap): the annotation context menu. The
+  /// hit annotation joins the selection first — an already-selected one
+  /// keeps a multi-selection intact, anything else starts a fresh
+  /// selection — so the menu always acts on what's highlighted.
+  Future<void> _onSecondaryTapUp(TapUpDetails details) async {
+    final editing = widget.editing;
+    if (editing == null || editing.isPickingColor) return;
+    final point = _pagePointAt(details.localPosition);
+    if (point == null) return;
+    final (page, x, y) = point;
+    final hit = editing.selectableAnnotationAt(page, x, y);
+    if (hit == null) return;
+    if (!editing.isAnnotationSelected(page, hit.$1)) {
+      editing.selectAnnotationAt(page, x, y);
+    }
+    await showPdfAnnotationMenu(
+      context: context,
+      position: details.globalPosition,
+      controller: editing,
+      pageIndex: page,
+      customActions: widget.annotationMenuBuilder,
+    );
   }
 
   void _activate(PdfAnnotation annotation) {
@@ -1610,6 +1643,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                           onPointerUp: _onPointerUp,
                           child: GestureDetector(
                             onTapUp: _onTapUp,
+                            onSecondaryTapUp: _onSecondaryTapUp,
                             onPanStart: _onSelectionStart,
                             onPanUpdate: _onSelectionUpdate,
                             onPanEnd: _onSelectionEnd,

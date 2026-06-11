@@ -191,6 +191,16 @@ no confirm button (set `inkCommitDelay` to null for the old manual
 flow). And the signature tool shows the signature riding the pointer —
 hover with a mouse, press-and-drag on touch — at exactly the size and
 position a tap or release will stamp.
+Right-clicking an annotation opens a context menu (two-finger tap on a
+trackpad): bring to front, send to back, delete. Z-order edits reorder
+the page's /Annots array — the PDF's painting order — so they stick in
+any viewer; a multi-selection moves as a block keeping its internal
+order, the menu entries disable when they'd change nothing, and the
+selection follows the annotations to their new slots. Apps extend the
+menu through `PdfViewer.annotationMenuBuilder`: return
+`PdfAnnotationMenuItem`s and they appear below a divider, each handed
+the selection it acts on (the example app adds "Copy text" for
+annotations that carry any).
 The side panels are desktop-grade too. Both sidebars resize by
 dragging their inner edge (the chosen widths persist on the device
 with the other UI preferences), the thumbnail strip follows the

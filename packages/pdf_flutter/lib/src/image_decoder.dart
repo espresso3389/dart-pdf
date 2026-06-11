@@ -99,8 +99,7 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
       'DeviceRGB' => 3,
       _ => 0,
     };
-    final ranges =
-        components > 0 ? _decodeRanges(cos, dict, components) : null;
+    final ranges = components > 0 ? _decodeRanges(cos, dict, components) : null;
     final colorKey =
         components > 0 ? _colorKeyRanges(cos, dict, components) : null;
     if (mask == null && ranges == null && colorKey == null) return base;
@@ -203,8 +202,7 @@ Uint8List? _jbig2Globals(CosDocument cos, CosDictionary dict) {
   if (parms is CosArray) {
     for (final entry in parms.items) {
       final resolved = cos.resolve(entry);
-      if (resolved is CosDictionary &&
-          resolved.containsKey('JBIG2Globals')) {
+      if (resolved is CosDictionary && resolved.containsKey('JBIG2Globals')) {
         globalsRef = resolved['JBIG2Globals'];
         break;
       }
@@ -476,8 +474,7 @@ Uint8List? _toRgba(CosDocument cos, CosDictionary dict, Uint8List data,
     'DeviceCMYK' => 4,
     _ => 0,
   };
-  final ranges =
-      components > 0 ? _decodeRanges(cos, dict, components) : null;
+  final ranges = components > 0 ? _decodeRanges(cos, dict, components) : null;
   final colorKey = components > 0
       ? _colorKeyRanges(cos, dict, components)
       : space == 'Indexed'
@@ -526,8 +523,8 @@ Uint8List? _toRgba(CosDocument cos, CosDictionary dict, Uint8List data,
       for (var i = 0; i < count; i++) {
         final r = data[i * 3], g = data[i * 3 + 1], b = data[i * 3 + 2];
         if (rgbIcc != null) {
-          final c = rgbIcc.toSrgb(
-              [luts[0][r] / 255, luts[1][g] / 255, luts[2][b] / 255]);
+          final c = rgbIcc
+              .toSrgb([luts[0][r] / 255, luts[1][g] / 255, luts[2][b] / 255]);
           out[i * 4] = (c.red * 255).round();
           out[i * 4 + 1] = (c.green * 255).round();
           out[i * 4 + 2] = (c.blue * 255).round();
@@ -545,7 +542,9 @@ Uint8List? _toRgba(CosDocument cos, CosDictionary dict, Uint8List data,
       final grayIcc = icc != null && icc.channels == 1 ? icc : null;
       final grayLut = grayIcc == null
           ? null
-          : [for (var v = 0; v < 256; v++) grayIcc.toSrgb([lut[v] / 255])];
+          : [
+              for (var v = 0; v < 256; v++) grayIcc.toSrgb([lut[v] / 255])
+            ];
       for (var i = 0; i < count; i++) {
         if (grayLut != null) {
           final c = grayLut[data[i]];
@@ -646,11 +645,10 @@ Uint8List? _indexedToRgba(CosDocument cos, CosDictionary dict, Uint8List data,
       out[i + 1] = palette[index * 3 + 1];
       out[i + 2] = palette[index * 3 + 2];
       // color-key ranges compare the raw index sample (§8.9.6.4)
-      out[i + 3] = colorKey != null &&
-              raw >= colorKey[0].$1 &&
-              raw <= colorKey[0].$2
-          ? 0
-          : 255;
+      out[i + 3] =
+          colorKey != null && raw >= colorKey[0].$1 && raw <= colorKey[0].$2
+              ? 0
+              : 255;
     }
   }
   return out;

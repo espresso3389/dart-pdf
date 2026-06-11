@@ -315,3 +315,20 @@ ViewerScreen) with an AppBar button cycling system→light→dark. Test
 gotcha (dark_mode_test.dart): re-pumping MaterialApp with a new theme
 animates via AnimatedTheme — a single pump still reads the old
 brightness, so assert light and dark in separate tests.
+Page color (Ben: "instead of a white page it must be blue or green or
+another arbitrary colour"): the paper is just the fill renderPicture
+paints under the content, so `PdfPageRenderer.renderPicture/renderImage/
+sampleColor/PdfPageColorSampler.of` take `pageColor` (default white) and
+`PdfViewer.pageColor` threads it through _PdfViewerPage → PdfPageView
+(placeholder ColoredBox matches; didUpdateWidget drops the cached
+picture on color change) and into EditingPageOverlay so the eyedropper
+raster matches what's on screen (sampler keyed on document AND color).
+`PdfThumbnailSidebar.pageColor` does the same for thumbnails. Display
+setting only — the document is untouched. Persisted as
+`PdfEditingPreferences.pageColor` (int key `pageColor`); the example app
+has a format_color_fill AppBar button → showPdfColorPicker, wiring the
+pref into both the viewer and the thumbnail strip. Test gotcha
+(page_color_test.dart): page renders complete without runAsync in
+widget tests — placeholders are already replaced after a pump, so
+assert on the RawImage/RepaintBoundary pixels (poll with runAsync
+delays), not on placeholder ColoredBoxes.

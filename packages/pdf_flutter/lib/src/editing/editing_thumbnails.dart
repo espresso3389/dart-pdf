@@ -37,6 +37,7 @@ class PdfThumbnailSidebar extends StatelessWidget {
     required this.controller,
     required this.viewerController,
     this.width = 160,
+    this.pageColor = const Color(0xFFFFFFFF),
   });
 
   final PdfEditingController controller;
@@ -45,6 +46,10 @@ class PdfThumbnailSidebar extends StatelessWidget {
   final PdfViewerController viewerController;
 
   final double width;
+
+  /// The paper color thumbnails render on — pass the viewer's
+  /// [PdfViewer.pageColor] so they match the pages.
+  final Color pageColor;
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +75,7 @@ class PdfThumbnailSidebar extends StatelessWidget {
                 controller: controller,
                 viewerController: viewerController,
                 pageIndex: index,
+                pageColor: pageColor,
               ),
             ),
           ),
@@ -115,11 +121,13 @@ class _PageTile extends StatelessWidget {
     required this.controller,
     required this.viewerController,
     required this.pageIndex,
+    required this.pageColor,
   });
 
   final PdfEditingController controller;
   final PdfViewerController viewerController;
   final int pageIndex;
+  final Color pageColor;
 
   @override
   Widget build(BuildContext context) {
@@ -146,8 +154,11 @@ class _PageTile extends StatelessWidget {
                 // the boundary keeps scroll-driven indicator repaints
                 // from replaying the page picture
                 RepaintBoundary(
-                  child:
-                      _PageThumbnail(document: document, pageIndex: pageIndex),
+                  child: _PageThumbnail(
+                    document: document,
+                    pageIndex: pageIndex,
+                    pageColor: pageColor,
+                  ),
                 ),
                 if (viewport != null)
                   Positioned.fill(
@@ -187,10 +198,15 @@ class _PageTile extends StatelessWidget {
 
 /// Renders a page's display list scaled down to the tile width.
 class _PageThumbnail extends StatefulWidget {
-  const _PageThumbnail({required this.document, required this.pageIndex});
+  const _PageThumbnail({
+    required this.document,
+    required this.pageIndex,
+    required this.pageColor,
+  });
 
   final PdfDocument document;
   final int pageIndex;
+  final Color pageColor;
 
   @override
   State<_PageThumbnail> createState() => _PageThumbnailState();
@@ -212,7 +228,8 @@ class _PageThumbnailState extends State<_PageThumbnail> {
     super.didUpdateWidget(old);
     // the document changes identity on every revision
     if (!identical(old.document, widget.document) ||
-        old.pageIndex != widget.pageIndex) {
+        old.pageIndex != widget.pageIndex ||
+        old.pageColor != widget.pageColor) {
       _render();
     }
   }
@@ -228,7 +245,8 @@ class _PageThumbnailState extends State<_PageThumbnail> {
     final generation = ++_generation;
     final page = widget.document.page(widget.pageIndex);
     final size = PdfPageRenderer.pageSize(page);
-    unawaited(PdfPageRenderer.renderPicture(page).then((picture) {
+    unawaited(PdfPageRenderer.renderPicture(page, pageColor: widget.pageColor)
+        .then((picture) {
       if (generation != _generation) {
         picture.dispose();
         return;
@@ -251,7 +269,7 @@ class _PageThumbnailState extends State<_PageThumbnail> {
     return AspectRatio(
       aspectRatio: size.width / size.height,
       child: _picture == null
-          ? const ColoredBox(color: Color(0xFFFFFFFF))
+          ? ColoredBox(color: widget.pageColor)
           : CustomPaint(painter: _ThumbnailPainter(_picture!, _pictureSize)),
     );
   }

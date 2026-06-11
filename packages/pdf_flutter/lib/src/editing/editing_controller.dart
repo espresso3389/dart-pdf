@@ -327,16 +327,24 @@ class PdfEditingController extends ChangeNotifier {
         switch (kind) {
           case PdfMarkupKind.highlight:
             editor.addHighlight(page, quads,
-                color: _colorValue, opacity: preferences.opacity, author: author);
+                color: _colorValue,
+                opacity: preferences.opacity,
+                author: author);
           case PdfMarkupKind.underline:
             editor.addUnderline(page, quads,
-                color: _colorValue, opacity: preferences.opacity, author: author);
+                color: _colorValue,
+                opacity: preferences.opacity,
+                author: author);
           case PdfMarkupKind.strikeOut:
             editor.addStrikeOut(page, quads,
-                color: _colorValue, opacity: preferences.opacity, author: author);
+                color: _colorValue,
+                opacity: preferences.opacity,
+                author: author);
           case PdfMarkupKind.squiggly:
             editor.addSquiggly(page, quads,
-                color: _colorValue, opacity: preferences.opacity, author: author);
+                color: _colorValue,
+                opacity: preferences.opacity,
+                author: author);
         }
       });
     });
@@ -367,9 +375,8 @@ class PdfEditingController extends ChangeNotifier {
           author: author));
 
   /// Adds a sticky note with its top-left corner at ([x], [y]).
-  void addNote(int pageIndex, double x, double y, String text) =>
-      apply((e) =>
-          e.addNote(pageIndex, x, y, text, color: _colorValue, author: author));
+  void addNote(int pageIndex, double x, double y, String text) => apply((e) =>
+      e.addNote(pageIndex, x, y, text, color: _colorValue, author: author));
 
   // ---------------------------------------------------------------------
   // signature
@@ -385,8 +392,7 @@ class PdfEditingController extends ChangeNotifier {
   /// page space, [width] points wide (clamped, with the center, so the
   /// whole signature stays on the page). Keeps the signature's own ink
   /// color and pen pressures. Returns false when none is saved.
-  bool placeSignature(int pageIndex, double x, double y,
-      {double width = 160}) {
+  bool placeSignature(int pageIndex, double x, double y, {double width = 160}) {
     final signature = preferences.signature;
     if (signature == null) return false;
     final box = _document.page(pageIndex).cropBox;
@@ -469,13 +475,9 @@ class PdfEditingController extends ChangeNotifier {
         .clamp(h, box.width * 0.9);
     final cx = x.clamp(box.left + w / 2, box.right - w / 2);
     final cy = y.clamp(box.bottom + h / 2, box.top - h / 2);
-    return apply((e) => e.addStamp(
-        pageIndex,
-        PdfRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2),
-        stamp.text,
-        color: stamp.color,
-        opacity: preferences.opacity,
-        author: author));
+    return apply((e) => e.addStamp(pageIndex,
+        PdfRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), stamp.text,
+        color: stamp.color, opacity: preferences.opacity, author: author));
   }
 
   /// Bakes every page's annotation appearances into its content and
@@ -692,7 +694,8 @@ class PdfEditingController extends ChangeNotifier {
           final tf = RegExp(r'(\d+(?:\.\d+)?)\s+Tf')
               .firstMatch(annotation.defaultAppearance ?? '');
           e.addFreeText(page, rect, text,
-              fontSize: double.tryParse(tf?.group(1) ?? '') ?? preferences.fontSize,
+              fontSize:
+                  double.tryParse(tf?.group(1) ?? '') ?? preferences.fontSize,
               color: color ?? 0x000000,
               author: by);
         case 'Stamp':

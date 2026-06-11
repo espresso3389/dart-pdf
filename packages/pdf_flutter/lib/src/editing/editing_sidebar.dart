@@ -95,8 +95,7 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
     final slot = (pageIndex, index);
     final selectable = !_unselectable.contains(annotation.subtype);
     // on widgets /T is the field name, not an author
-    final author =
-        annotation.subtype == 'Widget' ? null : annotation.author;
+    final author = annotation.subtype == 'Widget' ? null : annotation.author;
     final contents = annotation.contents;
     final detail = [
       if (author != null && author.isNotEmpty) author,

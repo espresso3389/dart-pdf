@@ -63,7 +63,8 @@ class CanvasPdfDevice implements PdfDevice {
     canvas.saveLayer(
       null,
       Paint()
-        ..color = Color.from(alpha: alpha.clamp(0, 1), red: 0, green: 0, blue: 0)
+        ..color =
+            Color.from(alpha: alpha.clamp(0, 1), red: 0, green: 0, blue: 0)
         ..blendMode = _blend,
     );
   }
@@ -136,8 +137,8 @@ class CanvasPdfDevice implements PdfDevice {
       Paint()
         ..shader = shader
         ..blendMode = _blend
-        ..color = Color.from(
-            alpha: alpha.clamp(0, 1), red: 0, green: 0, blue: 0),
+        ..color =
+            Color.from(alpha: alpha.clamp(0, 1), red: 0, green: 0, blue: 0),
     );
   }
 
@@ -212,8 +213,7 @@ class CanvasPdfDevice implements PdfDevice {
 
   /// Rebuilds [source] as its dashed segments (§8.4.3.6). Zero-length
   /// "on" dashes become near-zero slivers so round caps still paint dots.
-  static ui.Path _dashPath(
-      ui.Path source, List<double> pattern, double phase) {
+  static ui.Path _dashPath(ui.Path source, List<double> pattern, double phase) {
     // odd-length patterns repeat doubled, per spec
     final dashes = [
       for (final d in pattern)
@@ -250,8 +250,7 @@ class CanvasPdfDevice implements PdfDevice {
                   ? metric.length
                   : distance + 1e-3)
               : end;
-          out.addPath(
-              metric.extractPath(distance, sliver), ui.Offset.zero);
+          out.addPath(metric.extractPath(distance, sliver), ui.Offset.zero);
         }
         remaining -= end - distance;
         distance = end;
@@ -345,9 +344,8 @@ class CanvasPdfDevice implements PdfDevice {
     canvas.transform(_toFloat64(run.transform));
     // unflip: the page transform is y-up, text rasterizes y-down
     final targetWidth = run.width * renderSize;
-    final scaleX = run.width > 0 && painter.width > 0
-        ? targetWidth / painter.width
-        : 1.0;
+    final scaleX =
+        run.width > 0 && painter.width > 0 ? targetWidth / painter.width : 1.0;
     canvas.scale(scaleX / renderSize, -1 / renderSize);
     painter.paint(canvas, Offset(0, -baseline));
     canvas.restore();
@@ -387,8 +385,7 @@ class CanvasPdfDevice implements PdfDevice {
       paint.colorFilter = ColorFilter.mode(
           _toColor(request.stencilColor, request.alpha), BlendMode.srcIn);
     } else {
-      paint.color =
-          Color.from(alpha: request.alpha, red: 0, green: 0, blue: 0);
+      paint.color = Color.from(alpha: request.alpha, red: 0, green: 0, blue: 0);
     }
     canvas.save();
     canvas.transform(_toFloat64(request.transform));
@@ -410,14 +407,12 @@ class CanvasPdfDevice implements PdfDevice {
       color: _toColor(run.color, 1),
       fontSize: 100,
       fontFamily: switch (name) {
-        _ when name.contains('Courier') || name.contains('Mono') =>
-          'Courier',
+        _ when name.contains('Courier') || name.contains('Mono') => 'Courier',
         _ when name.contains('Times') || name.contains('Serif') =>
           'Times New Roman',
         _ => 'Helvetica',
       },
-      fontWeight:
-          name.contains('Bold') ? FontWeight.bold : FontWeight.normal,
+      fontWeight: name.contains('Bold') ? FontWeight.bold : FontWeight.normal,
       fontStyle: name.contains('Italic') || name.contains('Oblique')
           ? FontStyle.italic
           : FontStyle.normal,

@@ -19,7 +19,13 @@ class PdfPageRenderer {
 
   /// Renders [page] into a picture at 1 unit = 1 PDF point, cropped to the
   /// page's crop box and rotated per /Rotate.
-  static Future<ui.Picture> renderPicture(PdfPage page) async {
+  ///
+  /// [pageColor] is the paper: the fill painted under the page content.
+  /// PDF pages have no background of their own — white is only the
+  /// convention — so any opaque color works (a viewer-level setting; the
+  /// document is untouched).
+  static Future<ui.Picture> renderPicture(PdfPage page,
+      {Color pageColor = const Color(0xFFFFFFFF)}) async {
     final cos = page.document.cos;
 
     final collector = ImageCollector();
@@ -35,7 +41,7 @@ class PdfPageRenderer {
 
     canvas.drawRect(
       Offset.zero & size,
-      Paint()..color = const Color(0xFFFFFFFF),
+      Paint()..color = pageColor,
     );
     switch (page.rotation) {
       case 90:
@@ -99,8 +105,9 @@ class PdfPageRenderer {
 
   /// Renders [page] to a bitmap. [pixelRatio] of 2 doubles the resolution.
   static Future<ui.Image> renderImage(PdfPage page,
-      {double pixelRatio = 1}) async {
-    final picture = await renderPicture(page);
+      {double pixelRatio = 1,
+      Color pageColor = const Color(0xFFFFFFFF)}) async {
+    final picture = await renderPicture(page, pageColor: pageColor);
     try {
       return await rasterize(picture, pageSize(page), pixelRatio);
     } finally {
@@ -152,8 +159,9 @@ class PdfPageRenderer {
   /// i.e. post-rotation points with y down (view coordinates divided by
   /// the view scale). One-shot; for repeated samples (an eyedropper's
   /// live preview) build a [PdfPageColorSampler] once instead.
-  static Future<ui.Color?> sampleColor(PdfPage page, ui.Offset point) async =>
-      (await PdfPageColorSampler.of(page)).colorAt(point);
+  static Future<ui.Color?> sampleColor(PdfPage page, ui.Offset point,
+          {Color pageColor = const Color(0xFFFFFFFF)}) async =>
+      (await PdfPageColorSampler.of(page, pageColor: pageColor)).colorAt(point);
 
   /// Page size in points after applying /Rotate.
   static Size pageSize(PdfPage page) {
@@ -176,9 +184,13 @@ class PdfPageColorSampler {
   final int _width;
   final int _height;
 
-  /// Renders and rasterizes [page] at 1 px per point.
-  static Future<PdfPageColorSampler> of(PdfPage page) async {
-    final picture = await PdfPageRenderer.renderPicture(page);
+  /// Renders and rasterizes [page] at 1 px per point. [pageColor] must
+  /// match the paper color the page is displayed with, so samples off
+  /// the content read the color the user actually sees.
+  static Future<PdfPageColorSampler> of(PdfPage page,
+      {Color pageColor = const Color(0xFFFFFFFF)}) async {
+    final picture =
+        await PdfPageRenderer.renderPicture(page, pageColor: pageColor);
     try {
       final image = await PdfPageRenderer.rasterize(
           picture, PdfPageRenderer.pageSize(page), 1);

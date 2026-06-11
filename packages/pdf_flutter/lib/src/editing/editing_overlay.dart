@@ -25,12 +25,17 @@ class EditingPageOverlay extends StatefulWidget {
     required this.pageIndex,
     required this.geometry,
     required this.textPrompt,
+    this.pageColor = const Color(0xFFFFFFFF),
   });
 
   final PdfEditingController controller;
   final int pageIndex;
   final PdfPageGeometry geometry;
   final PdfTextPrompt textPrompt;
+
+  /// The paper color the page is displayed with — the eyedropper's
+  /// raster must match what's on screen.
+  final Color pageColor;
 
   @override
   State<EditingPageOverlay> createState() => _EditingPageOverlayState();
@@ -69,6 +74,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   // eyedropper: one page raster serves every preview sample
   PdfPageColorSampler? _sampler;
   PdfDocument? _samplerDocument;
+  Color? _samplerPageColor;
   Future<PdfPageColorSampler>? _samplerFuture;
   Offset? _pickPosition;
   Color? _pickPreview;
@@ -403,13 +409,19 @@ class _EditingPageOverlayState extends State<EditingPageOverlay> {
   /// geometry scale.
   Future<PdfPageColorSampler> _ensureSampler() {
     final document = _controller.document;
-    if (!identical(document, _samplerDocument)) {
+    final pageColor = widget.pageColor;
+    if (!identical(document, _samplerDocument) ||
+        pageColor != _samplerPageColor) {
       _samplerDocument = document;
+      _samplerPageColor = pageColor;
       _sampler = null;
-      _samplerFuture =
-          PdfPageColorSampler.of(document.page(widget.pageIndex)).then((s) {
+      _samplerFuture = PdfPageColorSampler.of(document.page(widget.pageIndex),
+              pageColor: pageColor)
+          .then((s) {
         // resolve the preview that was waiting on the raster
-        if (mounted && identical(_samplerDocument, document)) {
+        if (mounted &&
+            identical(_samplerDocument, document) &&
+            _samplerPageColor == pageColor) {
           setState(() {
             _sampler = s;
             final position = _pickPosition;

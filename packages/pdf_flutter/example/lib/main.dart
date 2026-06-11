@@ -334,6 +334,15 @@ class _ViewerScreenState extends State<ViewerScreen> {
               ),
             ],
             IconButton(
+              icon: const Icon(Icons.format_color_fill),
+              tooltip: 'Page color',
+              onPressed: () async {
+                final color = await showPdfColorPicker(context,
+                    initial: _prefs.pageColor);
+                if (color != null) _prefs.pageColor = color;
+              },
+            ),
+            IconButton(
               icon: Icon(switch (_prefs.themeMode) {
                 ThemeMode.system => Icons.brightness_auto,
                 ThemeMode.light => Icons.light_mode,
@@ -400,6 +409,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 PdfThumbnailSidebar(
                   controller: session,
                   viewerController: _controller,
+                  pageColor: _prefs.pageColor,
                 ),
               Expanded(
                 child: ListenableBuilder(
@@ -410,6 +420,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     onAction: _onAction,
                     pageOverlayBuilder: _isDemo ? _demoOverlays : null,
                     editing: session,
+                    pageColor: _prefs.pageColor,
                   ),
                 ),
               ),

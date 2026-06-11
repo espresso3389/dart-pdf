@@ -20,9 +20,14 @@ class PdfPageView extends StatefulWidget {
     required this.page,
     this.scale = 1,
     this.settleGeneration = 0,
+    this.pageColor = const Color(0xFFFFFFFF),
   });
 
   final PdfPage page;
+
+  /// The paper color the page renders on (see
+  /// [PdfPageRenderer.renderPicture]). Changing it re-renders the page.
+  final Color pageColor;
 
   /// Resolution multiplier on top of the device pixel ratio. The viewer
   /// raises it to the settled zoom level so pages stay sharp.
@@ -82,7 +87,8 @@ class _PdfPageViewState extends State<PdfPageView> {
   @override
   void didUpdateWidget(PdfPageView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.page, widget.page)) {
+    if (!identical(oldWidget.page, widget.page) ||
+        oldWidget.pageColor != widget.pageColor) {
       _dropPicture();
       _dropDetail();
       _render();
@@ -142,8 +148,9 @@ class _PdfPageViewState extends State<PdfPageView> {
 
   Future<void> _render() async {
     final generation = ++_renderGeneration;
-    final picture =
-        await (_picture ??= PdfPageRenderer.renderPicture(widget.page));
+    final picture = await (_picture ??= PdfPageRenderer.renderPicture(
+        widget.page,
+        pageColor: widget.pageColor));
     if (!mounted || generation != _renderGeneration) return;
     final image = await PdfPageRenderer.rasterize(
         picture, PdfPageRenderer.pageSize(widget.page), _effectiveRatio());
@@ -179,9 +186,7 @@ class _PdfPageViewState extends State<PdfPageView> {
     );
     final screen = Offset.zero & MediaQuery.sizeOf(context);
     final visible = pageRect.intersect(screen);
-    if (visible.isEmpty ||
-        pageRect.width <= 0 ||
-        pageRect.height <= 0) {
+    if (visible.isEmpty || pageRect.width <= 0 || pageRect.height <= 0) {
       _dropDetail();
       return;
     }
@@ -194,8 +199,7 @@ class _PdfPageViewState extends State<PdfPageView> {
           .clamp(0.0, 1.0),
       ((visible.right - pageRect.left + visible.width / 2) / pageRect.width)
           .clamp(0.0, 1.0),
-      ((visible.bottom - pageRect.top + visible.height / 2) /
-              pageRect.height)
+      ((visible.bottom - pageRect.top + visible.height / 2) / pageRect.height)
           .clamp(0.0, 1.0),
     );
     final size = PdfPageRenderer.pageSize(widget.page);
@@ -211,16 +215,16 @@ class _PdfPageViewState extends State<PdfPageView> {
     }
     // the patch obeys the same pixel budget as the base
     var ratio = desired;
-    ratio = math.min(
-        ratio, math.sqrt(_maxPixels / (region.width * region.height)));
+    ratio =
+        math.min(ratio, math.sqrt(_maxPixels / (region.width * region.height)));
     ratio =
         math.min(ratio, _maxDimension / math.max(region.width, region.height));
 
-    final picture =
-        await (_picture ??= PdfPageRenderer.renderPicture(widget.page));
+    final picture = await (_picture ??= PdfPageRenderer.renderPicture(
+        widget.page,
+        pageColor: widget.pageColor));
     if (!mounted || generation != _detailGeneration) return;
-    final image =
-        await PdfPageRenderer.rasterizeRegion(picture, region, ratio);
+    final image = await PdfPageRenderer.rasterizeRegion(picture, region, ratio);
     if (!mounted || generation != _detailGeneration) {
       image.dispose();
       return;
@@ -250,27 +254,29 @@ class _PdfPageViewState extends State<PdfPageView> {
               alignment: Alignment.topLeft,
               fit: StackFit.expand,
               children: [
-            if (_image == null)
-              const ColoredBox(color: Color(0xFFFFFFFF))
-            else
-              RawImage(
-                image: _image,
-                fit: BoxFit.contain,
-                filterQuality: FilterQuality.medium,
-              ),
-            if (detail != null && fraction != null && w.isFinite)
-              Positioned(
-                left: fraction.left * w,
-                top: fraction.top * h,
-                width: fraction.width * w,
-                height: fraction.height * h,
-                child: RawImage(
-                  image: detail,
-                  fit: BoxFit.fill,
-                  filterQuality: FilterQuality.medium,
-                ),
-              ),
-          ]);
+                if (_image == null)
+                  // the placeholder matches the paper, so the page doesn't
+                  // flash white before the first render lands
+                  ColoredBox(color: widget.pageColor)
+                else
+                  RawImage(
+                    image: _image,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.medium,
+                  ),
+                if (detail != null && fraction != null && w.isFinite)
+                  Positioned(
+                    left: fraction.left * w,
+                    top: fraction.top * h,
+                    width: fraction.width * w,
+                    height: fraction.height * h,
+                    child: RawImage(
+                      image: detail,
+                      fit: BoxFit.fill,
+                      filterQuality: FilterQuality.medium,
+                    ),
+                  ),
+              ]);
         }),
       );
     });

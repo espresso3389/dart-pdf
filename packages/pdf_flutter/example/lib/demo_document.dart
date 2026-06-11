@@ -104,8 +104,7 @@ Uint8List buildDemoPdf() {
         '/Contents ${4 + i * 2} 0 R '
         '/Resources << /Font << /F1 9 0 R >> >> '
         '${i == 0 ? annots : ''}>>');
-    objects
-        .add('<< /Length ${content.length} >>\nstream\n$content\nendstream');
+    objects.add('<< /Length ${content.length} >>\nstream\n$content\nendstream');
   }
   objects.add('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
 

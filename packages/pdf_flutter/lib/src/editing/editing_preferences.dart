@@ -52,6 +52,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   PdfInkSignature? _signature;
   List<PdfCustomStamp> _customStamps = const [];
   ThemeMode _themeMode = ThemeMode.system;
+  Color _pageColor = const Color(0xFFFFFFFF);
 
   Future<void> _load() async {
     final SharedPreferences store;
@@ -81,6 +82,8 @@ class PdfEditingPreferences extends ChangeNotifier {
       if (themeMode != null) {
         _themeMode = ThemeMode.values.asNameMap()[themeMode] ?? _themeMode;
       }
+      final pageColor = store.getInt('${_prefix}pageColor');
+      if (pageColor != null) _pageColor = Color(pageColor);
       final stamps = store.getStringList('${_prefix}customStamps');
       if (stamps != null) {
         _customStamps = List.unmodifiable([
@@ -208,6 +211,18 @@ class PdfEditingPreferences extends ChangeNotifier {
     if (value == _themeMode) return;
     _themeMode = value;
     _write((s) => s.setString('${_prefix}themeMode', value.name));
+    notifyListeners();
+  }
+
+  /// The paper color pages are displayed on (see [PdfViewer.pageColor]).
+  /// White — the PDF convention — by default; a display setting only,
+  /// the document is untouched.
+  Color get pageColor => _pageColor;
+
+  set pageColor(Color value) {
+    if (value == _pageColor) return;
+    _pageColor = value;
+    _write((s) => s.setInt('${_prefix}pageColor', value.toARGB32()));
     notifyListeners();
   }
 

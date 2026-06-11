@@ -240,6 +240,7 @@ class PdfViewer extends StatefulWidget {
     this.maxZoom = 6,
     this.doubleTapZoom = 2.5,
     this.backgroundColor,
+    this.pageColor = const Color(0xFFFFFFFF),
   });
 
   final PdfDocument document;
@@ -291,6 +292,12 @@ class PdfViewer extends StatefulWidget {
   /// theme-aware grey: the familiar desktop-viewer slate in light themes
   /// and a deeper shade in dark themes.
   final Color? backgroundColor;
+
+  /// The paper color: the fill pages render their content on. PDF pages
+  /// have no background of their own — white is only the convention — so
+  /// this can be any color (sepia for reading, a tint to match the app).
+  /// Purely a display setting; the document is untouched.
+  final Color pageColor;
 
   @override
   State<PdfViewer> createState() => _PdfViewerState();
@@ -1257,6 +1264,7 @@ class _PdfViewerState extends State<PdfViewer>
               child: _PdfViewerPage(
                 page: _pages[index],
                 index: index,
+                pageColor: widget.pageColor,
                 scale: _renderScale,
                 settleGeneration: _settleGeneration,
                 matches: _controller._matchesOn(index),
@@ -1464,6 +1472,7 @@ class _PdfViewerPage extends StatelessWidget {
   const _PdfViewerPage({
     required this.page,
     required this.index,
+    required this.pageColor,
     required this.scale,
     required this.settleGeneration,
     required this.matches,
@@ -1476,6 +1485,7 @@ class _PdfViewerPage extends StatelessWidget {
 
   final PdfPage page;
   final int index;
+  final Color pageColor;
   final double scale;
   final int settleGeneration;
   final List<PdfTextMatch> matches;
@@ -1492,7 +1502,12 @@ class _PdfViewerPage extends StatelessWidget {
     // (dropping its rendered image: a white flash)
     final builder = overlayBuilder;
     return Stack(children: [
-      PdfPageView(page: page, scale: scale, settleGeneration: settleGeneration),
+      PdfPageView(
+        page: page,
+        scale: scale,
+        settleGeneration: settleGeneration,
+        pageColor: pageColor,
+      ),
       Positioned.fill(
         child: CustomPaint(
           painter: _HighlightPainter(
@@ -1528,6 +1543,7 @@ class _PdfViewerPage extends StatelessWidget {
                                 pageIndex: index,
                                 geometry: geometry,
                                 textPrompt: editingTextPrompt,
+                                pageColor: pageColor,
                               ),
                             ),
                 ),

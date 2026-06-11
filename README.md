@@ -121,7 +121,13 @@ Material theme, the canvas around the pages deepens automatically under
 a dark theme (override it with `PdfViewer.backgroundColor`), and the
 chosen theme mode persists on the device like the other UI preferences
 (`PdfEditingPreferences.themeMode`) — the example app has a
-system/light/dark toggle in its app bar. Still
+system/light/dark toggle in its app bar.
+The paper itself can be recolored too: `PdfViewer.pageColor` renders
+pages on any background instead of white (sepia for reading, a tint to
+match the app) — a pure display setting that leaves the document
+untouched, mirrored by the thumbnails and the eyedropper, persisted via
+`PdfEditingPreferences.pageColor`, and exposed in the example app
+through a color-picker button in the app bar. Still
 open: richer text editing (reflow),
 RSASSA-PSS signatures, JBIG2 Huffman/refinement variants, and JPX
 subsampling/PCRL-CPRL progressions.

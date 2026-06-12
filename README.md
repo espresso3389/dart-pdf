@@ -177,29 +177,6 @@ variants, and JPX subsampling/PCRL-CPRL progressions.
   only edit their own annotations". Gated annotations still render and
   list; they just can't enter the selection.
 
-## Publishing
-
-The packages publish to pub.dev straight from the workspace. First-time
-publishes must go in dependency order so every hosted constraint
-resolves:
-
-```sh
-cd packages/pdf_cos           && dart pub publish
-cd packages/pdf_test_fixtures && dart pub publish
-cd packages/pdf_document      && dart pub publish
-cd packages/pdf_graphics      && dart pub publish
-cd packages/pdf_editor        && dart pub publish
-```
-
-The repo must be public before publishing so pub.dev can verify the
-`repository:` links. The web demo redeploys with:
-
-```sh
-cd packages/pdf_editor/example
-fvm flutter build web --release
-firebase deploy --only hosting   # → https://dart-pdf-demo.web.app
-```
-
 ## Development
 
 This repo uses [fvm](https://fvm.app) (Flutter 3.44.0) and pub workspaces.

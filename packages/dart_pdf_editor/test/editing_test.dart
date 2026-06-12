@@ -444,7 +444,9 @@ void main() {
 
     testWidgets('line-family selection drags vertex handles', (tester) async {
       final (editing, _) = await pumpEditor(tester);
-      editing.tool = PdfEditTool.arrow;
+      editing
+        ..tool = PdfEditTool.arrow
+        ..dashedStroke = true;
       await tester.pump();
       await drag(tester, view(100, 700), view(250, 620));
 
@@ -453,7 +455,19 @@ void main() {
         ..selectAnnotation(0, 0);
       await tester.pump();
 
-      await drag(tester, view(250, 620), view(300, 610));
+      final gesture = await tester.startGesture(view(250, 620),
+          kind: PointerDeviceKind.mouse);
+      await gesture.moveTo(view(300, 610));
+      await tester.pump();
+
+      final live = editingOverlayPainter(tester).livePath;
+      expect(live, isNotNull);
+      expect(live.tool, PdfEditTool.arrow);
+      expect(live.dashed, isTrue);
+      expect((live.points as List).cast<Offset>(),
+          [view(100, 700), view(300, 610)]);
+      await gesture.up();
+      await tester.pump();
 
       final annotation = editing.document.page(0).annotations.single;
       expect(annotation.subtype, 'Line');

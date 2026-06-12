@@ -265,6 +265,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     List<Offset> points,
     PdfEditTool tool,
     Color color,
+    Color? fillColor,
     double strokeWidth,
     bool dashed,
   })? _afterPath;
@@ -1495,6 +1496,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       tool: _tool!,
       color: _controller.color
           .withValues(alpha: _controller.opacity.clamp(0.0, 1.0)),
+      fillColor: null,
       strokeWidth: _controller.strokeWidth * _geometry.scale,
       dashed: _controller.dashedStroke,
     );
@@ -1504,6 +1506,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   void _commitVertexDrag(List<Offset> points) {
     final tool = _selectedLineTool;
     if (tool == null) return;
+    final style = _controller.selectedAnnotationStyle;
+    final annotation = _controller.selectedAnnotation;
+    final opacity = style?.opacity ?? 1;
     final before = _controller.document;
     _controller.reshapeSelectedLine(
         [for (final point in points) _geometry.toPagePoint(point)]);
@@ -1512,15 +1517,43 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterPath = (
       points: points,
       tool: tool,
-      color: _controller.selectedAnnotationStyle?.color.withValues(
-              alpha: _controller.selectedAnnotationStyle?.opacity ?? 1) ??
-          _controller.color,
-      strokeWidth: (_controller.selectedAnnotationStyle?.strokeWidth ??
-              _controller.strokeWidth) *
-          _geometry.scale,
-      dashed: _controller.selectedAnnotation?.borderDash != null,
+      color: style?.color.withValues(alpha: opacity) ?? _controller.color,
+      fillColor: annotation?.interiorColor == null
+          ? null
+          : Color(0xFF000000 | annotation!.interiorColor!)
+              .withValues(alpha: opacity),
+      strokeWidth:
+          (style?.strokeWidth ?? _controller.strokeWidth) * _geometry.scale,
+      dashed: annotation?.borderDash != null,
     );
     _afterDocument = _controller.document;
+  }
+
+  ({
+    List<Offset> points,
+    PdfEditTool tool,
+    Color color,
+    Color? fillColor,
+    double strokeWidth,
+    bool dashed,
+  })? _linePreviewPath(List<Offset> points) {
+    final tool = _selectedLineTool;
+    final style = _controller.selectedAnnotationStyle;
+    final annotation = _controller.selectedAnnotation;
+    if (tool == null || style == null || annotation == null) return null;
+    final opacity = style.opacity;
+    return (
+      points: points,
+      tool: tool,
+      color: style.color.withValues(alpha: opacity),
+      fillColor: annotation.interiorColor == null
+          ? null
+          : Color(0xFF000000 | annotation.interiorColor!)
+              .withValues(alpha: opacity),
+      strokeWidth:
+          (style.strokeWidth ?? _controller.strokeWidth) * _geometry.scale,
+      dashed: annotation.borderDash != null,
+    );
   }
 
   void _addPolyPoint(Offset point) {
@@ -1568,6 +1601,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       tool: _tool!,
       color: _controller.color
           .withValues(alpha: _controller.opacity.clamp(0.0, 1.0)),
+      fillColor: null,
       strokeWidth: _controller.strokeWidth * _geometry.scale,
       dashed: _controller.dashedStroke,
     );
@@ -2109,6 +2143,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
               _polyHover!,
           ];
     final vertexHandles = _vertexPoints ?? _selectedVertexPoints;
+    final vertexPreview =
+        _vertexPoints == null ? null : _linePreviewPath(_vertexPoints!);
     // touch and stylus get the hover/right-click affordances as a
     // floating action chip beside the selection
     final showChip = (_lastPointerKind == PointerDeviceKind.touch ||
@@ -2210,6 +2246,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                         : null,
                     dragPath: polyPreview,
                     dashed: _controller.dashedStroke,
+                    livePath: vertexPreview,
                     selectionRect: _resizeHandle != null
                         ? _resizeRect
                         : chrome?.$1.shift(moveDelta),
@@ -2462,6 +2499,7 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.dragLine,
     required this.dragPath,
     required this.dashed,
+    required this.livePath,
     required this.selectionRect,
     required this.extraSelectionRects,
     required this.marqueeRect,
@@ -2502,6 +2540,14 @@ class _EditingPreviewPainter extends CustomPainter {
   final (Offset, Offset)? dragLine;
   final List<Offset>? dragPath;
   final bool dashed;
+  final ({
+    List<Offset> points,
+    PdfEditTool tool,
+    Color color,
+    Color? fillColor,
+    double strokeWidth,
+    bool dashed,
+  })? livePath;
   final Rect? selectionRect;
 
   /// The non-primary members of a multi-selection on this page: chrome
@@ -2576,6 +2622,7 @@ class _EditingPreviewPainter extends CustomPainter {
     List<Offset> points,
     PdfEditTool tool,
     Color color,
+    Color? fillColor,
     double strokeWidth,
     bool dashed,
   })? afterPath;
@@ -2693,7 +2740,7 @@ class _EditingPreviewPainter extends CustomPainter {
   }
 
   void _paintPathPreview(Canvas canvas, List<Offset> points, PdfEditTool? tool,
-      Color color, double width, bool dashed) {
+      Color color, Color? fillColor, double width, bool dashed) {
     if (points.length < 2) return;
     final paint = Paint()
       ..color = color
@@ -2705,7 +2752,16 @@ class _EditingPreviewPainter extends CustomPainter {
     for (final point in points.skip(1)) {
       path.lineTo(point.dx, point.dy);
     }
-    if (tool == PdfEditTool.polygon) path.close();
+    if (tool == PdfEditTool.polygon) {
+      path.close();
+      if (fillColor != null) {
+        canvas.drawPath(
+            path,
+            Paint()
+              ..color = fillColor
+              ..style = PaintingStyle.fill);
+      }
+    }
     canvas.drawPath(dashed ? _dashPath(path, width) : path, paint);
     if (tool == PdfEditTool.arrow) {
       final tip = points.last;
@@ -2778,16 +2834,29 @@ class _EditingPreviewPainter extends CustomPainter {
 
     final afterPath = this.afterPath;
     if (afterPath != null) {
-      _paintPathPreview(canvas, afterPath.points, afterPath.tool,
-          afterPath.color, afterPath.strokeWidth, afterPath.dashed);
+      _paintPathPreview(
+          canvas,
+          afterPath.points,
+          afterPath.tool,
+          afterPath.color,
+          afterPath.fillColor,
+          afterPath.strokeWidth,
+          afterPath.dashed);
+    }
+
+    final livePath = this.livePath;
+    if (livePath != null) {
+      _paintPathPreview(canvas, livePath.points, livePath.tool, livePath.color,
+          livePath.fillColor, livePath.strokeWidth, livePath.dashed);
     }
 
     final line = dragLine;
     if (line != null) {
       _paintPathPreview(
-          canvas, [line.$1, line.$2], tool, color, strokeWidth, dashed);
+          canvas, [line.$1, line.$2], tool, color, null, strokeWidth, dashed);
     } else if (dragPath != null) {
-      _paintPathPreview(canvas, dragPath!, tool, color, strokeWidth, dashed);
+      _paintPathPreview(
+          canvas, dragPath!, tool, color, null, strokeWidth, dashed);
     } else if (dragRect case final rect?) {
       _paintShapePreview(canvas, rect, tool, color, strokeWidth);
     }

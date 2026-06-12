@@ -12,11 +12,12 @@ signatures.
 > signature-preserving incremental updates with encrypt-on-write, a
 > content-stream interpreter with TrueType/CFF/Type3 font rendering,
 > mesh shadings, ICC color, pure-Dart CCITT/JBIG2/JPEG 2000 decoders, a
-> zoomable Flutter viewer with text selection and search, annotation
-> authoring and flattening, AcroForm filling, page manipulation, digital
-> signatures with trust-store chain validation, content editing, and the
-> full editing UI: tools, panels, forms, touch/stylus input, theming,
-> and a sync surface for collaborative annotation stores.
+> zoomable Flutter viewer with text selection and search, inferred text
+> reflow, annotation authoring and flattening, AcroForm filling, page
+> manipulation, digital signatures with trust-store chain validation,
+> content editing, and the full editing UI: tools, panels, forms,
+> touch/stylus input, theming, and a sync surface for collaborative
+> annotation stores.
 
 ![The example app: PdfEditorView showing the feature showcase document](doc/dart_pdf_editor_example.jpg)
 
@@ -52,6 +53,7 @@ published on pub.dev under its directory name.
 5. ✅ Font engine: TrueType/CFF glyph outlines, CID fonts, CMaps, ToUnicode
 6. ✅ Flutter rendering device + viewer widget
 7. ✅ Text extraction with positions, feeding selection and search
+   plus paragraph/reading-order inference for text reflow
 8. ✅ Annotations: model, appearance-stream rendering, authoring with
    generated appearances (highlight/underline/strike-out/squiggly, ink,
    shapes, free text, notes, stamps), and flattening
@@ -72,9 +74,9 @@ published on pub.dev under its directory name.
     (`PdfPageElements` + `deleteElements`), and text editing
     (`replaceText` — simple fonts, within one shown string; no reflow)
 
-Deliberately deferred: richer text editing (paragraph/reading-order
-inference and reflow), RSASSA-PSS signatures, JBIG2 Huffman/refinement
-variants, and JPX subsampling/PCRL-CPRL progressions.
+Deliberately deferred: richer text editing beyond single shown-string
+rewrites, RSASSA-PSS signatures, JBIG2 Huffman/refinement variants, and
+JPX subsampling/PCRL-CPRL progressions.
 
 ## Features
 
@@ -84,6 +86,9 @@ variants, and JPX subsampling/PCRL-CPRL progressions.
   deep-zoom detail rendering past the raster caps.
 - Text selection with mouse or touch (long-press, then drag handles),
   full-text search, link navigation, outlines.
+- Reader reflow mode infers visual lines, columns, reading order, and
+  paragraphs from positioned text, then presents a continuous selectable
+  text view for narrow screens.
 - Custom always-visible scrollbars that stay usable while zoomed; a
   horizontal bar appears for panning the zoom window. Scroll metrics are
   computed from real page heights, so the thumb doesn't jump around on

@@ -60,6 +60,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   Color _pageColor = const Color(0xFFFFFFFF);
   bool _showAnnotations = true;
   bool _highlightFormFields = true;
+  bool _showReflowView = false;
   bool _showPropertiesPanel = false;
   bool _showSearchResultsPanel = false;
   double? _thumbnailSidebarWidth;
@@ -116,6 +117,8 @@ class PdfEditingPreferences extends ChangeNotifier {
           store.getBool('${_prefix}showAnnotations') ?? _showAnnotations;
       _highlightFormFields = store.getBool('${_prefix}highlightFormFields') ??
           _highlightFormFields;
+      _showReflowView =
+          store.getBool('${_prefix}showReflowView') ?? _showReflowView;
       _thumbnailSidebarWidth =
           store.getDouble('${_prefix}thumbnailSidebarWidth') ??
               _thumbnailSidebarWidth;
@@ -331,6 +334,17 @@ class PdfEditingPreferences extends ChangeNotifier {
     if (value == _highlightFormFields) return;
     _highlightFormFields = value;
     _write((s) => s.setBool('${_prefix}highlightFormFields', value));
+    notifyListeners();
+  }
+
+  /// Whether reader chrome shows the inferred text reflow view instead
+  /// of fixed-layout PDF pages. Display-only.
+  bool get showReflowView => _showReflowView;
+
+  set showReflowView(bool value) {
+    if (value == _showReflowView) return;
+    _showReflowView = value;
+    _write((s) => s.setBool('${_prefix}showReflowView', value));
     notifyListeners();
   }
 

@@ -19,6 +19,7 @@ export 'src/page_number_field.dart';
 export 'src/pdf_editor_view.dart';
 export 'src/pdf_page_view.dart';
 export 'src/pdf_reader.dart';
+export 'src/pdf_reflow_view.dart';
 export 'src/pdf_viewer.dart';
 export 'src/preview_cache.dart';
 export 'src/renderer.dart';

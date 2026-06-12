@@ -20,6 +20,7 @@ void main() {
       a.author = 'Ben';
       a.colorPickerFormat = PdfColorFormat.cmyk;
       a.highlightFormFields = false;
+      a.showReflowView = true;
       await pumpEventQueue(); // let the unawaited writes land
 
       final b = PdfEditingPreferences();
@@ -34,6 +35,7 @@ void main() {
       expect(b.author, 'Ben');
       expect(b.colorPickerFormat, PdfColorFormat.cmyk);
       expect(b.highlightFormFields, isFalse);
+      expect(b.showReflowView, isTrue);
     });
 
     test('empty storage leaves the defaults', () async {
@@ -51,6 +53,7 @@ void main() {
       expect(prefs.author, isNull);
       expect(prefs.colorPickerFormat, PdfColorFormat.hex);
       expect(prefs.highlightFormFields, isTrue);
+      expect(prefs.showReflowView, isFalse);
     });
 
     test('a value set while loading is not clobbered by stored data', () async {

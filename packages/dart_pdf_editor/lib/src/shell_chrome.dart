@@ -47,15 +47,20 @@ class PdfShellBar extends StatelessWidget {
   }
 }
 
-enum _ViewOption { annotations, formHighlight, pageColor }
+enum _ViewOption { annotations, formHighlight, reflow, pageColor }
 
 /// The "view options" popup both shells offer: display-only settings
 /// (annotation visibility, form-field highlight, paper color) that live
 /// in [PdfEditingPreferences] and never touch the document.
 class PdfShellViewOptionsButton extends StatelessWidget {
-  const PdfShellViewOptionsButton({super.key, required this.preferences});
+  const PdfShellViewOptionsButton({
+    super.key,
+    required this.preferences,
+    this.reflow = false,
+  });
 
   final PdfEditingPreferences preferences;
+  final bool reflow;
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +75,8 @@ class PdfShellViewOptionsButton extends StatelessWidget {
             preferences.showAnnotations = !preferences.showAnnotations;
           case _ViewOption.formHighlight:
             preferences.highlightFormFields = !preferences.highlightFormFields;
+          case _ViewOption.reflow:
+            preferences.showReflowView = !preferences.showReflowView;
           case _ViewOption.pageColor:
             final color = await showPdfColorPicker(
               context,
@@ -94,6 +101,13 @@ class PdfShellViewOptionsButton extends StatelessWidget {
           checked: preferences.highlightFormFields,
           child: const Text('Highlight form fields'),
         ),
+        if (reflow)
+          CheckedPopupMenuItem(
+            key: const ValueKey('pdf-shell-reflow-view'),
+            value: _ViewOption.reflow,
+            checked: preferences.showReflowView,
+            child: const Text('Reflow text'),
+          ),
         const PopupMenuItem(
           key: ValueKey('pdf-shell-page-color'),
           value: _ViewOption.pageColor,

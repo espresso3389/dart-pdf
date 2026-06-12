@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
@@ -86,4 +88,81 @@ void main() {
     // are in or out, no partial text
     expect(text.textIn(const PdfRect(200, 700, 300, 760)), '');
   });
+
+  test('reflow reads visual columns before stream order', () {
+    final doc = PdfDocument.open(_buildTextPdf([
+      _textAt(320, 720, 'Right top'),
+      _textAt(72, 720, 'Left top'),
+      _textAt(320, 704, 'Right bottom'),
+      _textAt(72, 704, 'Left bottom'),
+    ]));
+
+    final page = PdfTextExtractor.reflowPage(doc, 0);
+
+    expect(page.blocks.map((block) => block.text), [
+      'Left top Left bottom',
+      'Right top Right bottom',
+    ]);
+  });
+
+  test('reflow splits paragraphs on vertical gaps', () {
+    final doc = PdfDocument.open(_buildTextPdf([
+      _textAt(72, 720, 'First line'),
+      _textAt(72, 704, 'continues here'),
+      _textAt(72, 660, 'Second paragraph'),
+    ]));
+
+    final page = PdfTextExtractor.reflowPage(doc, 0);
+
+    expect(page.blocks.map((block) => block.text), [
+      'First line continues here',
+      'Second paragraph',
+    ]);
+  });
+
+  test('reflow repairs line-end hyphenation', () {
+    final doc = PdfDocument.open(_buildTextPdf([
+      _textAt(72, 720, 'para-'),
+      _textAt(72, 704, 'graph text'),
+    ]));
+
+    final page = PdfTextExtractor.reflowPage(doc, 0);
+
+    expect(page.text, 'paragraph text');
+  });
+}
+
+String _textAt(num x, num y, String text) =>
+    'BT /F1 12 Tf $x $y Td (${_escapePdfText(text)}) Tj ET';
+
+String _escapePdfText(String text) =>
+    text.replaceAll('\\', r'\\').replaceAll('(', r'\(').replaceAll(')', r'\)');
+
+Uint8List _buildTextPdf(List<String> operations) {
+  final content = operations.join('\n');
+  final objects = <String>[
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R '
+        '/Resources << /Font << /F1 5 0 R >> >> >>',
+    '<< /Length ${content.length} >>\nstream\n$content\nendstream',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+  ];
+  final buffer = StringBuffer('%PDF-1.4\n');
+  final offsets = <int>[];
+  for (var i = 0; i < objects.length; i++) {
+    offsets.add(buffer.length);
+    buffer.write('${i + 1} 0 obj\n${objects[i]}\nendobj\n');
+  }
+  final xrefOffset = buffer.length;
+  buffer
+    ..write('xref\n0 ${objects.length + 1}\n')
+    ..write('0000000000 65535 f \n');
+  for (final offset in offsets) {
+    buffer.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
+  }
+  buffer
+    ..write('trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n')
+    ..write('startxref\n$xrefOffset\n%%EOF\n');
+  return ascii(buffer.toString());
 }

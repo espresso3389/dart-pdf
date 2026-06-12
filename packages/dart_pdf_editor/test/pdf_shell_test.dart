@@ -25,8 +25,8 @@ void main() {
       expect(find.byKey(const ValueKey('pdf-search-field')), findsOneWidget);
       expect(
           find.byKey(const ValueKey('pdf-page-number-field')), findsOneWidget);
-      expect(find.byKey(const ValueKey('pdf-shell-view-options')),
-          findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('pdf-shell-view-options')), findsOneWidget);
       expect(find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
           findsOneWidget);
       // view-only: no editing toolbar anywhere
@@ -34,8 +34,7 @@ void main() {
       expect(find.byType(PdfViewer), findsOneWidget);
     });
 
-    testWidgets('PdfReaderFeatures.none leaves just the pages',
-        (tester) async {
+    testWidgets('PdfReaderFeatures.none leaves just the pages', (tester) async {
       await pump(
         tester,
         PdfReader(
@@ -71,7 +70,8 @@ void main() {
       await pump(
           tester, PdfReader(bytes: buildMultiPagePdf(2), preferences: prefs));
       expect(find.byType(PdfThumbnailSidebar), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
+      await tester.tap(
+          find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
           kind: PointerDeviceKind.mouse);
       await tester.pump();
       expect(find.byType(PdfThumbnailSidebar), findsNothing);
@@ -99,17 +99,39 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('pdf-shell-view-options')),
           kind: PointerDeviceKind.mouse);
       await tester.pumpAndSettle();
-      await tester.tap(
-          find.byKey(const ValueKey('pdf-shell-show-annotations')),
+      await tester.tap(find.byKey(const ValueKey('pdf-shell-show-annotations')),
           kind: PointerDeviceKind.mouse);
       await tester.pumpAndSettle();
       expect(prefs.showAnnotations, isFalse);
     });
+
+    testWidgets('view options can switch to reflow text', (tester) async {
+      final prefs = PdfEditingPreferences();
+      addTearDown(prefs.dispose);
+      await pump(
+          tester, PdfReader(bytes: buildClassicPdf(), preferences: prefs));
+      expect(find.byType(PdfViewer), findsOneWidget);
+      expect(find.byType(PdfReflowView), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('pdf-shell-view-options')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('pdf-shell-reflow-view')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+
+      expect(prefs.showReflowView, isTrue);
+      expect(find.byType(PdfViewer), findsNothing);
+      expect(find.byType(PdfThumbnailSidebar), findsNothing);
+      expect(find.byKey(const ValueKey('pdf-search-field')), findsNothing);
+      expect(find.byKey(const ValueKey('pdf-page-number-field')), findsNothing);
+      expect(find.byType(PdfReflowView), findsOneWidget);
+      expect(find.text('Hello, world!'), findsOneWidget);
+    });
   });
 
   group('PdfEditorView', () {
-    testWidgets('stock chrome: header, toolbar, panel toggles',
-        (tester) async {
+    testWidgets('stock chrome: header, toolbar, panel toggles', (tester) async {
       await pump(tester, PdfEditorView(bytes: buildMultiPagePdf(2)));
       expect(find.byType(PdfEditingToolbar), findsOneWidget);
       expect(find.byKey(const ValueKey('pdf-search-field')), findsOneWidget);
@@ -190,8 +212,7 @@ void main() {
 
     testWidgets('toolbar buttons drive the owned session', (tester) async {
       await pump(tester, PdfEditorView(bytes: buildMultiPagePdf(1)));
-      await tester.tap(find.byIcon(Icons.draw),
-          kind: PointerDeviceKind.mouse);
+      await tester.tap(find.byIcon(Icons.draw), kind: PointerDeviceKind.mouse);
       await tester.pump();
       // the draw button reads back as armed from the internal session
       final button = tester.widget<IconButton>(find.ancestor(
@@ -223,8 +244,7 @@ void main() {
       expect(reported.last, editing.bytes.length);
     });
 
-    testWidgets('save button hands the host the current bytes',
-        (tester) async {
+    testWidgets('save button hands the host the current bytes', (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(1));
       addTearDown(editing.dispose);
       List<int>? saved;
@@ -256,15 +276,11 @@ void main() {
     testWidgets('swapping bytes opens a fresh session', (tester) async {
       final viewer = PdfViewerController();
       addTearDown(viewer.dispose);
-      await pump(
-          tester,
-          PdfEditorView(
-              bytes: buildMultiPagePdf(1), viewerController: viewer));
+      await pump(tester,
+          PdfEditorView(bytes: buildMultiPagePdf(1), viewerController: viewer));
       expect(viewer.pageCount, 1);
-      await pump(
-          tester,
-          PdfEditorView(
-              bytes: buildMultiPagePdf(3), viewerController: viewer));
+      await pump(tester,
+          PdfEditorView(bytes: buildMultiPagePdf(3), viewerController: viewer));
       expect(viewer.pageCount, 3);
     });
 

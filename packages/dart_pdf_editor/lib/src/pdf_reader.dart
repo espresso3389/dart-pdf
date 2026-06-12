@@ -5,6 +5,7 @@ import 'editing/editing_controller.dart';
 import 'editing/editing_preferences.dart';
 import 'editing/editing_thumbnails.dart';
 import 'page_number_field.dart';
+import 'pdf_reflow_view.dart';
 import 'pdf_viewer.dart';
 import 'search_panel.dart';
 import 'shell_chrome.dart';
@@ -190,13 +191,13 @@ class _PdfReaderState extends State<PdfReader> {
           if (features.headerBar)
             PdfShellBar(
               leading: [
-                if (features.search)
+                if (features.search && !prefs.showReflowView)
                   PdfSearchField(
                     controller: _viewer,
                     searchController: _searchField,
                     focusNode: _searchFocus,
                   ),
-                if (features.pageNumber)
+                if (features.pageNumber && !prefs.showReflowView)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: PdfPageNumberField(controller: _viewer),
@@ -204,7 +205,7 @@ class _PdfReaderState extends State<PdfReader> {
               ],
               trailing: [
                 if (features.viewOptions)
-                  PdfShellViewOptionsButton(preferences: prefs),
+                  PdfShellViewOptionsButton(preferences: prefs, reflow: true),
                 if (features.thumbnails)
                   PdfShellToggleButton(
                     key: const ValueKey('pdf-shell-thumbnails-toggle'),
@@ -220,7 +221,9 @@ class _PdfReaderState extends State<PdfReader> {
             // keyed so a panel appearing never recreates the viewer
             // element (which would reset the reading position)
             child: Row(children: [
-              if (features.thumbnails && prefs.showThumbnailSidebar)
+              if (features.thumbnails &&
+                  prefs.showThumbnailSidebar &&
+                  !prefs.showReflowView)
                 PdfThumbnailSidebar(
                   key: const ValueKey('pdf-shell-thumbnails'),
                   controller: _session,
@@ -231,17 +234,22 @@ class _PdfReaderState extends State<PdfReader> {
                 ),
               Expanded(
                 key: const ValueKey('pdf-shell-viewer'),
-                child: PdfViewer(
-                  document: _session.document,
-                  controller: _viewer,
-                  onAction: widget.onAction,
-                  pageOverlayBuilder: widget.pageOverlayBuilder,
-                  initialFit: widget.initialFit,
-                  backgroundColor: widget.backgroundColor,
-                  pageColor: pageColor,
-                  showAnnotations: prefs.showAnnotations,
-                  highlightFormFields: prefs.highlightFormFields,
-                ),
+                child: prefs.showReflowView
+                    ? PdfReflowView(
+                        document: _session.document,
+                        backgroundColor: widget.backgroundColor,
+                      )
+                    : PdfViewer(
+                        document: _session.document,
+                        controller: _viewer,
+                        onAction: widget.onAction,
+                        pageOverlayBuilder: widget.pageOverlayBuilder,
+                        initialFit: widget.initialFit,
+                        backgroundColor: widget.backgroundColor,
+                        pageColor: pageColor,
+                        showAnnotations: prefs.showAnnotations,
+                        highlightFormFields: prefs.highlightFormFields,
+                      ),
               ),
             ]),
           ),

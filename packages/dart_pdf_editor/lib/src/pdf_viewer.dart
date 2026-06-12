@@ -596,9 +596,15 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   /// With ctrl/cmd held the list is out of the hit path (IgnorePointer),
   /// this registration wins, and the wheel zooms around the pointer.
   /// Without a modifier the list's own registration wins while it can
-  /// scroll; at the scroll extents this wins instead — zoomed in it pans
-  /// the zoom window (keeping the document's ends reachable), otherwise
-  /// it just soaks the event up so nothing else zooms.
+  /// scroll; this wins instead at the scroll extents AND whenever the
+  /// list refuses wheel events outright — with an editing tool armed its
+  /// physics is NeverScrollableScrollPhysics, and on web every trackpad
+  /// two-finger pan arrives as a wheel event (no PointerPanZoomEvents
+  /// there), so this path must scroll the document itself: vertical
+  /// deltas drive the scroll position directly (jumpTo bypasses physics,
+  /// like the trackpad and scrollbar paths) and whatever the extents
+  /// can't absorb pans the zoom window, horizontal deltas pan the zoom
+  /// window.
   void _onPointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
     GestureBinding.instance.pointerSignalResolver.register(event, (event) {
@@ -607,12 +613,22 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       _touchFlinger.stop();
       if (_zoomModifierDown) {
         _applyWheelZoom(scroll);
-      } else if (_zoomed) {
-        final matrix = _transform.value.clone();
-        matrix.storage[12] -= scroll.scrollDelta.dx;
-        matrix.storage[13] -= scroll.scrollDelta.dy;
-        _transform.value = _clampedTransform(matrix);
+        return;
       }
+      final matrix = _transform.value.clone();
+      final scale = matrix.getMaxScaleOnAxis();
+      final zoomed = scale > 1.01;
+      if (zoomed) matrix.storage[12] -= scroll.scrollDelta.dx;
+      if (_scroll.hasClients && scroll.scrollDelta.dy != 0) {
+        final position = _scroll.position;
+        // deltas are screen pixels; the list lives under the zoom transform
+        final target = position.pixels + scroll.scrollDelta.dy / scale;
+        final clamped =
+            target.clamp(position.minScrollExtent, position.maxScrollExtent);
+        if (clamped != position.pixels) position.jumpTo(clamped);
+        if (zoomed) matrix.storage[13] -= (target - clamped) * scale;
+      }
+      if (zoomed) _transform.value = _clampedTransform(matrix);
     });
   }
 
@@ -2102,7 +2118,10 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
         controller: _scroll,
         // with a tool armed, touch drags belong to the editing overlay —
         // the list's drag recognizer would win vertical-ish strokes in
-        // the arena otherwise. Wheel and trackpad scrolling are unaffected.
+        // the arena otherwise. Desktop trackpad gestures are unaffected
+        // (_onTrackpadPanZoomUpdate drives the position directly); wheel
+        // events — including web trackpad pans, which arrive as wheel —
+        // are refused by these physics and handled by _onPointerSignal.
         physics:
             editing?.tool != null ? const NeverScrollableScrollPhysics() : null,
         // every page's extent is known up front, so give the sliver exact

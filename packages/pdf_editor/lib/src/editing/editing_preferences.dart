@@ -50,7 +50,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   PdfStandardFont _fontFamily = PdfStandardFont.helvetica;
   double _opacity = 1;
   bool _fingerDrawsInk = true;
-  bool _showThumbnailSidebar = false;
+  bool _showThumbnailSidebar = true;
   bool _showAnnotationSidebar = false;
   String? _author;
   PdfInkSignature? _signature;
@@ -105,8 +105,9 @@ class PdfEditingPreferences extends ChangeNotifier {
       }
       final colorPickerFormat = store.getString('${_prefix}colorPickerFormat');
       if (colorPickerFormat != null) {
-        _colorPickerFormat = PdfColorFormat.values.asNameMap()[colorPickerFormat] ??
-            _colorPickerFormat;
+        _colorPickerFormat =
+            PdfColorFormat.values.asNameMap()[colorPickerFormat] ??
+                _colorPickerFormat;
       }
       final pageColor = store.getInt('${_prefix}pageColor');
       if (pageColor != null) _pageColor = Color(pageColor);

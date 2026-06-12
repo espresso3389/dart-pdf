@@ -53,6 +53,7 @@ class PdfThumbnailSidebar extends StatefulWidget {
     this.minWidth = 100,
     this.maxWidth = 400,
     this.followsViewer = true,
+    this.allowPageEditing = true,
   });
 
   final PdfEditingController controller;
@@ -86,6 +87,11 @@ class PdfThumbnailSidebar extends StatefulWidget {
   /// Whether the strip scrolls the current page's tile into view when
   /// the viewer's page changes.
   final bool followsViewer;
+
+  /// Whether pages can be reordered (drag) and deleted (footer button)
+  /// from the strip. False makes it purely navigational — the mode a
+  /// read-only viewer wants.
+  final bool allowPageEditing;
 
   /// How many thumbnails have actually been rasterized — cache misses
   /// only, across all sidebars. Tests assert on the deltas.
@@ -255,20 +261,24 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
                   padding: EdgeInsets.fromLTRB(0, 8, _extraRightPadding, 8),
                   itemCount: controller.document.pageCount,
                   onReorderItem: controller.movePage,
-                  itemBuilder: (context, index) => _ReorderDragStartListener(
-                    key: ValueKey(index),
-                    index: index,
-                    child: _PageTile(
+                  itemBuilder: (context, index) {
+                    final tile = _PageTile(
                       key: _tileKeys[index] ??= GlobalKey(),
                       controller: controller,
                       viewerController: widget.viewerController,
                       pageIndex: index,
                       pageColor: widget.pageColor,
                       showAnnotations: widget.showAnnotations,
+                      allowPageEditing: widget.allowPageEditing,
                       cache: _cache,
                       tileWidth: _tileWidth,
-                    ),
-                  ),
+                    );
+                    // without the drag listener no reorder can ever start
+                    return widget.allowPageEditing
+                        ? _ReorderDragStartListener(
+                            key: ValueKey(index), index: index, child: tile)
+                        : KeyedSubtree(key: ValueKey(index), child: tile);
+                  },
                 ),
               ),
             ),
@@ -345,6 +355,7 @@ class _PageTile extends StatelessWidget {
     required this.pageIndex,
     required this.pageColor,
     required this.showAnnotations,
+    required this.allowPageEditing,
     required this.cache,
     required this.tileWidth,
   });
@@ -354,6 +365,7 @@ class _PageTile extends StatelessWidget {
   final int pageIndex;
   final Color pageColor;
   final bool showAnnotations;
+  final bool allowPageEditing;
   final _ThumbnailCache cache;
   final double tileWidth;
 
@@ -435,7 +447,7 @@ class _PageTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelMedium),
                 ),
-                if (document.pageCount > 1)
+                if (allowPageEditing && document.pageCount > 1)
                   IconButton(
                     icon: const Icon(Icons.delete_outline, size: 16),
                     tooltip: 'Delete page',

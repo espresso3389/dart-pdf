@@ -26,6 +26,11 @@ class PdfEditingToolbar extends StatelessWidget {
     this.onSave,
     this.textPrompt = showPdfTextPrompt,
     this.palette = defaultPalette,
+    this.tools,
+    this.showMarkup = true,
+    this.showUndoRedo = true,
+    this.showStyle = true,
+    this.showFlatten = true,
   });
 
   final PdfEditingController controller;
@@ -43,6 +48,27 @@ class PdfEditingToolbar extends StatelessWidget {
 
   /// The colors offered for new annotations.
   final List<Color> palette;
+
+  /// The tool buttons to show, null meaning all of them. Sub-controls
+  /// tied to an armed tool (the stamp picker, the form field-type menu)
+  /// follow their tool. Hiding a button doesn't disable the tool — it
+  /// can still be armed through the controller.
+  final Set<PdfEditTool>? tools;
+
+  /// Whether the text-markup buttons (highlight, underline, strike out,
+  /// squiggly — they act on the viewer's text selection) are shown.
+  final bool showMarkup;
+
+  /// Whether the undo/redo buttons are shown. The viewer's ⌘Z/⇧⌘Z
+  /// shortcuts work either way.
+  final bool showUndoRedo;
+
+  /// Whether the style controls (color palette, color picker,
+  /// eyedropper, and the stroke/opacity/font popup) are shown.
+  final bool showStyle;
+
+  /// Whether the flatten-annotations button is shown.
+  final bool showFlatten;
 
   static const defaultPalette = [
     Color(0xFFE53935), // red
@@ -143,13 +169,17 @@ class PdfEditingToolbar extends StatelessWidget {
             final hasTextSelection = viewerController.hasSelection;
             final selected = controller.selectedAnnotation;
 
+            bool shows(PdfEditTool value) => tools?.contains(value) ?? true;
+
             Widget toolButton(PdfEditTool value, IconData icon, String tip) =>
-                IconButton(
-                  icon: Icon(icon),
-                  tooltip: tip,
-                  isSelected: controller.tool == value,
-                  onPressed: () => _toggleTool(value),
-                );
+                !shows(value)
+                    ? const SizedBox.shrink()
+                    : IconButton(
+                        icon: Icon(icon),
+                        tooltip: tip,
+                        isSelected: controller.tool == value,
+                        onPressed: () => _toggleTool(value),
+                      );
 
             Widget markupButton(
                     PdfMarkupKind kind, IconData icon, String tip) =>
@@ -162,26 +192,30 @@ class PdfEditingToolbar extends StatelessWidget {
             return SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(children: [
-                IconButton(
-                  icon: const Icon(Icons.undo),
-                  tooltip: 'Undo (⌘Z)',
-                  onPressed: controller.canUndo ? controller.undo : null,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.redo),
-                  tooltip: 'Redo (⇧⌘Z)',
-                  onPressed: controller.canRedo ? controller.redo : null,
-                ),
-                const VerticalDivider(width: 16),
-                markupButton(PdfMarkupKind.highlight, Icons.border_color,
-                    'Highlight selection'),
-                markupButton(PdfMarkupKind.underline, Icons.format_underlined,
-                    'Underline selection'),
-                markupButton(PdfMarkupKind.strikeOut,
-                    Icons.format_strikethrough, 'Strike out selection'),
-                markupButton(PdfMarkupKind.squiggly, Icons.gesture,
-                    'Squiggly-underline selection'),
-                const VerticalDivider(width: 16),
+                if (showUndoRedo) ...[
+                  IconButton(
+                    icon: const Icon(Icons.undo),
+                    tooltip: 'Undo (⌘Z)',
+                    onPressed: controller.canUndo ? controller.undo : null,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.redo),
+                    tooltip: 'Redo (⇧⌘Z)',
+                    onPressed: controller.canRedo ? controller.redo : null,
+                  ),
+                  const VerticalDivider(width: 16),
+                ],
+                if (showMarkup) ...[
+                  markupButton(PdfMarkupKind.highlight, Icons.border_color,
+                      'Highlight selection'),
+                  markupButton(PdfMarkupKind.underline, Icons.format_underlined,
+                      'Underline selection'),
+                  markupButton(PdfMarkupKind.strikeOut,
+                      Icons.format_strikethrough, 'Strike out selection'),
+                  markupButton(PdfMarkupKind.squiggly, Icons.gesture,
+                      'Squiggly-underline selection'),
+                  const VerticalDivider(width: 16),
+                ],
                 toolButton(PdfEditTool.select, Icons.near_me, 'Select'),
                 if (selected != null) ...[
                   IconButton(
@@ -249,12 +283,13 @@ class PdfEditingToolbar extends StatelessWidget {
                     onPressed: () =>
                         showPdfStampPicker(context, controller: controller),
                   ),
-                IconButton(
-                  icon: const Icon(Icons.history_edu),
-                  tooltip: 'Signature — tap a page to place it',
-                  isSelected: controller.tool == PdfEditTool.signature,
-                  onPressed: () => _toggleSignatureTool(context),
-                ),
+                if (shows(PdfEditTool.signature))
+                  IconButton(
+                    icon: const Icon(Icons.history_edu),
+                    tooltip: 'Signature — tap a page to place it',
+                    isSelected: controller.tool == PdfEditTool.signature,
+                    onPressed: () => _toggleSignatureTool(context),
+                  ),
                 if (controller.tool == PdfEditTool.signature)
                   IconButton(
                     icon: const Icon(Icons.restart_alt),
@@ -315,57 +350,62 @@ class PdfEditingToolbar extends StatelessWidget {
                       onPressed: () => _editElementText(context),
                     ),
                 ],
-                const VerticalDivider(width: 16),
-                for (final color in palette)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: InkWell(
-                      onTap: () => _applyColor(color),
-                      customBorder: const CircleBorder(),
-                      child: Container(
-                        width: 22,
-                        height: 22,
-                        decoration: BoxDecoration(
-                          color: color,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            // theme outline: visible on light and dark chrome
-                            color: controller.color == color
-                                ? Theme.of(context).colorScheme.primary
-                                : Theme.of(context).colorScheme.outline,
-                            width: controller.color == color ? 3 : 1,
+                if (showStyle) ...[
+                  const VerticalDivider(width: 16),
+                  for (final color in palette)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2),
+                      child: InkWell(
+                        onTap: () => _applyColor(color),
+                        customBorder: const CircleBorder(),
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              // theme outline: visible on light and dark chrome
+                              color: controller.color == color
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).colorScheme.outline,
+                              width: controller.color == color ? 3 : 1,
+                            ),
                           ),
                         ),
                       ),
                     ),
+                  IconButton(
+                    icon: Icon(Icons.palette, color: controller.color),
+                    tooltip: 'More colors…',
+                    onPressed: () async {
+                      final picked = await showPdfColorPicker(context,
+                          initial: controller.color,
+                          initialFormat:
+                              controller.preferences.colorPickerFormat,
+                          onFormatChanged: (format) => controller
+                              .preferences.colorPickerFormat = format);
+                      if (picked != null) _applyColor(picked);
+                    },
                   ),
-                IconButton(
-                  icon: Icon(Icons.palette, color: controller.color),
-                  tooltip: 'More colors…',
-                  onPressed: () async {
-                    final picked = await showPdfColorPicker(context,
-                        initial: controller.color,
-                        initialFormat: controller.preferences.colorPickerFormat,
-                        onFormatChanged: (format) =>
-                            controller.preferences.colorPickerFormat = format);
-                    if (picked != null) _applyColor(picked);
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.colorize),
-                  tooltip: 'Pick a color from the page',
-                  isSelected: controller.isPickingColor,
-                  onPressed: () => controller.isPickingColor
-                      ? controller.cancelColorPick()
-                      : controller.startColorPick(),
-                ),
-                _StyleMenu(controller: controller, palette: palette),
-                const VerticalDivider(width: 16),
-                IconButton(
-                  icon: const Icon(Icons.layers),
-                  tooltip: 'Flatten annotations into the pages',
-                  onPressed: controller.flattenAllAnnotations,
-                ),
+                  IconButton(
+                    icon: const Icon(Icons.colorize),
+                    tooltip: 'Pick a color from the page',
+                    isSelected: controller.isPickingColor,
+                    onPressed: () => controller.isPickingColor
+                        ? controller.cancelColorPick()
+                        : controller.startColorPick(),
+                  ),
+                  _StyleMenu(controller: controller, palette: palette),
+                ],
+                if (showFlatten || onSave != null)
+                  const VerticalDivider(width: 16),
+                if (showFlatten)
+                  IconButton(
+                    icon: const Icon(Icons.layers),
+                    tooltip: 'Flatten annotations into the pages',
+                    onPressed: controller.flattenAllAnnotations,
+                  ),
                 if (onSave != null)
                   IconButton(
                     icon: const Icon(Icons.save_alt),

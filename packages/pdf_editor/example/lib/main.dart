@@ -86,16 +86,18 @@ class ViewerScreen extends StatefulWidget {
 
 class _ViewerScreenState extends State<ViewerScreen> {
   final _controller = PdfViewerController();
-  final _searchField = TextEditingController();
-  final _searchFocus = FocusNode();
 
   PdfEditingPreferences get _prefs => widget.prefs;
 
-  /// The open document's editing session: owns the bytes, the document
-  /// revisions, undo/redo, and the editing tool state.
-  PdfEditingController? _editing;
+  /// The open document's bytes — PdfEditorView/PdfReader own the rest
+  /// (edit session, search, panels, toolbar).
+  Uint8List? _bytes;
   String _title = '';
   String? _error;
+
+  /// Demo of the two drop-in widgets: the toggle swaps the full
+  /// [PdfEditorView] for the view-only [PdfReader].
+  bool _readOnly = false;
 
   // app state the interactive demo's PDF links and overlays manipulate
   bool _isDemo = false;
@@ -159,16 +161,13 @@ class _ViewerScreenState extends State<ViewerScreen> {
   }
 
   void _openBytes(Uint8List bytes, String title, {bool isDemo = false}) {
-    final previous = _editing;
     setState(() {
-      _editing = PdfEditingController(bytes, preferences: _prefs);
+      _bytes = bytes;
       _title = title;
       _error = null;
       _isDemo = isDemo;
       if (isDemo) _counter = 0;
-      _searchField.clear();
     });
-    previous?.dispose();
   }
 
   void _openDemo() =>
@@ -245,8 +244,6 @@ class _ViewerScreenState extends State<ViewerScreen> {
   @override
   void initState() {
     super.initState();
-    // repaint the chrome when a preference (panel visibility) changes
-    _prefs.addListener(_onPrefsChanged);
     // open a file straight away with:
     //   flutter run -d macos --dart-define=PDF=/path/to/file.pdf
     const preset = String.fromEnvironment('PDF');
@@ -257,23 +254,10 @@ class _ViewerScreenState extends State<ViewerScreen> {
     }
   }
 
-  void _onPrefsChanged() => setState(() {});
-
-  /// ⌘F / Ctrl+F: jump to the search field, ready to overtype.
-  void _focusSearch() {
-    _searchFocus.requestFocus();
-    _searchField.selection =
-        TextSelection(baseOffset: 0, extentOffset: _searchField.text.length);
-  }
-
   @override
   void dispose() {
-    _prefs.removeListener(_onPrefsChanged);
     _controller.dispose();
-    _searchField.dispose();
-    _searchFocus.dispose();
     _noteField.dispose();
-    _editing?.dispose();
     super.dispose();
   }
 
@@ -335,136 +319,44 @@ class _ViewerScreenState extends State<ViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final editing = _editing;
-    // the inline search field fits a desktop app bar; narrow (phone)
-    // layouts get a slim second row instead
-    final wideBar = MediaQuery.sizeOf(context).width >= 720;
-    // shortcuts bubble up the focus tree, so wrapping the scaffold catches
-    // them with focus anywhere inside — including on the viewer itself
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
-            _focusSearch,
-        const SingleActivator(LogicalKeyboardKey.keyF, control: true):
-            _focusSearch,
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(_title.isEmpty ? 'dart-pdf viewer' : _title,
-              overflow: TextOverflow.ellipsis),
-          actions: [
-            if (editing != null && wideBar) ...[
-              Center(
-                child: PdfSearchField(
-                  controller: _controller,
-                  searchController: _searchField,
-                  focusNode: _searchFocus,
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.manage_search),
-                tooltip: 'Search results',
-                isSelected: _prefs.showSearchResultsPanel,
-                onPressed: () => _prefs.showSearchResultsPanel =
-                    !_prefs.showSearchResultsPanel,
-              ),
-            ],
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Center(child: PdfPageNumberField(controller: _controller)),
-            ),
-            ListenableBuilder(
-              listenable: _controller,
-              builder: (context, _) => !_controller.hasSelection
-                  ? const SizedBox.shrink()
-                  : IconButton(
-                      icon: const Icon(Icons.copy),
-                      tooltip: 'Copy selected text (⌘C)',
-                      onPressed: () async {
-                        await _controller.copySelection();
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Copied to clipboard'),
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-            if (editing != null) ...[
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.grid_view),
-                tooltip: 'Pages',
-                isSelected: _prefs.showThumbnailSidebar,
-                onPressed: () =>
-                    _prefs.showThumbnailSidebar = !_prefs.showThumbnailSidebar,
-              ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.list_alt),
-                tooltip: 'Annotations',
-                isSelected: _prefs.showAnnotationSidebar,
-                onPressed: () => _prefs.showAnnotationSidebar =
-                    !_prefs.showAnnotationSidebar,
-              ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.tune),
-                tooltip: 'Properties',
-                isSelected: _prefs.showPropertiesPanel,
-                onPressed: () =>
-                    _prefs.showPropertiesPanel = !_prefs.showPropertiesPanel,
-              ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.person_outline),
-                tooltip: 'Author name',
-                onPressed: () async {
-                  final name = await showPdfTextPrompt(context,
-                      title: 'Author name', initial: editing.author ?? '');
-                  if (name == null) return;
-                  editing.author = name.trim().isEmpty ? null : name.trim();
-                },
-              ),
-            ],
-            // every plain action is compact: the row overflows an 800px
-            // window (the widget-test viewport included) at full density
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: Icon(_prefs.showAnnotations
-                  ? Icons.visibility
-                  : Icons.visibility_off),
-              tooltip: _prefs.showAnnotations
-                  ? 'Hide annotations'
-                  : 'Show annotations',
-              onPressed: () => _prefs.showAnnotations = !_prefs.showAnnotations,
-            ),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.dynamic_form),
-              tooltip: _prefs.highlightFormFields
-                  ? 'Hide form field highlight'
-                  : 'Highlight form fields',
-              isSelected: _prefs.highlightFormFields,
-              onPressed: () =>
-                  _prefs.highlightFormFields = !_prefs.highlightFormFields,
-            ),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.format_color_fill),
-              tooltip: 'Page color',
-              onPressed: () async {
-                final color = await showPdfColorPicker(context,
-                    initial: _prefs.pageColor,
-                    initialFormat: _prefs.colorPickerFormat,
-                    onFormatChanged: (format) =>
-                        _prefs.colorPickerFormat = format);
-                if (color != null) _prefs.pageColor = color;
-              },
-            ),
-            IconButton(
+    final bytes = _bytes;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_title.isEmpty ? 'dart-pdf viewer' : _title,
+            overflow: TextOverflow.ellipsis),
+        actions: [
+          ListenableBuilder(
+            listenable: _controller,
+            builder: (context, _) => !_controller.hasSelection
+                ? const SizedBox.shrink()
+                : IconButton(
+                    icon: const Icon(Icons.copy),
+                    tooltip: 'Copy selected text (⌘C)',
+                    onPressed: () async {
+                      await _controller.copySelection();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Copied to clipboard'),
+                          duration: Duration(seconds: 1),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          // every plain action is compact: the row overflows an 800px
+          // window (the widget-test viewport included) at full density
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: Icon(_readOnly ? Icons.edit_off : Icons.edit),
+            tooltip: _readOnly
+                ? 'Read-only (PdfReader) — tap to edit'
+                : 'Editing (PdfEditorView) — tap for read-only',
+            onPressed: () => setState(() => _readOnly = !_readOnly),
+          ),
+          ListenableBuilder(
+            listenable: _prefs,
+            builder: (context, _) => IconButton(
               visualDensity: VisualDensity.compact,
               icon: Icon(switch (_prefs.themeMode) {
                 ThemeMode.system => Icons.brightness_auto,
@@ -482,124 +374,65 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 ThemeMode.dark => ThemeMode.system,
               },
             ),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.auto_awesome),
-              tooltip: 'Open the interactive demo',
-              onPressed: _openDemo,
-            ),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.folder_open),
-              tooltip: 'Open PDF',
-              onPressed: _pickFile,
-            ),
-          ],
-          bottom: editing == null || wideBar
-              ? null
-              : PreferredSize(
-                  preferredSize: const Size.fromHeight(48),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                    child: Row(children: [
-                      PdfSearchField(
-                        controller: _controller,
-                        searchController: _searchField,
-                        focusNode: _searchFocus,
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.manage_search),
-                        tooltip: 'Search results',
-                        isSelected: _prefs.showSearchResultsPanel,
-                        onPressed: () => _prefs.showSearchResultsPanel =
-                            !_prefs.showSearchResultsPanel,
-                      ),
-                    ]),
-                  ),
-                ),
-        ),
-        body: switch ((editing, _error)) {
-          (_, final String error) => Center(
-              child: Text(error, textAlign: TextAlign.center),
-            ),
-          (null, _) => Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  FilledButton.icon(
-                    onPressed: _pickFile,
-                    icon: const Icon(Icons.folder_open),
-                    label: const Text('Open a PDF'),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.tonalIcon(
-                    onPressed: _openDemo,
-                    icon: const Icon(Icons.auto_awesome),
-                    label: const Text('Try the interactive demo'),
-                  ),
-                ],
-              ),
-            ),
-          // the editing controller owns the document revisions: rebuild the
-          // viewer with the current one whenever the controller notifies
-          // the children are keyed so a panel appearing or disappearing
-          // never recreates the viewer element (which would reset the
-          // reading position and re-run the initial fit)
-          (final PdfEditingController session, _) => Row(children: [
-              if (_prefs.showThumbnailSidebar)
-                PdfThumbnailSidebar(
-                  key: const ValueKey('thumbnail-sidebar'),
-                  controller: session,
-                  viewerController: _controller,
-                  pageColor: _prefs.pageColor,
-                  showAnnotations: _prefs.showAnnotations,
-                ),
-              if (_prefs.showSearchResultsPanel)
-                PdfSearchResultsPanel(
-                  key: const ValueKey('search-panel'),
-                  controller: _controller,
-                  preferences: _prefs,
-                ),
-              Expanded(
-                key: const ValueKey('viewer'),
-                child: ListenableBuilder(
-                  listenable: session,
-                  builder: (context, _) => PdfViewer(
-                    document: session.document,
-                    controller: _controller,
-                    onAction: _onAction,
-                    pageOverlayBuilder: _isDemo ? _demoOverlays : null,
-                    editing: session,
-                    annotationMenuBuilder: _annotationMenuActions,
-                    formImagePicker: _pickFormImage,
-                    pageColor: _prefs.pageColor,
-                    showAnnotations: _prefs.showAnnotations,
-                    highlightFormFields: _prefs.highlightFormFields,
-                  ),
-                ),
-              ),
-              if (_prefs.showAnnotationSidebar)
-                PdfAnnotationSidebar(
-                  key: const ValueKey('annotation-sidebar'),
-                  controller: session,
-                  viewerController: _controller,
-                ),
-              if (_prefs.showPropertiesPanel)
-                PdfAnnotationPropertiesPanel(
-                  key: const ValueKey('properties-panel'),
-                  controller: session,
-                ),
-            ]),
-        },
-        bottomNavigationBar: editing == null
-            ? null
-            : PdfEditingToolbar(
-                controller: editing,
-                viewerController: _controller,
-                onSave: (bytes) => unawaited(_saveAs(bytes)),
-              ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.auto_awesome),
+            tooltip: 'Open the interactive demo',
+            onPressed: _openDemo,
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.folder_open),
+            tooltip: 'Open PDF',
+            onPressed: _pickFile,
+          ),
+        ],
       ),
+      body: switch ((bytes, _error)) {
+        (_, final String error) => Center(
+            child: Text(error, textAlign: TextAlign.center),
+          ),
+        (null, _) => Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FilledButton.icon(
+                  onPressed: _pickFile,
+                  icon: const Icon(Icons.folder_open),
+                  label: const Text('Open a PDF'),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  onPressed: _openDemo,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('Try the interactive demo'),
+                ),
+              ],
+            ),
+          ),
+        // the two drop-in widgets carry all the PDF chrome (search,
+        // page number, panels, toolbar) — the app only supplies bytes,
+        // its file handling, and the demo's app-side wiring
+        (final Uint8List data, _) => _readOnly
+            ? PdfReader(
+                bytes: data,
+                controller: _controller,
+                preferences: _prefs,
+                onAction: _onAction,
+                pageOverlayBuilder: _isDemo ? _demoOverlays : null,
+              )
+            : PdfEditorView(
+                bytes: data,
+                viewerController: _controller,
+                preferences: _prefs,
+                onSave: (saved) => unawaited(_saveAs(saved)),
+                onAction: _onAction,
+                pageOverlayBuilder: _isDemo ? _demoOverlays : null,
+                annotationMenuBuilder: _annotationMenuActions,
+                formImagePicker: _pickFormImage,
+              ),
+      },
     );
   }
 }

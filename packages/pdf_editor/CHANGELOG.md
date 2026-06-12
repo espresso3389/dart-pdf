@@ -4,6 +4,12 @@
 
 Initial release.
 
+- Drop-in widgets: `PdfEditorView` (the full editor — header bar with
+  search and panel toggles, all panels, the editing toolbar, save) and
+  `PdfReader` (view-only with search, page navigation, and a read-only
+  thumbnail strip), both theme-following and configurable via
+  `PdfEditorFeatures`/`PdfReaderFeatures` (features and tools toggle
+  off; styling via the Material theme and `PdfViewerTheme`).
 - `PdfViewer`: zooming/panning viewer with text selection, search,
   link navigation, page-fit modes, deep-zoom detail rendering,
   theming (`PdfViewerTheme`), dark mode, and custom page colors.

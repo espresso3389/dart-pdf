@@ -1548,3 +1548,38 @@ TargetPlatformVariant.only(...)`. A touch tap with ink armed draws a
 DOT whose 800ms auto-commit timer outlives the test (!timersPending)
 — touch in reader mode, then arm ink. flutter_test's default platform
 is android, so existing touch_app-dependent tests pass unchanged.
+Drop-in shells (Ben: out-of-the-box viewer/editor widgets; the example
+must use them): `PdfReader` (pdf_reader.dart) and `PdfEditorView`
+(pdf_editor_view.dart), both exported — composed entirely from the
+existing public parts. Shared package-private chrome in
+shell_chrome.dart: `PdfShellBar` (header = spaceBetween Row inside
+ConstrainedBox(minWidth: viewport) inside a horizontal scroll — a
+Spacer can't live in an unbounded-width Row), `PdfShellViewOptionsButton`
+(menu: show annotations / highlight form fields / page color…), toggle
+keys 'pdf-shell-*'. Both shells: bytes in (the reader wraps them in a
+never-edited PdfEditingController so thumbnails + pageAt caching work),
+optional external viewer controller, optional shared
+PdfEditingPreferences (owned instances disposed), `viewerTheme` wrap,
+⌘F/Ctrl+F focuses the header search, panels keyed (the viewer-element
+clobber lesson), panel visibility = persisted prefs gated by
+`PdfReaderFeatures`/`PdfEditorFeatures`; swapping `bytes` (identity
+compare) reopens in place via didUpdateWidget. PdfEditorView takes
+bytes XOR an external PdfEditingController (then preferences must be
+null — they come from the controller); `onDocumentChanged` fires per
+revision, detected by bytes LENGTH (revisions are byte prefixes of one
+buffer, so equal length == same revision). PdfEditingToolbar gained
+`tools:` + showMarkup/showUndoRedo/showStyle/showFlatten (filtered
+toolButtons return SizedBox.shrink; the signature button isn't a
+toolButton — gated explicitly). PdfThumbnailSidebar gained
+`allowPageEditing` (false = no _ReorderDragStartListener wrapper +
+no footer delete — the reader's mode). Example app: ViewerScreen now
+holds `Uint8List? _bytes` (no controller management) and swaps
+PdfEditorView/PdfReader with an AppBar read-only toggle; search, page
+number, author, view options, and panel toggles all moved into the
+shell header — AppBar keeps copy/theme/demo/open. The pub-page README
+leads with the example screenshot, which lives at REPO-ROOT
+doc/pdf_editor_example.jpg and is referenced by raw.githubusercontent
+URL — out of the pub archive, renders once the repo is public. Tests:
+pdf_shell_test.dart (16); the example tests passed unchanged (their
+coordinates derive from the live viewer rect, so the 48px header is
+absorbed).

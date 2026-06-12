@@ -4,7 +4,40 @@ A Flutter PDF viewer and editor rendered natively in Dart, with no
 platform views or native PDF libraries. The same code runs on iOS,
 Android, macOS, Windows, Linux, and the web.
 
-There is a [live demo](https://dart-pdf-demo.web.app) of the example app
+![The example app: PdfEditorView showing the feature showcase document](https://raw.githubusercontent.com/ben-milanko/dart-pdf/main/doc/pdf_editor_example.jpg)
+
+Two drop-in widgets carry the whole UI — give them bytes and bounded
+space, and everything in the screenshot above (search, page navigation,
+panels, tools, undo/redo, save) is wired up:
+
+```dart
+import 'package:pdf_editor/pdf_editor.dart';
+
+// A complete PDF editor
+PdfEditorView(
+  bytes: pdfBytes,
+  onSave: (bytes) => /* write the file */,
+)
+
+// A view-only reader
+PdfReader(bytes: pdfBytes)
+```
+
+Both follow the ambient Material `Theme` (dark mode included), persist
+user preferences on the device, and pare down with feature flags:
+
+```dart
+PdfEditorView(
+  bytes: pdfBytes,
+  features: const PdfEditorFeatures(
+    propertiesPanel: false,
+    flatten: false,
+    tools: {PdfEditTool.select, PdfEditTool.ink, PdfEditTool.freeText},
+  ),
+)
+```
+
+Try the [live demo](https://dart-pdf-demo.web.app) of the example app
 on Flutter web, with a built-in feature showcase document.
 
 Built on the pure-Dart
@@ -48,28 +81,34 @@ are byte prefixes of one buffer.
 - Sync: an `annotationChanges` feed plus `applyRemoteChange` for wiring
   annotations to a collaborative store (Firestore, websockets, etc.).
 
-## Quick start
+## Composing your own UI
+
+`PdfEditorView` and `PdfReader` are assembled from public parts —
+`PdfViewer`, `PdfEditingController`, `PdfEditingToolbar`, the panels —
+so apps wanting custom chrome can wire those directly:
 
 ```dart
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_editor/pdf_editor.dart';
 
-// Read-only viewing
+// Just the viewer
 PdfViewer(document: PdfDocument.open(bytes));
 
-// Editing
+// Your own editor layout
 final editing = PdfEditingController(bytes);
+final viewer = PdfViewerController();
 
 ListenableBuilder(
   listenable: editing,
   builder: (context, _) => Column(children: [
-    PdfEditingToolbar(controller: editing),
     Expanded(
       child: PdfViewer(
         document: editing.document, // rebuild with each revision
+        controller: viewer,
         editing: editing,
       ),
     ),
+    PdfEditingToolbar(controller: editing, viewerController: viewer),
   ]),
 );
 
@@ -77,9 +116,10 @@ ListenableBuilder(
 final Uint8List saved = editing.bytes;
 ```
 
-The [example app](example) wires up everything: toolbars, all four
-panels, search, page navigation, preferences, and dark mode. It runs on
-all six platforms.
+The [example app](example) is a thin shell over `PdfEditorView` (with a
+toggle that swaps in `PdfReader`) plus the app-side concerns: file
+open/save dialogs, theme mode, and Flutter overlays pinned onto PDF
+pages. It runs on all six platforms.
 
 ## Under the hood
 

@@ -18,6 +18,8 @@ signatures.
 > full editing UI: tools, panels, forms, touch/stylus input, theming,
 > and a sync surface for collaborative annotation stores.
 
+![The example app: PdfEditorView showing the feature showcase document](doc/pdf_editor_example.jpg)
+
 Live demo: <https://dart-pdf-demo.web.app> (the example app built for
 the web; it opens onto a six-page feature showcase, and the open button
 loads your own PDF).

@@ -45,4 +45,4 @@ final info = doc.trailer['Info'];
 | `pdf_cos` | file syntax, objects, filters, crypto |
 | [`pdf_document`](https://pub.dev/packages/pdf_document) | pages, annotations, forms, signatures, editing |
 | [`pdf_graphics`](https://pub.dev/packages/pdf_graphics) | content interpreter, fonts, text extraction |
-| [`pdf_editor`](https://pub.dev/packages/pdf_editor) | Flutter viewer + editing UI |
+| [`dart_pdf_editor`](https://pub.dev/packages/dart_pdf_editor) | Flutter viewer + editing UI |

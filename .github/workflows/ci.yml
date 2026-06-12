@@ -24,4 +24,4 @@ jobs:
       - run: dart test
         working-directory: packages/pdf_graphics
       - run: flutter test
-        working-directory: packages/pdf_editor
+        working-directory: packages/dart_pdf_editor

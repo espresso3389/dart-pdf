@@ -2,7 +2,7 @@
 //
 // One test per patch: the file must open, every page must interpret without
 // throwing, and the page must actually paint something. No rasterization
-// happens here (that suite is pdf_editor/test/ghent_render_test.dart);
+// happens here (that suite is dart_pdf_editor/test/ghent_render_test.dart);
 // this layer pins parsing, fonts, color spaces, shadings, and filters on
 // the plain Dart VM, where failures are fast to bisect.
 //

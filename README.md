@@ -18,7 +18,7 @@ signatures.
 > full editing UI: tools, panels, forms, touch/stylus input, theming,
 > and a sync surface for collaborative annotation stores.
 
-![The example app: PdfEditorView showing the feature showcase document](doc/pdf_editor_example.jpg)
+![The example app: PdfEditorView showing the feature showcase document](doc/dart_pdf_editor_example.jpg)
 
 Live demo: <https://dart-pdf-demo.web.app> (the example app built for
 the web; it opens onto a six-page feature showcase, and the open button
@@ -26,7 +26,7 @@ loads your own PDF).
 
 ## Architecture
 
-Strictly layered packages; `dart:ui` is only allowed in `pdf_editor`, so
+Strictly layered packages; `dart:ui` is only allowed in `dart_pdf_editor`, so
 the core runs on servers and in plain Dart tests. Each package is
 published on pub.dev under its directory name.
 
@@ -35,7 +35,7 @@ published on pub.dev under its directory name.
 | [`pdf_cos`](packages/pdf_cos) | The PDF file format itself: tokenizer, parser, filters (incl. CCITT/JBIG2/JPX), encryption, cross-reference machinery, serializer, crypto primitives. |
 | [`pdf_document`](packages/pdf_document) | Document semantics: page tree, annotations, AcroForm, digital signatures, and the incremental-save `PdfEditor`. |
 | [`pdf_graphics`](packages/pdf_graphics) | Content-stream interpreter, device interface, font engine, ICC color, text extraction. |
-| [`pdf_editor`](packages/pdf_editor) | Flutter viewer and editing UI: canvas device, `PdfViewer`, tools, panels, forms. |
+| [`dart_pdf_editor`](packages/dart_pdf_editor) | Flutter viewer and editing UI: canvas device, `PdfViewer`, tools, panels, forms. |
 | [`pdf_test_fixtures`](packages/pdf_test_fixtures) | Programmatic, structurally-correct PDF builders for tests. |
 
 ## Roadmap
@@ -187,7 +187,7 @@ fvm dart analyze
 cd packages/pdf_cos && fvm dart test
 ```
 
-The example app (`packages/pdf_editor/example`) runs on macOS, iOS,
+The example app (`packages/dart_pdf_editor/example`) runs on macOS, iOS,
 Android, web, Windows, and Linux, with platform-native file handling:
 the system picker to open, and a save dialog, browser download, or share
 sheet to save, depending on the platform.
@@ -213,7 +213,7 @@ compression. Two layers run over it:
 
 - `pdf_graphics/test/ghent_corpus_test.dart` interprets every page on
   the plain Dart VM (parse + paint-op assertions, no rasterization).
-- `pdf_editor/test/ghent_render_test.dart` rasterizes every page and
+- `dart_pdf_editor/test/ghent_render_test.dart` rasterizes every page and
   compares it pixel-wise against checked-in baseline renders;
   regressions dump actual/diff images for inspection, and
   `GHENT_UPDATE=1` re-baselines after an intentional change.
@@ -228,5 +228,5 @@ which files open, which fail with a controlled exception, which need
 passwords, and which legitimately render blank (see the README in the
 corpus directory for provenance and per-file notes). Two layers again:
 `pdf_graphics/test/pdfjs_corpus_test.dart` (pure-Dart open + interpret)
-and `pdf_editor/test/pdfjs_render_test.dart` (rasterization smoke over
+and `dart_pdf_editor/test/pdfjs_render_test.dart` (rasterization smoke over
 the real decode pipeline, no baselines).

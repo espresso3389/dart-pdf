@@ -1,0 +1,444 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show ThemeMode;
+import 'package:flutter/painting.dart';
+import 'package:pdf_document/pdf_document.dart' show PdfStandardFont;
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'editing_color_picker.dart' show PdfColorFormat;
+import 'editing_signature.dart';
+import 'editing_stamps.dart';
+
+/// Editing-UI preferences, persisted on the local device.
+///
+/// Every [PdfEditingController] creates one by default, so tool styles
+/// (color, stroke width, opacity, font size) and the stylus mode come
+/// back the way the user left them, in this session and the next.
+/// Panel visibility ([showThumbnailSidebar], [showAnnotationSidebar])
+/// lives here too for the host's chrome — pass one instance to both the
+/// controller and the surrounding scaffold:
+///
+/// ```dart
+/// final prefs = PdfEditingPreferences();
+/// // later, per document:
+/// final editing = PdfEditingController(bytes, preferences: prefs);
+/// ```
+///
+/// Values load asynchronously ([ready]); each change is written back
+/// immediately. Where no local storage exists — plain widget tests, for
+/// example — loading fails silently and the defaults stand.
+class PdfEditingPreferences extends ChangeNotifier {
+  PdfEditingPreferences() {
+    _ready = _load();
+  }
+
+  static const _prefix = 'dart_pdf_editor.editing.';
+
+  SharedPreferences? _store;
+  late final Future<void> _ready;
+  bool _modified = false;
+
+  /// Completes once stored values have been applied — or storage turned
+  /// out to be unavailable and the defaults stand.
+  Future<void> get ready => _ready;
+
+  Color _color = const Color(0xFFE53935);
+  double _strokeWidth = 2;
+  double _eraserRadius = 8;
+  double _fontSize = 14;
+  PdfStandardFont _fontFamily = PdfStandardFont.helvetica;
+  double _opacity = 1;
+  bool _fingerDrawsInk = true;
+  bool _showThumbnailSidebar = true;
+  bool _showAnnotationSidebar = false;
+  String? _author;
+  PdfInkSignature? _signature;
+  List<PdfCustomStamp> _customStamps = const [];
+  ThemeMode _themeMode = ThemeMode.system;
+  PdfColorFormat _colorPickerFormat = PdfColorFormat.hex;
+  Color _pageColor = const Color(0xFFFFFFFF);
+  bool _showAnnotations = true;
+  bool _highlightFormFields = true;
+  bool _showPropertiesPanel = false;
+  bool _showSearchResultsPanel = false;
+  double? _thumbnailSidebarWidth;
+  double? _annotationSidebarWidth;
+  double? _propertiesPanelWidth;
+  double? _searchPanelWidth;
+  Color? _textFillColor;
+  Color? _textBorderColor;
+
+  Future<void> _load() async {
+    final SharedPreferences store;
+    try {
+      store = await SharedPreferences.getInstance();
+    } catch (_) {
+      return; // no local storage here (e.g. widget tests) — defaults stand
+    }
+    // a value set while the disk read was in flight wins over the stored one
+    if (!_modified) {
+      final color = store.getInt('${_prefix}color');
+      if (color != null) _color = Color(color);
+      _strokeWidth = store.getDouble('${_prefix}strokeWidth') ?? _strokeWidth;
+      _eraserRadius =
+          store.getDouble('${_prefix}eraserRadius') ?? _eraserRadius;
+      _fontSize = store.getDouble('${_prefix}fontSize') ?? _fontSize;
+      final fontFamily = store.getString('${_prefix}fontFamily');
+      if (fontFamily != null) {
+        _fontFamily =
+            PdfStandardFont.values.asNameMap()[fontFamily] ?? _fontFamily;
+      }
+      _opacity = store.getDouble('${_prefix}opacity') ?? _opacity;
+      _fingerDrawsInk =
+          store.getBool('${_prefix}fingerDrawsInk') ?? _fingerDrawsInk;
+      _showThumbnailSidebar = store.getBool('${_prefix}showThumbnailSidebar') ??
+          _showThumbnailSidebar;
+      _showAnnotationSidebar =
+          store.getBool('${_prefix}showAnnotationSidebar') ??
+              _showAnnotationSidebar;
+      _author = store.getString('${_prefix}author') ?? _author;
+      final signature = store.getString('${_prefix}signature');
+      if (signature != null) _signature = PdfInkSignature.decode(signature);
+      final themeMode = store.getString('${_prefix}themeMode');
+      if (themeMode != null) {
+        _themeMode = ThemeMode.values.asNameMap()[themeMode] ?? _themeMode;
+      }
+      final colorPickerFormat = store.getString('${_prefix}colorPickerFormat');
+      if (colorPickerFormat != null) {
+        _colorPickerFormat =
+            PdfColorFormat.values.asNameMap()[colorPickerFormat] ??
+                _colorPickerFormat;
+      }
+      final pageColor = store.getInt('${_prefix}pageColor');
+      if (pageColor != null) _pageColor = Color(pageColor);
+      _showAnnotations =
+          store.getBool('${_prefix}showAnnotations') ?? _showAnnotations;
+      _highlightFormFields = store.getBool('${_prefix}highlightFormFields') ??
+          _highlightFormFields;
+      _thumbnailSidebarWidth =
+          store.getDouble('${_prefix}thumbnailSidebarWidth') ??
+              _thumbnailSidebarWidth;
+      _annotationSidebarWidth =
+          store.getDouble('${_prefix}annotationSidebarWidth') ??
+              _annotationSidebarWidth;
+      _showPropertiesPanel = store.getBool('${_prefix}showPropertiesPanel') ??
+          _showPropertiesPanel;
+      _showSearchResultsPanel =
+          store.getBool('${_prefix}showSearchResultsPanel') ??
+              _showSearchResultsPanel;
+      _propertiesPanelWidth =
+          store.getDouble('${_prefix}propertiesPanelWidth') ??
+              _propertiesPanelWidth;
+      _searchPanelWidth =
+          store.getDouble('${_prefix}searchPanelWidth') ?? _searchPanelWidth;
+      final textFill = store.getInt('${_prefix}textFillColor');
+      if (textFill != null) _textFillColor = Color(textFill);
+      final textBorder = store.getInt('${_prefix}textBorderColor');
+      if (textBorder != null) _textBorderColor = Color(textBorder);
+      final stamps = store.getStringList('${_prefix}customStamps');
+      if (stamps != null) {
+        _customStamps = List.unmodifiable([
+          for (final stamp in stamps)
+            if (PdfCustomStamp.decode(stamp) case final decoded?) decoded
+        ]);
+      }
+    }
+    _store = store;
+    notifyListeners();
+  }
+
+  void _write(Future<Object?> Function(SharedPreferences store) write) {
+    _modified = true;
+    final store = _store;
+    if (store != null) unawaited(write(store));
+  }
+
+  /// The color new annotations are created with.
+  Color get color => _color;
+
+  set color(Color value) {
+    if (value == _color) return;
+    _color = value;
+    _write((s) => s.setInt('${_prefix}color', value.toARGB32()));
+    notifyListeners();
+  }
+
+  /// Stroke width for ink and shape annotations, in PDF points.
+  double get strokeWidth => _strokeWidth;
+
+  set strokeWidth(double value) {
+    if (value == _strokeWidth) return;
+    _strokeWidth = value;
+    _write((s) => s.setDouble('${_prefix}strokeWidth', value));
+    notifyListeners();
+  }
+
+  /// The circle eraser's radius, in PDF points (see
+  /// [PdfEditingController.eraserRadius]).
+  double get eraserRadius => _eraserRadius;
+
+  set eraserRadius(double value) {
+    if (value == _eraserRadius) return;
+    _eraserRadius = value;
+    _write((s) => s.setDouble('${_prefix}eraserRadius', value));
+    notifyListeners();
+  }
+
+  /// Font size for free-text annotations, in PDF points.
+  double get fontSize => _fontSize;
+
+  set fontSize(double value) {
+    if (value == _fontSize) return;
+    _fontSize = value;
+    _write((s) => s.setDouble('${_prefix}fontSize', value));
+    notifyListeners();
+  }
+
+  /// Font family for free-text annotations — one of the standard PDF
+  /// text fonts (sans-serif, serif, monospace).
+  PdfStandardFont get fontFamily => _fontFamily;
+
+  set fontFamily(PdfStandardFont value) {
+    if (value == _fontFamily) return;
+    _fontFamily = value;
+    _write((s) => s.setString('${_prefix}fontFamily', value.name));
+    notifyListeners();
+  }
+
+  /// Opacity (0–1] new ink, shape, markup, and stamp annotations are
+  /// created with.
+  double get opacity => _opacity;
+
+  set opacity(double value) {
+    if (value == _opacity) return;
+    _opacity = value;
+    _write((s) => s.setDouble('${_prefix}opacity', value));
+    notifyListeners();
+  }
+
+  /// Whether touch pointers draw with the ink tool (see
+  /// [PdfEditingController.fingerDrawsInk]). Persisted so a stylus
+  /// user's palm rejection survives reopening the app.
+  bool get fingerDrawsInk => _fingerDrawsInk;
+
+  set fingerDrawsInk(bool value) {
+    if (value == _fingerDrawsInk) return;
+    _fingerDrawsInk = value;
+    _write((s) => s.setBool('${_prefix}fingerDrawsInk', value));
+    notifyListeners();
+  }
+
+  /// Whether the host shows the page thumbnail sidebar.
+  bool get showThumbnailSidebar => _showThumbnailSidebar;
+
+  set showThumbnailSidebar(bool value) {
+    if (value == _showThumbnailSidebar) return;
+    _showThumbnailSidebar = value;
+    _write((s) => s.setBool('${_prefix}showThumbnailSidebar', value));
+    notifyListeners();
+  }
+
+  /// The saved hand-drawn signature the signature tool stamps, or null
+  /// when none has been drawn yet.
+  PdfInkSignature? get signature => _signature;
+
+  set signature(PdfInkSignature? value) {
+    if (value == _signature) return;
+    _signature = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}signature')
+        : s.setString('${_prefix}signature', value.encode()));
+    notifyListeners();
+  }
+
+  /// The user's saved custom rubber stamps, oldest first.
+  List<PdfCustomStamp> get customStamps => _customStamps;
+
+  set customStamps(List<PdfCustomStamp> value) {
+    if (listEquals(value, _customStamps)) return;
+    _customStamps = List.unmodifiable(value);
+    _write((s) => s.setStringList(
+        '${_prefix}customStamps', [for (final stamp in value) stamp.encode()]));
+    notifyListeners();
+  }
+
+  /// The author name new annotations carry (/T), shown in the
+  /// annotation sidebar. Null leaves them unsigned.
+  String? get author => _author;
+
+  set author(String? value) {
+    if (value == _author) return;
+    _author = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}author')
+        : s.setString('${_prefix}author', value));
+    notifyListeners();
+  }
+
+  /// The app theme the host runs the viewer UI in. The viewer and the
+  /// stock chrome all follow the ambient [Theme]; this just remembers
+  /// the user's choice for the host's `MaterialApp.themeMode`.
+  ThemeMode get themeMode => _themeMode;
+
+  set themeMode(ThemeMode value) {
+    if (value == _themeMode) return;
+    _themeMode = value;
+    _write((s) => s.setString('${_prefix}themeMode', value.name));
+    notifyListeners();
+  }
+
+  /// The value format the color picker last showed (hex, RGB, HSL, or
+  /// CMYK) — the picker reopens in it.
+  PdfColorFormat get colorPickerFormat => _colorPickerFormat;
+
+  set colorPickerFormat(PdfColorFormat value) {
+    if (value == _colorPickerFormat) return;
+    _colorPickerFormat = value;
+    _write((s) => s.setString('${_prefix}colorPickerFormat', value.name));
+    notifyListeners();
+  }
+
+  /// The paper color pages are displayed on (see [PdfViewer.pageColor]).
+  /// White — the PDF convention — by default; a display setting only,
+  /// the document is untouched.
+  Color get pageColor => _pageColor;
+
+  set pageColor(Color value) {
+    if (value == _pageColor) return;
+    _pageColor = value;
+    _write((s) => s.setInt('${_prefix}pageColor', value.toARGB32()));
+    notifyListeners();
+  }
+
+  /// Whether pages are displayed with their annotations (see
+  /// [PdfViewer.showAnnotations]). A display setting only — hiding
+  /// changes nothing in the document.
+  bool get showAnnotations => _showAnnotations;
+
+  set showAnnotations(bool value) {
+    if (value == _showAnnotations) return;
+    _showAnnotations = value;
+    _write((s) => s.setBool('${_prefix}showAnnotations', value));
+    notifyListeners();
+  }
+
+  /// Whether form-field widgets are washed with the visibility tint
+  /// (see [PdfViewer.highlightFormFields]). A display setting only.
+  bool get highlightFormFields => _highlightFormFields;
+
+  set highlightFormFields(bool value) {
+    if (value == _highlightFormFields) return;
+    _highlightFormFields = value;
+    _write((s) => s.setBool('${_prefix}highlightFormFields', value));
+    notifyListeners();
+  }
+
+  /// The thumbnail sidebar's user-dragged width, or null while it has
+  /// never been resized (the widget's own default width applies).
+  double? get thumbnailSidebarWidth => _thumbnailSidebarWidth;
+
+  set thumbnailSidebarWidth(double? value) {
+    if (value == _thumbnailSidebarWidth) return;
+    _thumbnailSidebarWidth = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}thumbnailSidebarWidth')
+        : s.setDouble('${_prefix}thumbnailSidebarWidth', value));
+    notifyListeners();
+  }
+
+  /// The annotation sidebar's user-dragged width, or null while it has
+  /// never been resized.
+  double? get annotationSidebarWidth => _annotationSidebarWidth;
+
+  set annotationSidebarWidth(double? value) {
+    if (value == _annotationSidebarWidth) return;
+    _annotationSidebarWidth = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}annotationSidebarWidth')
+        : s.setDouble('${_prefix}annotationSidebarWidth', value));
+    notifyListeners();
+  }
+
+  /// The background fill new free-text boxes are created with, or null
+  /// (the default) for no fill.
+  Color? get textFillColor => _textFillColor;
+
+  set textFillColor(Color? value) {
+    if (value == _textFillColor) return;
+    _textFillColor = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}textFillColor')
+        : s.setInt('${_prefix}textFillColor', value.toARGB32()));
+    notifyListeners();
+  }
+
+  /// The border color new free-text boxes are created with, or null
+  /// (the default) for no border. The border width follows [strokeWidth].
+  Color? get textBorderColor => _textBorderColor;
+
+  set textBorderColor(Color? value) {
+    if (value == _textBorderColor) return;
+    _textBorderColor = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}textBorderColor')
+        : s.setInt('${_prefix}textBorderColor', value.toARGB32()));
+    notifyListeners();
+  }
+
+  /// Whether the host shows the annotation list sidebar.
+  bool get showAnnotationSidebar => _showAnnotationSidebar;
+
+  set showAnnotationSidebar(bool value) {
+    if (value == _showAnnotationSidebar) return;
+    _showAnnotationSidebar = value;
+    _write((s) => s.setBool('${_prefix}showAnnotationSidebar', value));
+    notifyListeners();
+  }
+
+  /// Whether the host shows the annotation properties panel.
+  bool get showPropertiesPanel => _showPropertiesPanel;
+
+  set showPropertiesPanel(bool value) {
+    if (value == _showPropertiesPanel) return;
+    _showPropertiesPanel = value;
+    _write((s) => s.setBool('${_prefix}showPropertiesPanel', value));
+    notifyListeners();
+  }
+
+  /// The properties panel's user-dragged width, or null while it has
+  /// never been resized.
+  double? get propertiesPanelWidth => _propertiesPanelWidth;
+
+  set propertiesPanelWidth(double? value) {
+    if (value == _propertiesPanelWidth) return;
+    _propertiesPanelWidth = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}propertiesPanelWidth')
+        : s.setDouble('${_prefix}propertiesPanelWidth', value));
+    notifyListeners();
+  }
+
+  /// Whether the host shows the search results panel.
+  bool get showSearchResultsPanel => _showSearchResultsPanel;
+
+  set showSearchResultsPanel(bool value) {
+    if (value == _showSearchResultsPanel) return;
+    _showSearchResultsPanel = value;
+    _write((s) => s.setBool('${_prefix}showSearchResultsPanel', value));
+    notifyListeners();
+  }
+
+  /// The search results panel's user-dragged width, or null while it
+  /// has never been resized.
+  double? get searchPanelWidth => _searchPanelWidth;
+
+  set searchPanelWidth(double? value) {
+    if (value == _searchPanelWidth) return;
+    _searchPanelWidth = value;
+    _write((s) => value == null
+        ? s.remove('${_prefix}searchPanelWidth')
+        : s.setDouble('${_prefix}searchPanelWidth', value));
+    notifyListeners();
+  }
+}

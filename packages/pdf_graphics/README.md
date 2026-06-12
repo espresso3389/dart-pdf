@@ -7,7 +7,7 @@ extraction.
 
 Pure Dart with no `dart:ui` or Flutter dependency, so it runs on the VM,
 in CLIs and servers, and on the web. The Flutter canvas device lives in
-[`pdf_editor`](https://pub.dev/packages/pdf_editor); implement
+[`dart_pdf_editor`](https://pub.dev/packages/dart_pdf_editor); implement
 `PdfDevice` to render anywhere else (SVG, raster, print pipelines).
 
 ## Features
@@ -51,4 +51,4 @@ print(text.text);
 | [`pdf_cos`](https://pub.dev/packages/pdf_cos) | file syntax, objects, filters, crypto |
 | [`pdf_document`](https://pub.dev/packages/pdf_document) | pages, annotations, forms, signatures, editing |
 | `pdf_graphics` | content interpreter, fonts, text extraction |
-| [`pdf_editor`](https://pub.dev/packages/pdf_editor) | Flutter viewer + editing UI |
+| [`dart_pdf_editor`](https://pub.dev/packages/dart_pdf_editor) | Flutter viewer + editing UI |

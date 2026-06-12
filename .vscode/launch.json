@@ -22,21 +22,21 @@
             "type": "dart"
         },
         {
-            "name": "pdf_editor",
-            "cwd": "packages/pdf_editor",
+            "name": "dart_pdf_editor",
+            "cwd": "packages/dart_pdf_editor",
             "request": "launch",
             "type": "dart"
         },
         {
-            "name": "pdf_editor (profile mode)",
-            "cwd": "packages/pdf_editor",
+            "name": "dart_pdf_editor (profile mode)",
+            "cwd": "packages/dart_pdf_editor",
             "request": "launch",
             "type": "dart",
             "flutterMode": "profile"
         },
         {
-            "name": "pdf_editor (release mode)",
-            "cwd": "packages/pdf_editor",
+            "name": "dart_pdf_editor (release mode)",
+            "cwd": "packages/dart_pdf_editor",
             "request": "launch",
             "type": "dart",
             "flutterMode": "release"
@@ -55,20 +55,20 @@
         },
         {
             "name": "example",
-            "cwd": "packages/pdf_editor/example",
+            "cwd": "packages/dart_pdf_editor/example",
             "request": "launch",
             "type": "dart"
         },
         {
             "name": "example (profile mode)",
-            "cwd": "packages/pdf_editor/example",
+            "cwd": "packages/dart_pdf_editor/example",
             "request": "launch",
             "type": "dart",
             "flutterMode": "profile"
         },
         {
             "name": "example (release mode)",
-            "cwd": "packages/pdf_editor/example",
+            "cwd": "packages/dart_pdf_editor/example",
             "request": "launch",
             "type": "dart",
             "flutterMode": "release"

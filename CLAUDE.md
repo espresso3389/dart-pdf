@@ -9,13 +9,13 @@ Monorepo using **pub workspaces** (root `pubspec.yaml` lists members under
 - `fvm flutter pub get` (at repo root — resolves every workspace package)
 - `fvm dart analyze` (at root)
 - `cd packages/<pkg> && fvm dart test` (pure-Dart packages)
-- `cd packages/pdf_editor && fvm flutter test`
+- `cd packages/dart_pdf_editor && fvm flutter test`
 
 ## Layering rules (strict)
 
-`pdf_cos` ← `pdf_document` ← `pdf_graphics` ← `pdf_editor`
+`pdf_cos` ← `pdf_document` ← `pdf_graphics` ← `dart_pdf_editor`
 
-- `dart:ui` and Flutter imports are **only** allowed in `pdf_editor`.
+- `dart:ui` and Flutter imports are **only** allowed in `dart_pdf_editor`.
   Everything else must run on the Dart VM (server/CLI/tests) and on the web.
 - `dart:io` is not allowed anywhere in `lib/` (web support); use
   `package:archive` for compression.
@@ -39,7 +39,7 @@ folders and OneDrive — CAD drawings, scanned docs, reports, forms. Use them
 to validate changes:
 
 - Parse check: `cd packages/pdf_document && fvm dart tool/inspect.dart ../../corpus/*.pdf`
-- Render check: `cd packages/pdf_editor && PDF_PATH=../../corpus/<file>.pdf PDF_PAGE=0 fvm flutter test test/render_smoke_test.dart` (writes /tmp/dart_pdf_render.png)
+- Render check: `cd packages/dart_pdf_editor && PDF_PATH=../../corpus/<file>.pdf PDF_PAGE=0 fvm flutter test test/render_smoke_test.dart` (writes /tmp/dart_pdf_render.png)
 
 `test_corpora/ghent/` (checked in) is the Ghent PDF Output Suite V5.0 —
 54 print-conformance PDFs (overprint, DeviceN, spot, ICC v2/v4, 16-bit,
@@ -48,7 +48,7 @@ JBIG2/JPX) incl. 3 composite test pages. Two test layers:
 
 - `packages/pdf_graphics/test/ghent_corpus_test.dart` — pure-Dart: every
   page must interpret without throwing and paint > 0 ops.
-- `packages/pdf_editor/test/ghent_render_test.dart` — rasterizes every
+- `packages/dart_pdf_editor/test/ghent_render_test.dart` — rasterizes every
   page and diffs against checked-in baselines in
   `test_corpora/ghent/_baselines` (fail when >0.05% of pixels differ by
   >8/channel). Missing baselines seed on first run; accept intentional
@@ -100,7 +100,7 @@ files still refused), trust-store chain validation
 (`verifyCertificateChain` in pdf_cos cms.dart, `PdfTrustStore` +
 `validate(trustStore:)` in pdf_document), mesh shadings 4-7
 (`PdfMeshParser`/`PdfMesh`, device `fillMesh`, drawVertices in
-pdf_editor), CCITT G3/G4 (`CcittDecoder`, KAT vs libtiff), JBIG2
+dart_pdf_editor), CCITT G3/G4 (`CcittDecoder`, KAT vs libtiff), JBIG2
 embedded profile (`Jbig2Decoder` + shared `MqDecoder` in
 filters/mq.dart, KAT vs jbig2enc/jbig2dec), JPEG 2000 (`JpxDecoder`,
 lossless bit-perfect vs OpenJPEG, lossy ±1), deep-zoom detail patch
@@ -110,7 +110,7 @@ gray TRC, matrix/TRC, mft1/mft2/mAB LUTs, validated vs littleCMS;
 wired into sc/scn and image decoding). Remaining gaps: text reflow,
 RSASSA-PSS, JBIG2 Huffman/refinement, JPX subsampling + PCRL/CPRL,
 rendering intents/BPC in ICC.
-The editing UI is in (pdf_editor `src/editing/`): `PdfEditingController`
+The editing UI is in (dart_pdf_editor `src/editing/`): `PdfEditingController`
 owns the edit session — every edit is an incremental save, so revisions
 are byte prefixes of one buffer and undo/redo is a stack of lengths;
 `PdfViewer(editing:)` injects per-page tool overlays (markup/ink/shapes/
@@ -177,7 +177,7 @@ handler no-ops while picking). dart:typed_data must be imported
 explicitly for ByteData (flutter/painting doesn't re-export it).
 Persisted UI preferences (Ben: save them locally, default behavior):
 `PdfEditingPreferences` (editing_preferences.dart, backed by
-shared_preferences, keys `pdf_editor.editing.*`) — color/strokeWidth/
+shared_preferences, keys `dart_pdf_editor.editing.*`) — color/strokeWidth/
 fontSize/opacity/fingerDrawsInk plus host-chrome flags
 showThumbnailSidebar/showAnnotationSidebar. The controller's style
 state proxies to it (no duplicate fields; `preferences.addListener(
@@ -674,7 +674,7 @@ toString + data bytes) for inline requests, stream identity for
 XObjects (the xref cache makes those stable); ImageCollector now
 collects requests, decodeImages takes requests and keys by
 pdfImageKey, CanvasPdfDevice.images is Map<Object, ui.Image>.
-Regression test: pdf_editor/test/inline_image_test.dart. Two Ghent
+Regression test: dart_pdf_editor/test/inline_image_test.dart. Two Ghent
 baselines moved because GWG090's Type 3 bitmap-font row (CharProcs
 painting inline images) now renders — re-baselined as an improvement.
 Batch 3, session 1 (resize correctness): three fixes sharing one root —
@@ -1099,7 +1099,7 @@ clears it unless mid-swipe). Commit on lift → `sliceErase`, afterimage
 menu only while the eraser is armed — the legacy 3-slider count test
 still holds. Tests: pdf_document/test/ink_slice_test.dart (geometry
 KATs — the vertical-spine cut of a horizontal line lands exactly at
-|x−cx| = r; pressure recovery round-trip 3.28/4.72 w), pdf_editor
+|x−cx| = r; pressure recovery round-trip 3.28/4.72 w), dart_pdf_editor
 editing_eraser_test.dart (live preview via the dynamic painter cast —
 record fields ARE dynamically accessible; afterimage; hover ring;
 slider; pref round-trip) and editing_ipad_test.dart eraser group
@@ -1210,7 +1210,7 @@ AND restyles selection when canRestyleSelected); stroke/opacity
 sliders show the selection's values and restyle on release
 (_draggingStroke/_draggingOpacity mirror the font-size pattern).
 Tests: pdf_document annotation_clipboard_test (7) +
-annotation_restyle_test (8), pdf_editor editing_clipboard_test (16).
+annotation_restyle_test (8), dart_pdf_editor editing_clipboard_test (16).
 Remaining batch-4: properties panel, annotation-panel search,
 page-number jump field, slimmer search bar + results panel, PDF.js
 corpus.
@@ -1256,7 +1256,7 @@ contents, field name/value, link text/target); page headers only
 survive with matching tiles; query non-empty + all filtered → 'No
 matching annotations'; the query deliberately survives revisions
 (the document-identity reset clears checkboxes, not the search).
-Tests: pdf_document annotation_metadata_test (3), pdf_editor
+Tests: pdf_document annotation_metadata_test (3), dart_pdf_editor
 editing_properties_test (11: 3 controller + 8 panel widget tests),
 editing_sidebar_test +3 search tests. Gotchas: the search TextField
 hosts its own Scrollable — pdf_theme_test's annotation-bar test had
@@ -1326,7 +1326,7 @@ ELXRTQWS, encrypted-attachment 000000}, print_protection must throw
 CosPasswordException (pdf.js shows its password dialog too — NOT a
 bug), 6 fuzz files pinned "controlled CosParseException or zero
 reachable pages", 14 mayBeBlank files annotated in-test) and
-pdfjs_render_test.dart (pdf_editor, rasterizes ≤5 pages/file at
+pdfjs_render_test.dart (dart_pdf_editor, rasterizes ≤5 pages/file at
 ratio 1, no baselines — exercises the image decoders; skips the
 unopenable+password files).
 Bugs the corpus caught (all fixed, all with inline-fixture regression
@@ -1419,7 +1419,7 @@ reads phantom `modified`s. Remote applies join the undo stack (byte
 prefixes can't skip revisions) — undoing past one reverts it locally
 and re-broadcasts the revert; documented, deliberate. Tests:
 pdf_document/test/annotation_sync_test.dart (17),
-pdf_editor/test/editing_sync_test.dart (9 — incl. two piped
+dart_pdf_editor/test/editing_sync_test.dart (9 — incl. two piped
 controllers converging both ways). Remaining trax gaps: per-annotation
 read-only enforcement (host predicate + /F readOnly), hide-all
 annotations viewer toggle.
@@ -1458,7 +1458,7 @@ Tests: annotation_metadata_test +1 (flags round-trip),
 editing_readonly_test.dart (7), annotations_visibility_test.dart (6).
 The trax-replacement gap list is now empty.
 Publishing round (Ben: pub.dev hosting + web demo): the Flutter package
-is now **pdf_editor** (pub.dev already had a `pdf_flutter`; Ben picked
+is now **dart_pdf_editor** (pub.dev already had a `pdf_flutter`; Ben picked
 the name) — directory, lib entry, and every reference renamed
 (mechanical sed; suites re-ran green). All five packages are
 publish-ready: Apache-2.0 LICENSE at root + copied per package,
@@ -1472,7 +1472,7 @@ imports pdf_document; publish validation rejects undeclared imports —
 also killed the long-standing analyzer info). All 5 dry-runs pass with
 only the dirty-git warning; archives 63–500KB. First-publish order
 (hosted constraints must resolve): pdf_cos → pdf_test_fixtures →
-pdf_document → pdf_graphics → pdf_editor; repo must be PUBLIC first so
+pdf_document → pdf_graphics → dart_pdf_editor; repo must be PUBLIC first so
 pub.dev verifies the repository links; publishing is Ben's manual step
 (needs his pub.dev auth). pdf_test_fixtures publishes too — it's a dev
 dep of the others, and pana resolves dev deps, so leaving it private
@@ -1550,7 +1550,7 @@ DOT whose 800ms auto-commit timer outlives the test (!timersPending)
 is android, so existing touch_app-dependent tests pass unchanged.
 Drop-in shells (Ben: out-of-the-box viewer/editor widgets; the example
 must use them): `PdfReader` (pdf_reader.dart) and `PdfEditorView`
-(pdf_editor_view.dart), both exported — composed entirely from the
+(dart_pdf_editor_view.dart), both exported — composed entirely from the
 existing public parts. Shared package-private chrome in
 shell_chrome.dart: `PdfShellBar` (header = spaceBetween Row inside
 ConstrainedBox(minWidth: viewport) inside a horizontal scroll — a
@@ -1578,7 +1578,7 @@ PdfEditorView/PdfReader with an AppBar read-only toggle; search, page
 number, author, view options, and panel toggles all moved into the
 shell header — AppBar keeps copy/theme/demo/open. The pub-page README
 leads with the example screenshot, which lives at REPO-ROOT
-doc/pdf_editor_example.jpg and is referenced by raw.githubusercontent
+doc/dart_pdf_editor_example.jpg and is referenced by raw.githubusercontent
 URL — out of the pub archive, renders once the repo is public. Tests:
 pdf_shell_test.dart (16); the example tests passed unchanged (their
 coordinates derive from the live viewer rect, so the 48px header is
@@ -1635,9 +1635,24 @@ transparent canvas (Big Sur grid; rx 224/1024 ≈ Apple's 185/824),
 Android mipmaps / web Icon-* / favicon / Windows multi-res .ico =
 rounded mark, web MASKABLE icons = full-bleed (the page's corners sit
 at 39% radius — inside the 40% safe-zone circle). Banner heads the
-root README (relative path) and the pdf_editor README
+root README (relative path) and the dart_pdf_editor README
 (raw.githubusercontent URL, same pattern as the screenshot); web demo
 manifest.json/index.html renamed to 'dart-pdf demo' (the template
 theme_color was already #0175C2). Verified: macOS debug build
 compiles the new appiconset into AppIcon.icns; example tests green.
 Linux has no icon in the flutter template — none added.
+Package rename #2 (pub.dev rejected `pdf_editor` at real publish —
+"too similar to another active package: pdfeditor", an abandoned
+3-year-old iOS plugin; similarity = names matching with underscores
+stripped, and it's only checked server-side at publish, never by
+dry-run): the Flutter package is now **dart_pdf_editor** (Ben picked
+it; pdf_editor_flutter was rejected as risky — `flutter_pdf_editor`
+exists and is active). Mechanical: git mv of the package dir, lib
+entry (lib/dart_pdf_editor.dart), and doc/dart_pdf_editor_example.jpg,
+then one global sed — which is NOT idempotent (the new name contains
+the old; never re-run it) and had exactly one casualty:
+lib/src/pdf_editor_view.dart is named for the PdfEditorView WIDGET and
+keeps its name (the entry's export URI was reverted by hand). Class
+names (PdfEditorView, PdfEditorFeatures) are unchanged. Residual-check
+pattern: `git grep -P '(?<!dart_)pdf_editor'`. Publish order is
+unchanged with dart_pdf_editor last; its dry-run re-verified.

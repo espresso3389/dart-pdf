@@ -1,0 +1,136 @@
+![dart-pdf — pure-Dart PDF renderer & editor for Flutter](https://raw.githubusercontent.com/ben-milanko/dart-pdf/main/doc/banner.png)
+
+# dart_pdf_editor
+
+A Flutter PDF viewer and editor rendered natively in Dart, with no
+platform views or native PDF libraries. The same code runs on iOS,
+Android, macOS, Windows, Linux, and the web.
+
+![The example app: PdfEditorView showing the feature showcase document](https://raw.githubusercontent.com/ben-milanko/dart-pdf/main/doc/dart_pdf_editor_example.jpg)
+
+Two drop-in widgets carry the whole UI — give them bytes and bounded
+space, and everything in the screenshot above (search, page navigation,
+panels, tools, undo/redo, save) is wired up:
+
+```dart
+import 'package:dart_pdf_editor/dart_pdf_editor.dart';
+
+// A complete PDF editor
+PdfEditorView(
+  bytes: pdfBytes,
+  onSave: (bytes) => /* write the file */,
+)
+
+// A view-only reader
+PdfReader(bytes: pdfBytes)
+```
+
+Both follow the ambient Material `Theme` (dark mode included), persist
+user preferences on the device, and pare down with feature flags:
+
+```dart
+PdfEditorView(
+  bytes: pdfBytes,
+  features: const PdfEditorFeatures(
+    propertiesPanel: false,
+    flatten: false,
+    tools: {PdfEditTool.select, PdfEditTool.ink, PdfEditTool.freeText},
+  ),
+)
+```
+
+Try the [live demo](https://dart-pdf-demo.web.app) of the example app
+on Flutter web, with a built-in feature showcase document.
+
+Built on the pure-Dart
+[dart-pdf suite](https://github.com/ben-milanko/dart-pdf): `pdf_cos`
+(file syntax) ← `pdf_document` (document semantics + editing) ←
+`pdf_graphics` (interpreter + fonts) ← `dart_pdf_editor` (Flutter widgets).
+
+## Viewing
+
+- Zooming/panning viewer with fit-page and fit-width modes, deep-zoom
+  detail rendering past the raster caps, and exact scroll metrics on
+  long mixed-size documents.
+- Smooth fast scrolling on heavy documents: pages flying past show
+  low-res previews (filled in by a background prerender) instead of
+  blank paper, and full rendering resumes the moment scrolling
+  settles.
+- Text selection (mouse, and touch with selection handles), full-text
+  search with a results panel, link navigation, outlines.
+- Theming via `PdfViewerTheme`, dark mode, arbitrary page colors, and a
+  hide-all-annotations toggle.
+
+## Editing
+
+Every edit is an incremental save: undo/redo is built in, and revisions
+are byte prefixes of one buffer.
+
+- Annotation tools: highlight/underline/strikeout/squiggly, ink with
+  stylus pressure and spline smoothing, shapes, free text with in-place
+  editing, notes, stamps (including custom saved stamps), and a saved
+  ink signature.
+- Direct manipulation: select (single, marquee, ⌘A), move, resize, and
+  rotate with live appearance previews, plus a slicing circle eraser,
+  copy/cut/paste, z-order, restyling, and a context menu with
+  host-extensible entries (right-click, or long-press on touch).
+- Forms: fill text/checkbox/radio/choice fields in place, set button
+  images, and administer fields (add, rename, retype, delete, flatten).
+  Fields are highlighted with a translucent wash by default
+  (`PdfViewer.highlightFormFields`).
+- Panels: thumbnail sidebar with drag-reorder, annotation sidebar with
+  search and multi-select, properties panel, and search results panel,
+  all resizable and persisted.
+- Permissions: `/F` read-only and locked flags are honored, and a
+  `canEditAnnotation` predicate implements policies like "users may
+  only edit their own annotations" in one line.
+- Sync: an `annotationChanges` feed plus `applyRemoteChange` for wiring
+  annotations to a collaborative store (Firestore, websockets, etc.).
+
+## Composing your own UI
+
+`PdfEditorView` and `PdfReader` are assembled from public parts —
+`PdfViewer`, `PdfEditingController`, `PdfEditingToolbar`, the panels —
+so apps wanting custom chrome can wire those directly:
+
+```dart
+import 'package:pdf_document/pdf_document.dart';
+import 'package:dart_pdf_editor/dart_pdf_editor.dart';
+
+// Just the viewer
+PdfViewer(document: PdfDocument.open(bytes));
+
+// Your own editor layout
+final editing = PdfEditingController(bytes);
+final viewer = PdfViewerController();
+
+ListenableBuilder(
+  listenable: editing,
+  builder: (context, _) => Column(children: [
+    Expanded(
+      child: PdfViewer(
+        document: editing.document, // rebuild with each revision
+        controller: viewer,
+        editing: editing,
+      ),
+    ),
+    PdfEditingToolbar(controller: editing, viewerController: viewer),
+  ]),
+);
+
+// Saving
+final Uint8List saved = editing.bytes;
+```
+
+The [example app](example) is a thin shell over `PdfEditorView` (with a
+toggle that swaps in `PdfReader`) plus the app-side concerns: file
+open/save dialogs, theme mode, and Flutter overlays pinned onto PDF
+pages. It runs on all six platforms.
+
+## Under the hood
+
+Encrypted files (RC4/AES-128/AES-256, encrypt-on-write), digital
+signature validation, the full shading and blend-mode set, ICC color,
+CCITT/JBIG2/JPEG 2000 images, and lenient parsing of broken real-world
+files, with conformance pinned against the Ghent Output Suite and the
+PDF.js test corpus.

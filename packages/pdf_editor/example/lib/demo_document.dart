@@ -195,10 +195,15 @@ Uint8List buildDemoPdf() {
     ..write(_text(280, 625, 9, '[10 6] dash'))
     ..write('q 0.15 0.2 0.5 RG 4 w 1 J [0.5 7] 0 d 72 608 m 270 608 l S Q\n')
     ..write(_text(280, 605, 9, '[0.5 7] round caps'));
-  const joins = [(0, 638, 'miter join'), (1, 612, 'round join'), (2, 586, 'bevel join')];
+  const joins = [
+    (0, 638, 'miter join'),
+    (1, 612, 'round join'),
+    (2, 586, 'bevel join')
+  ];
   for (final (j, y0, label) in joins) {
     page3
-      ..write('q 0.3 0.34 0.5 RG 9 w $j j 350 $y0 m 375 ${y0 + 18} l 400 $y0 l S Q\n')
+      ..write(
+          'q 0.3 0.34 0.5 RG 9 w $j j 350 $y0 m 375 ${y0 + 18} l 400 $y0 l S Q\n')
       ..write(_text(412, y0 + 4.0, 9, label));
   }
   page3
@@ -270,13 +275,17 @@ Uint8List buildDemoPdf() {
         'BT /F2 28 Tf 72 405 Td (Fill) Tj 1 Tr 80 0 Td (Outline) Tj '
         '2 Tr 130 0 Td (Fill + stroke) Tj ET Q\n')
     ..write(_text(72, 360, 12, 'Spacing & scaling'))
-    ..write('BT /F1 13 Tf 2.5 Tc 72 330 Td (2.5 Tc letter spacing) Tj 0 Tc ET\n')
-    ..write('BT /F1 13 Tf 8 Tw 72 305 Td (8 Tw spreads word gaps wide) Tj 0 Tw ET\n')
-    ..write('BT /F1 13 Tf 140 Tz 72 280 Td (140 Tz stretches glyphs) Tj 100 Tz ET\n')
+    ..write(
+        'BT /F1 13 Tf 2.5 Tc 72 330 Td (2.5 Tc letter spacing) Tj 0 Tc ET\n')
+    ..write(
+        'BT /F1 13 Tf 8 Tw 72 305 Td (8 Tw spreads word gaps wide) Tj 0 Tw ET\n')
+    ..write(
+        'BT /F1 13 Tf 140 Tz 72 280 Td (140 Tz stretches glyphs) Tj 100 Tz ET\n')
     ..write('BT /F1 13 Tf 72 255 Td (E = mc) Tj 6 Ts (2) Tj 0 Ts '
         '(  -  superscript via Ts rise) Tj ET\n')
     ..write(_text(72, 210, 12, 'Text transforms'))
-    ..write('BT 1 0 0.35 1 72 170 Tm /F1 16 Tf (skewed with the text matrix) Tj ET\n')
+    ..write(
+        'BT 1 0 0.35 1 72 170 Tm /F1 16 Tf (skewed with the text matrix) Tj ET\n')
     ..write('q 0.5 0.3 0.1 rg BT 0.866 0.5 -0.5 0.866 300 90 Tm /F2 16 Tf '
         '(rotated 30 degrees) Tj ET Q\n');
 
@@ -299,7 +308,8 @@ Uint8List buildDemoPdf() {
     ..write(_text(72, 440, 12, 'Stencil masks & inline images'))
     ..write('q 0.10 0.45 0.25 rg 80 0 0 80 72 340 cm /Im3 Do Q\n')
     ..write('q 0.85 0.45 0.1 rg 110 0 0 110 180 320 cm /Im3 Do Q\n')
-    ..write(_text(72, 300, 9, '1-bit /ImageMask painted through the fill color'))
+    ..write(
+        _text(72, 300, 9, '1-bit /ImageMask painted through the fill color'))
     ..write('q 80 0 0 80 340 340 cm BI /W 4 /H 4 /CS /RGB /BPC 8 /F /AHx ID\n'
         'e63030 ffffff e63030 ffffff\n'
         'ffffff e63030 ffffff e63030\n'
@@ -365,9 +375,10 @@ Uint8List buildDemoPdf() {
       _stencilHex()));
 
   // radio button appearance states (18×18 circles, shared by both kids)
-  final radioBase = 'q 0.96 0.97 1 rg 0.35 0.4 0.6 RG 1 w ${_circle(9, 9, 7.5)}B Q';
-  final radioOff = add(_stream(
-      '/Type /XObject /Subtype /Form /BBox [0 0 18 18]', radioBase));
+  final radioBase =
+      'q 0.96 0.97 1 rg 0.35 0.4 0.6 RG 1 w ${_circle(9, 9, 7.5)}B Q';
+  final radioOff = add(
+      _stream('/Type /XObject /Subtype /Form /BBox [0 0 18 18]', radioBase));
   final radioOn = add(_stream('/Type /XObject /Subtype /Form /BBox [0 0 18 18]',
       '$radioBase q 0.1 0.15 0.4 rg ${_circle(9, 9, 3.6)}f Q'));
 
@@ -392,9 +403,15 @@ Uint8List buildDemoPdf() {
   // per-page resources and annotations
   final allFonts = '/Font << /F1 $f1 0 R /F2 $f2 0 R /F3 $f3 0 R '
       '/F4 $f4 0 R /F5 $f5 0 R /F6 $f6 0 R /F7 $f7 0 R >>';
-  const rainbow = ['1 0.2 0.15', '1 0.85 0.2', '0.15 0.7 0.3', '0.15 0.55 0.9',
-      '0.5 0.2 0.75'];
-  final stitched = StringBuffer('<< /FunctionType 3 /Domain [0 1] /Functions [');
+  const rainbow = [
+    '1 0.2 0.15',
+    '1 0.85 0.2',
+    '0.15 0.7 0.3',
+    '0.15 0.55 0.9',
+    '0.5 0.2 0.75'
+  ];
+  final stitched =
+      StringBuffer('<< /FunctionType 3 /Domain [0 1] /Functions [');
   for (var i = 0; i < rainbow.length - 1; i++) {
     stitched.write('<< /FunctionType 2 /Domain [0 1] '
         '/C0 [${rainbow[i]}] /C1 [${rainbow[i + 1]}] /N 1 >> ');
@@ -428,8 +445,12 @@ Uint8List buildDemoPdf() {
     (page2, '/Font << /F1 $f1 0 R >>', ''),
     (page3, page3Resources, ''),
     (page4, allFonts, ''),
-    (page5, '/Font << /F1 $f1 0 R >> '
-        '/XObject << /Im1 $im1 0 R /Im2 $im2 0 R /Im3 $im3 0 R >>', ''),
+    (
+      page5,
+      '/Font << /F1 $f1 0 R >> '
+          '/XObject << /Im1 $im1 0 R /Im2 $im2 0 R /Im3 $im3 0 R >>',
+      ''
+    ),
     (page6, '/Font << /F1 $f1 0 R >>', page6Annots),
   ];
   final pageNumbers = <int>[];
@@ -499,8 +520,15 @@ Uint8List _authorShowcase(Uint8List base) {
         page,
         const <List<(double, double)>>[
           [
-            (350, 610), (358, 642), (366, 606), (374, 645), (382, 608),
-            (390, 640), (398, 610), (406, 636), (414, 614),
+            (350, 610),
+            (358, 642),
+            (366, 606),
+            (374, 645),
+            (382, 608),
+            (390, 640),
+            (398, 610),
+            (406, 636),
+            (414, 614),
           ]
         ],
         color: 0x2060C0,

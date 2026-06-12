@@ -1482,3 +1482,55 @@ https://dart-pdf-demo.web.app (firebase.json + .firebaserc in example/;
 no immutable cache headers — main.dart.js isn't content-hashed);
 redeploy = build web --release + firebase deploy --only hosting.
 Text reflow (#128) is deferred on the roadmap at Ben's request.
+Touch round (Ben's comments: fling, paste on touch, visible fields):
+three features. (1) Touch fling: the overlay's viewport pan
+(_viewportPanning) ended by dropping details.velocity, so finger
+scrolls with a tool armed stopped dead at lift-off (reader-mode
+scrolls fling fine — the list's physics own them). `onPanViewportEnd`
+(overlay → _PdfViewerPage → viewer `_flingViewport`): the viewer's
+`_touchFlinger` (unbounded controller, value = elapsed time via the
+`_FlingClock` Simulation, since one controller carries one double and
+the fling needs two axes) feeds FrictionSimulation deltas (drag 0.135
+≈ UIScrollView; tolerance velocity 5 so the tail doesn't tick for
+seconds) through `_grabPanBy` — extent clamping and zoom-window
+spillover come free, and no ScrollActivity surgery (goBallistic was
+rejected: stopping it on pointer-down risks killing list drags). The
+tick self-stops when a nonzero delta moves nothing (all absorbers
+pinned). Stopped beside every `_panFlinger.stop()` (raw pointer-down,
+wheel, pinch/trackpad start) + dispose. Test gotcha
+(editing_fling_test.dart): TestGesture stamps every event t=0 —
+velocity reads 0.0 at lift; pass explicit `timeStamp:` to
+moveBy/up or the fling silently never starts. (2) Touch long-press
+context menu: `_MenuLongPressRecognizer` (editing_overlay.dart,
+touch+stylus, RawGestureDetector between the overlay's MouseRegion
+and Stack) — addAllowedPointer consults `_menuLongPressClaims(pos)`
+(select mode: annotation hit or clipboard non-empty; form tool:
+field hit) so a press with no menu to offer NEVER enters the arena —
+text selection, marquees, and slow move drags keep their gestures
+(claim-then-no-op would kill them). Handler mirrors _onSecondaryTapUp:
+hit joins the selection (multi-selection intact), empty area = paste
+menu at the point. `onShowAnnotationMenu` grew (pageIndex,
+{pagePoint}) — paste needs them with no selection; the form branch
+factored to viewer `_showFormFieldMenu` + overlay
+`onShowFormFieldMenu`. Reader mode: viewer `_onLongPressStart`'s
+range==null branch tries `_maybeAnnotationMenu` before
+_clearSelection (tool null only; annotation → select+menu, empty +
+clipboard → paste menu). (3) Form-field highlight:
+`PdfViewer.highlightFormFields` (default TRUE, like Acrobat) →
+`_FormFieldPainter` in the page Stack under the text-highlight
+painter (wash + hairline border; border = fill color at alpha×2.5);
+rects from `_formFieldRects` cached beside _annotCache (Widget
+subtype, !hidden, !noView); auto-off while showAnnotations is false
+(boxes would mark invisible fields). Theme:
+`PdfViewerThemeData.formFieldHighlightColor` (used as given — carry
+your own alpha; default 0x2E4D90FE). Preference `highlightFormFields`
++ example AppBar dynamic_form toggle — which overflowed the 800px
+test window's AppBar by 35px: ALL example AppBar actions are now
+VisualDensity.compact (the row was already at its limit; remember
+this before adding another button). Pre-existing test failure fixed
+in passing: 9bbfc87 (Ben, outside sessions) flipped
+showThumbnailSidebar's default to true; editing_preferences_test
+still expected false — suites had been red since. Tests:
+editing_fling_test (3), editing_longpress_menu_test (6, incl. the
+claim-gate regression "long-press on page text still selects the
+word"), form_field_highlight_test (5).

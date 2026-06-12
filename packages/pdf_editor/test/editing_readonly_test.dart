@@ -37,8 +37,7 @@ void main() {
 
       // the marquee over both finds only the unlocked one
       editing.clearAnnotationSelection();
-      expect(
-          editing.selectAnnotationsIn(0, const PdfRect(0, 0, 612, 792)), 1);
+      expect(editing.selectAnnotationsIn(0, const PdfRect(0, 0, 612, 792)), 1);
 
       // deletes refuse, alone and in a batch
       editing.deleteAnnotation(0, 0);

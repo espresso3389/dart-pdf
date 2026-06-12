@@ -330,8 +330,7 @@ class PdfEditingToolbar extends StatelessWidget {
                 onPressed: () async {
                   final picked = await showPdfColorPicker(context,
                       initial: controller.color,
-                      initialFormat:
-                          controller.preferences.colorPickerFormat,
+                      initialFormat: controller.preferences.colorPickerFormat,
                       onFormatChanged: (format) =>
                           controller.preferences.colorPickerFormat = format);
                   if (picked != null) _applyColor(picked);
@@ -509,9 +508,8 @@ class _StyleMenuState extends State<_StyleMenu> {
             // with a restylable selection the stroke/opacity sliders
             // show — and change — its style; otherwise the defaults
             final restylingAnnotation = controller.canRestyleSelected;
-            final annotationStyle = restylingAnnotation
-                ? controller.selectedAnnotationStyle
-                : null;
+            final annotationStyle =
+                restylingAnnotation ? controller.selectedAnnotationStyle : null;
             final strokeValue = _draggingStroke ??
                 annotationStyle?.strokeWidth ??
                 controller.strokeWidth;
@@ -529,7 +527,8 @@ class _StyleMenuState extends State<_StyleMenu> {
                     : null)
                 : controller.textFillColor;
             final borderValue = restyling
-                ? (boxStyle?.borderColor != null && (boxStyle?.borderWidth ?? 0) > 0
+                ? (boxStyle?.borderColor != null &&
+                        (boxStyle?.borderWidth ?? 0) > 0
                     ? Color(0xFF000000 | boxStyle!.borderColor!)
                     : null)
                 : controller.textBorderColor;
@@ -565,8 +564,7 @@ class _StyleMenuState extends State<_StyleMenu> {
                       value: controller.eraserRadius,
                       min: 2,
                       max: 40,
-                      display:
-                          '${controller.eraserRadius.round()} pt',
+                      display: '${controller.eraserRadius.round()} pt',
                       onChanged: (v) =>
                           controller.eraserRadius = v.roundToDouble(),
                     ),

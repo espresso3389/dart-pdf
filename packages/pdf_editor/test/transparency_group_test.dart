@@ -54,7 +54,8 @@ Uint8List buildGroupAlphaPdf() {
 }
 
 void main() {
-  testWidgets('group ca survives an inner gs reset; plain forms keep '
+  testWidgets(
+      'group ca survives an inner gs reset; plain forms keep '
       'per-paint alpha semantics', (tester) async {
     await tester.runAsync(() async {
       final doc = PdfDocument.open(buildGroupAlphaPdf());

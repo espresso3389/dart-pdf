@@ -40,8 +40,7 @@ Uint8List buildDashedPdf() {
 }
 
 void main() {
-  testWidgets('dash arrays produce gaps and honor the phase',
-      (tester) async {
+  testWidgets('dash arrays produce gaps and honor the phase', (tester) async {
     await tester.runAsync(() async {
       final doc = PdfDocument.open(buildDashedPdf());
       final image =

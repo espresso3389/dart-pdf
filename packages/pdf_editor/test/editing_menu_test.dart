@@ -26,8 +26,7 @@ void main() {
       return editing;
     }
 
-    test('bringSelectedToFront reorders /Annots and the selection follows',
-        () {
+    test('bringSelectedToFront reorders /Annots and the selection follows', () {
       final editing = threeRects()..selectAnnotation(0, 0);
       addTearDown(editing.dispose);
       const rectA = PdfRect(50, 700, 150, 750);
@@ -133,10 +132,12 @@ void main() {
       await pumpViewer(tester);
 
       await rightClick(tester, viewPoint(250, 725)); // B, already on top
-      final front = tester.widget(
-          find.byKey(const ValueKey('pdf-annot-menu-front'))) as PopupMenuItem;
-      final back = tester.widget(
-          find.byKey(const ValueKey('pdf-annot-menu-back'))) as PopupMenuItem;
+      final front =
+          tester.widget(find.byKey(const ValueKey('pdf-annot-menu-front')))
+              as PopupMenuItem;
+      final back =
+          tester.widget(find.byKey(const ValueKey('pdf-annot-menu-back')))
+              as PopupMenuItem;
       expect(front.enabled, isFalse);
       expect(back.enabled, isTrue);
     });

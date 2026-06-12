@@ -25,7 +25,8 @@ void main() {
           data: data,
           child: PdfViewer(
             initialFit: PdfViewerFit.width,
-            document: editing?.document ?? PdfDocument.open(buildMultiPagePdf(pages)),
+            document:
+                editing?.document ?? PdfDocument.open(buildMultiPagePdf(pages)),
             backgroundColor: backgroundColor,
             editing: editing,
           ),
@@ -74,8 +75,8 @@ void main() {
               outlineColor: outline,
             ),
           ));
-      final container = tester.widget<Container>(
-          find.byKey(const ValueKey('pdf-scrollbar-thumb')));
+      final container = tester
+          .widget<Container>(find.byKey(const ValueKey('pdf-scrollbar-thumb')));
       final decoration = container.decoration! as BoxDecoration;
       expect(decoration.color, thumbColor);
       expect((decoration.border! as Border).top.color, outline);
@@ -94,8 +95,7 @@ void main() {
       expect((paint.painter as dynamic).theme, data);
     });
 
-    testWidgets('the editing overlay chrome carries the theme',
-        (tester) async {
+    testWidgets('the editing overlay chrome carries the theme', (tester) async {
       const data = PdfViewerThemeData(
         annotationChromeColor: Color(0xFF00AA88),
         elementChromeColor: Color(0xFF8800AA),
@@ -134,7 +134,8 @@ void main() {
       return editing;
     }
 
-    testWidgets('the thumbnail strip shows the viewer-style bar when it '
+    testWidgets(
+        'the thumbnail strip shows the viewer-style bar when it '
         'overflows', (tester) async {
       await pumpThumbnailStrip(tester);
       expect(find.byKey(thumbnailThumb), findsOneWidget);
@@ -146,12 +147,10 @@ void main() {
       expect(find.byKey(thumbnailThumb), findsNothing);
     });
 
-    testWidgets('dragging the thumbnail bar scrolls the strip',
-        (tester) async {
+    testWidgets('dragging the thumbnail bar scrolls the strip', (tester) async {
       await pumpThumbnailStrip(tester);
-      final position = tester
-          .state<ScrollableState>(find.byType(Scrollable).first)
-          .position;
+      final position =
+          tester.state<ScrollableState>(find.byType(Scrollable).first).position;
       expect(position.pixels, 0);
 
       final gesture = await tester.startGesture(
@@ -227,8 +226,7 @@ void main() {
         ),
       ));
       await tester.pump();
-      final container =
-          tester.widget<Container>(find.byKey(thumbnailThumb));
+      final container = tester.widget<Container>(find.byKey(thumbnailThumb));
       expect((container.decoration! as BoxDecoration).color, thumbColor);
     });
   });

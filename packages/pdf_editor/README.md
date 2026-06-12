@@ -33,10 +33,12 @@ are byte prefixes of one buffer.
   ink signature.
 - Direct manipulation: select (single, marquee, ⌘A), move, resize, and
   rotate with live appearance previews, plus a slicing circle eraser,
-  copy/cut/paste, z-order, restyling, and a right-click context menu
-  with host-extensible entries.
+  copy/cut/paste, z-order, restyling, and a context menu with
+  host-extensible entries (right-click, or long-press on touch).
 - Forms: fill text/checkbox/radio/choice fields in place, set button
   images, and administer fields (add, rename, retype, delete, flatten).
+  Fields are highlighted with a translucent wash by default
+  (`PdfViewer.highlightFormFields`).
 - Panels: thumbnail sidebar with drag-reorder, annotation sidebar with
   search and multi-select, properties panel, and search results panel,
   all resizable and persisted.

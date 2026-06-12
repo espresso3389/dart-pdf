@@ -146,9 +146,8 @@ class _PdfSearchFieldState extends State<PdfSearchField> {
               icon: const Icon(Icons.keyboard_arrow_up),
               tooltip: 'Previous match',
               visualDensity: VisualDensity.compact,
-              onPressed: controller.matchCount == 0
-                  ? null
-                  : controller.previousMatch,
+              onPressed:
+                  controller.matchCount == 0 ? null : controller.previousMatch,
             ),
             IconButton(
               key: const ValueKey('pdf-search-next'),
@@ -214,10 +213,9 @@ class _PdfSearchResultsPanelState extends State<PdfSearchResultsPanel> {
   final ScrollController _scroll = ScrollController();
   double? _dragWidth;
 
-  double get _width => (_dragWidth ??
-          widget.preferences?.searchPanelWidth ??
-          widget.width)
-      .clamp(widget.minWidth, widget.maxWidth);
+  double get _width =>
+      (_dragWidth ?? widget.preferences?.searchPanelWidth ?? widget.width)
+          .clamp(widget.minWidth, widget.maxWidth);
 
   @override
   void initState() {
@@ -266,8 +264,8 @@ class _PdfSearchResultsPanelState extends State<PdfSearchResultsPanel> {
 
   Widget _resultTile(BuildContext context, int index, PdfSearchResult result) {
     final scheme = Theme.of(context).colorScheme;
-    final highlight = PdfViewerTheme.of(context).searchMatchColor ??
-        const Color(0x66FFEB3B);
+    final highlight =
+        PdfViewerTheme.of(context).searchMatchColor ?? const Color(0x66FFEB3B);
     final style = Theme.of(context).textTheme.bodySmall;
     return ListTile(
       key: ValueKey('pdf-search-result-$index'),
@@ -351,8 +349,8 @@ class _PdfSearchResultsPanelState extends State<PdfSearchResultsPanel> {
                         child: ListView.builder(
                           key: const ValueKey('pdf-search-results-list'),
                           controller: _scroll,
-                          padding: EdgeInsets.only(
-                              right: barClearance, bottom: 8),
+                          padding:
+                              EdgeInsets.only(right: barClearance, bottom: 8),
                           itemCount: entries.length,
                           itemBuilder: (context, index) {
                             final entry = entries[index];
@@ -367,8 +365,8 @@ class _PdfSearchResultsPanelState extends State<PdfSearchResultsPanel> {
                                             .primary)),
                               );
                             }
-                            return _resultTile(context, entry.result!,
-                                results[entry.result!]);
+                            return _resultTile(
+                                context, entry.result!, results[entry.result!]);
                           },
                         ),
                       ),

@@ -247,8 +247,8 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
               // the implicit desktop scrollbar is replaced by the
               // viewer-style bar below
               builder: (context, _) => ScrollConfiguration(
-                behavior: ScrollConfiguration.of(context)
-                    .copyWith(scrollbars: false),
+                behavior:
+                    ScrollConfiguration.of(context).copyWith(scrollbars: false),
                 child: ReorderableListView.builder(
                   scrollController: _scroll,
                   buildDefaultDragHandles: false,

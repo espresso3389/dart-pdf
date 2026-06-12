@@ -154,8 +154,7 @@ void main() {
       expect(stamp.contents, 'PAID');
     });
 
-    testWidgets('the picker can revert to typing the caption',
-        (tester) async {
+    testWidgets('the picker can revert to typing the caption', (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(1));
       addTearDown(editing.dispose);
       const paid = PdfCustomStamp(text: 'PAID', color: 0xC03030);
@@ -167,8 +166,7 @@ void main() {
         home: Builder(
           builder: (context) => Center(
             child: FilledButton(
-              onPressed: () =>
-                  showPdfStampPicker(context, controller: editing),
+              onPressed: () => showPdfStampPicker(context, controller: editing),
               child: const Text('open'),
             ),
           ),

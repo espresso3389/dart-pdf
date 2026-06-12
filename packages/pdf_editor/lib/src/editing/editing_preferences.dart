@@ -59,6 +59,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   PdfColorFormat _colorPickerFormat = PdfColorFormat.hex;
   Color _pageColor = const Color(0xFFFFFFFF);
   bool _showAnnotations = true;
+  bool _highlightFormFields = true;
   bool _showPropertiesPanel = false;
   bool _showSearchResultsPanel = false;
   double? _thumbnailSidebarWidth;
@@ -113,6 +114,8 @@ class PdfEditingPreferences extends ChangeNotifier {
       if (pageColor != null) _pageColor = Color(pageColor);
       _showAnnotations =
           store.getBool('${_prefix}showAnnotations') ?? _showAnnotations;
+      _highlightFormFields = store.getBool('${_prefix}highlightFormFields') ??
+          _highlightFormFields;
       _thumbnailSidebarWidth =
           store.getDouble('${_prefix}thumbnailSidebarWidth') ??
               _thumbnailSidebarWidth;
@@ -317,6 +320,17 @@ class PdfEditingPreferences extends ChangeNotifier {
     if (value == _showAnnotations) return;
     _showAnnotations = value;
     _write((s) => s.setBool('${_prefix}showAnnotations', value));
+    notifyListeners();
+  }
+
+  /// Whether form-field widgets are washed with the visibility tint
+  /// (see [PdfViewer.highlightFormFields]). A display setting only.
+  bool get highlightFormFields => _highlightFormFields;
+
+  set highlightFormFields(bool value) {
+    if (value == _highlightFormFields) return;
+    _highlightFormFields = value;
+    _write((s) => s.setBool('${_prefix}highlightFormFields', value));
     notifyListeners();
   }
 

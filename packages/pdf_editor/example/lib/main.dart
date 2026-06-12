@@ -394,6 +394,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
             ),
             if (editing != null) ...[
               IconButton(
+                visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.grid_view),
                 tooltip: 'Pages',
                 isSelected: _prefs.showThumbnailSidebar,
@@ -401,6 +402,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     _prefs.showThumbnailSidebar = !_prefs.showThumbnailSidebar,
               ),
               IconButton(
+                visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.list_alt),
                 tooltip: 'Annotations',
                 isSelected: _prefs.showAnnotationSidebar,
@@ -408,6 +410,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     !_prefs.showAnnotationSidebar,
               ),
               IconButton(
+                visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.tune),
                 tooltip: 'Properties',
                 isSelected: _prefs.showPropertiesPanel,
@@ -415,6 +418,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     _prefs.showPropertiesPanel = !_prefs.showPropertiesPanel,
               ),
               IconButton(
+                visualDensity: VisualDensity.compact,
                 icon: const Icon(Icons.person_outline),
                 tooltip: 'Author name',
                 onPressed: () async {
@@ -425,9 +429,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 },
               ),
             ],
+            // every plain action is compact: the row overflows an 800px
+            // window (the widget-test viewport included) at full density
             IconButton(
-              // compact: the actions row brushes its width limit on
-              // 800px windows (the widget-test viewport included)
               visualDensity: VisualDensity.compact,
               icon: Icon(_prefs.showAnnotations
                   ? Icons.visibility
@@ -435,10 +439,20 @@ class _ViewerScreenState extends State<ViewerScreen> {
               tooltip: _prefs.showAnnotations
                   ? 'Hide annotations'
                   : 'Show annotations',
-              onPressed: () =>
-                  _prefs.showAnnotations = !_prefs.showAnnotations,
+              onPressed: () => _prefs.showAnnotations = !_prefs.showAnnotations,
             ),
             IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.dynamic_form),
+              tooltip: _prefs.highlightFormFields
+                  ? 'Hide form field highlight'
+                  : 'Highlight form fields',
+              isSelected: _prefs.highlightFormFields,
+              onPressed: () =>
+                  _prefs.highlightFormFields = !_prefs.highlightFormFields,
+            ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
               icon: const Icon(Icons.format_color_fill),
               tooltip: 'Page color',
               onPressed: () async {
@@ -451,6 +465,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
               },
             ),
             IconButton(
+              visualDensity: VisualDensity.compact,
               icon: Icon(switch (_prefs.themeMode) {
                 ThemeMode.system => Icons.brightness_auto,
                 ThemeMode.light => Icons.light_mode,
@@ -468,11 +483,13 @@ class _ViewerScreenState extends State<ViewerScreen> {
               },
             ),
             IconButton(
+              visualDensity: VisualDensity.compact,
               icon: const Icon(Icons.auto_awesome),
               tooltip: 'Open the interactive demo',
               onPressed: _openDemo,
             ),
             IconButton(
+              visualDensity: VisualDensity.compact,
               icon: const Icon(Icons.folder_open),
               tooltip: 'Open PDF',
               onPressed: _pickFile,
@@ -558,6 +575,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                     formImagePicker: _pickFormImage,
                     pageColor: _prefs.pageColor,
                     showAnnotations: _prefs.showAnnotations,
+                    highlightFormFields: _prefs.highlightFormFields,
                   ),
                 ),
               ),
@@ -688,4 +706,3 @@ class _CounterControl extends StatelessWidget {
     );
   }
 }
-

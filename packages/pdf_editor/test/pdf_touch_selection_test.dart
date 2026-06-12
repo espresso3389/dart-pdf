@@ -89,13 +89,14 @@ void main() {
       expect(controller.selectedText, 'Page 1');
       expect(find.byKey(const ValueKey('pdf-text-handle-start')), findsNothing);
       expect(find.byKey(const ValueKey('pdf-text-handle-end')), findsNothing);
-      expect(find.byKey(const ValueKey('pdf-text-selection-chip')),
-          findsNothing);
+      expect(
+          find.byKey(const ValueKey('pdf-text-selection-chip')), findsNothing);
     });
   });
 
   group('long-press selection', () {
-    testWidgets('long press selects the word under the finger and shows '
+    testWidgets(
+        'long press selects the word under the finger and shows '
         'handles and the chip', (tester) async {
       final controller = await pumpViewer(tester);
       await longPressSelect(tester, view(100, 720));
@@ -116,8 +117,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 600));
       expect(controller.selectedText, 'Page');
       expect(find.byKey(const ValueKey('pdf-text-handle-end')), findsNothing);
-      expect(find.byKey(const ValueKey('pdf-text-selection-chip')),
-          findsNothing);
+      expect(
+          find.byKey(const ValueKey('pdf-text-selection-chip')), findsNothing);
       await gesture.up();
       await tester.pump();
       expect(find.byKey(const ValueKey('pdf-text-handle-end')), findsOneWidget);
@@ -159,8 +160,8 @@ void main() {
       await tester.tapAt(view(300, 400));
       await tester.pump(const Duration(milliseconds: 400));
       expect(controller.hasSelection, isFalse);
-      expect(find.byKey(const ValueKey('pdf-text-selection-chip')),
-          findsNothing);
+      expect(
+          find.byKey(const ValueKey('pdf-text-selection-chip')), findsNothing);
     });
 
     testWidgets('long press does not select while an editing tool is armed',
@@ -202,8 +203,8 @@ void main() {
       await longPressSelect(tester, view(100, 720));
       expect(controller.selectedText, 'Page');
 
-      final handle = tester
-          .getCenter(find.byKey(const ValueKey('pdf-text-handle-end')));
+      final handle =
+          tester.getCenter(find.byKey(const ValueKey('pdf-text-handle-end')));
       final gesture = await tester.startGesture(handle);
       await tester.pump();
       // the eager recognizer claims on contact: no slop to pay
@@ -226,8 +227,8 @@ void main() {
       // top, wins there), but the ball regions stay unambiguous
       final box = tester
           .getTopLeft(find.byKey(const ValueKey('pdf-text-handle-start')));
-      final size = tester
-          .getSize(find.byKey(const ValueKey('pdf-text-handle-start')));
+      final size =
+          tester.getSize(find.byKey(const ValueKey('pdf-text-handle-start')));
       final gesture =
           await tester.startGesture(box + Offset(size.width / 2, 6));
       await tester.pump();
@@ -245,8 +246,8 @@ void main() {
       await longPressSelect(tester, view(100, 720));
       final before = controller.currentPage;
 
-      final handle = tester
-          .getCenter(find.byKey(const ValueKey('pdf-text-handle-end')));
+      final handle =
+          tester.getCenter(find.byKey(const ValueKey('pdf-text-handle-end')));
       final gesture = await tester.startGesture(handle);
       await tester.pump();
       await gesture.moveBy(const Offset(0, 120));
@@ -282,8 +283,8 @@ void main() {
 
       expect(copied, ['Page']);
       expect(controller.hasSelection, isFalse);
-      expect(find.byKey(const ValueKey('pdf-text-selection-chip')),
-          findsNothing);
+      expect(
+          find.byKey(const ValueKey('pdf-text-selection-chip')), findsNothing);
     });
 
     testWidgets('Select all selects the whole page text', (tester) async {

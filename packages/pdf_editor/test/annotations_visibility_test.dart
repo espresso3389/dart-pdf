@@ -35,8 +35,7 @@ void main() {
     return editor.save();
   }
 
-  testWidgets('renderImage leaves annotations out when asked',
-      (tester) async {
+  testWidgets('renderImage leaves annotations out when asked', (tester) async {
     await tester.runAsync(() async {
       final page = PdfDocument.open(annotated()).page(0);
 
@@ -48,8 +47,7 @@ void main() {
       final hidden =
           await PdfPageRenderer.renderImage(page, annotations: false);
       final hiddenPixels = (await hidden.toByteData())!;
-      expect(
-          pixelAt(hiddenPixels, hidden.width, 150, 142), (0xFF, 0xFF, 0xFF));
+      expect(pixelAt(hiddenPixels, hidden.width, 150, 142), (0xFF, 0xFF, 0xFF));
       hidden.dispose();
     });
   });
@@ -96,7 +94,8 @@ void main() {
     expect(pixelAt(pixels, raster.width, x, y), (0xFF, 0xFF, 0xFF));
   });
 
-  testWidgets('hidden annotations take no taps — an invisible link must not '
+  testWidgets(
+      'hidden annotations take no taps — an invisible link must not '
       'navigate', (tester) async {
     // the GoTo link in buildAnnotatedPdf: rect (72, 600)-(200, 624) on a
     // 612x792 page, targeting page 3; fit-width in an 800px viewport
@@ -160,8 +159,7 @@ void main() {
       if (PdfThumbnailSidebar.debugRasterizations > before &&
           find
               .descendant(
-                  of: find.byType(AspectRatio),
-                  matching: find.byType(RawImage))
+                  of: find.byType(AspectRatio), matching: find.byType(RawImage))
               .evaluate()
               .isNotEmpty) {
         break;

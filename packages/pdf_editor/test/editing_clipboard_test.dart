@@ -2,7 +2,8 @@
 // context menu) and restyling a selected annotation (controller +
 // toolbar wiring).
 
-import 'package:flutter/gestures.dart' show PointerDeviceKind, kSecondaryMouseButton;
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -188,8 +189,7 @@ void main() {
 
       editing.restyleSelected(color: const Color(0xFF1E88E5));
       editing.restyleSelected(fill: (const Color(0xFFFFF59D),));
-      final style =
-          editing.document.page(0).annotations.single.freeTextStyle!;
+      final style = editing.document.page(0).annotations.single.freeTextStyle!;
       expect(style.color, 0x1E88E5);
       expect(style.fillColor, 0xFFF59D);
       expect(editing.selectedAnnotationSlots, [(0, 0)]);
@@ -208,7 +208,8 @@ void main() {
 
     Future<(PdfEditingController, PdfViewerController)> pumpEditor(
         WidgetTester tester,
-        {int pages = 2, bool toolbar = false}) async {
+        {int pages = 2,
+        bool toolbar = false}) async {
       final editing = PdfEditingController(buildMultiPagePdf(pages));
       final viewer = PdfViewerController();
       addTearDown(editing.dispose);
@@ -225,8 +226,7 @@ void main() {
             ),
           ),
           bottomNavigationBar: toolbar
-              ? PdfEditingToolbar(
-                  controller: editing, viewerController: viewer)
+              ? PdfEditingToolbar(controller: editing, viewerController: viewer)
               : null,
         ),
       ));
@@ -295,9 +295,9 @@ void main() {
 
       await rightClick(tester, view(175, 700));
       // paste is offered but disabled while the clipboard is empty
-      final paste = tester.widget(
-              find.byKey(const ValueKey('pdf-annot-menu-paste')))
-          as PopupMenuItem;
+      final paste =
+          tester.widget(find.byKey(const ValueKey('pdf-annot-menu-paste')))
+              as PopupMenuItem;
       expect(paste.enabled, isFalse);
 
       await tester.tap(find.byKey(const ValueKey('pdf-annot-menu-copy')));
@@ -308,12 +308,10 @@ void main() {
       editing.clearAnnotationSelection();
       await tester.pump();
       await rightClick(tester, view(450, 350));
-      expect(find.byKey(const ValueKey('pdf-annot-menu-paste')),
-          findsOneWidget);
       expect(
-          find.byKey(const ValueKey('pdf-annot-menu-copy')), findsNothing);
-      expect(
-          find.byKey(const ValueKey('pdf-annot-menu-front')), findsNothing);
+          find.byKey(const ValueKey('pdf-annot-menu-paste')), findsOneWidget);
+      expect(find.byKey(const ValueKey('pdf-annot-menu-copy')), findsNothing);
+      expect(find.byKey(const ValueKey('pdf-annot-menu-front')), findsNothing);
 
       await tester.tap(find.byKey(const ValueKey('pdf-annot-menu-paste')));
       await tester.pumpAndSettle();
@@ -330,13 +328,11 @@ void main() {
       await tester.pump();
 
       await rightClick(tester, view(450, 350));
-      expect(find.byKey(const ValueKey('pdf-annot-menu-paste')),
-          findsNothing);
+      expect(find.byKey(const ValueKey('pdf-annot-menu-paste')), findsNothing);
       await settle(tester);
     });
 
-    testWidgets('cutting from the menu removes the annotation',
-        (tester) async {
+    testWidgets('cutting from the menu removes the annotation', (tester) async {
       final (editing, _) = await pumpEditor(tester);
       editing.addRectangle(0, const PdfRect(100, 650, 250, 750));
       await tester.pump();
@@ -364,8 +360,7 @@ void main() {
         matching: find.byWidgetPredicate((w) =>
             w is Container &&
             w.decoration is BoxDecoration &&
-            (w.decoration! as BoxDecoration).color ==
-                const Color(0xFF43A047) &&
+            (w.decoration! as BoxDecoration).color == const Color(0xFF43A047) &&
             (w.decoration! as BoxDecoration).shape == BoxShape.circle),
       );
       await tester.scrollUntilVisible(swatch, 100,
@@ -410,8 +405,7 @@ void main() {
       // dragging it restyles on release
       await tester.drag(find.byType(Slider).first, const Offset(150, 0));
       await tester.pumpAndSettle();
-      final width =
-          editing.document.page(0).annotations.single.borderWidth!;
+      final width = editing.document.page(0).annotations.single.borderWidth!;
       expect(width, greaterThan(2));
       expect(editing.selectedAnnotationSlots, [(0, 0)]);
       await settle(tester);

@@ -273,8 +273,7 @@ class _PdfColorPickerState extends State<PdfColorPicker> {
                 onSelected: _switchFormat,
                 itemBuilder: (context) => [
                   for (final format in PdfColorFormat.values)
-                    PopupMenuItem(
-                        value: format, child: Text(format.label)),
+                    PopupMenuItem(value: format, child: Text(format.label)),
                 ],
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 2),

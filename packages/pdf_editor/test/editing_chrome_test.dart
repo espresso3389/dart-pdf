@@ -79,8 +79,7 @@ void main() {
       return editing;
     }
 
-    testWidgets('the painter divides chrome sizes by the zoom',
-        (tester) async {
+    testWidgets('the painter divides chrome sizes by the zoom', (tester) async {
       await pumpOverlay(tester, zoom: 2.5);
       expect(overlayPainter(tester).chromeScale, closeTo(1 / 2.5, 1e-9));
       await tester.pump(const Duration(milliseconds: 400));
@@ -163,8 +162,7 @@ void main() {
           kind: PointerDeviceKind.trackpad, pointer: 9);
       await pinch.panZoomStart(const Offset(400, 300));
       for (var i = 1; i <= 5; i++) {
-        await pinch.panZoomUpdate(const Offset(400, 300),
-            scale: 1 + 0.2 * i);
+        await pinch.panZoomUpdate(const Offset(400, 300), scale: 1 + 0.2 * i);
         await tester.pump(const Duration(milliseconds: 16));
       }
       await pinch.panZoomEnd();
@@ -227,8 +225,8 @@ void main() {
       // a small patch: the 1.5px line lands between pixel columns
       var lineSeen = false;
       for (var dx = -2; dx <= 2 && !lineSeen; dx++) {
-        final (r2, _, b2, a2) = pixelAt(
-            data, 800, centerX.round() + dx, (boxTop - 8).round());
+        final (r2, _, b2, a2) =
+            pixelAt(data, 800, centerX.round() + dx, (boxTop - 8).round());
         lineSeen = a2 > 150 && b2 > 150 && r2 < 120;
       }
       expect(lineSeen, isTrue);

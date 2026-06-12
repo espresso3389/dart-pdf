@@ -921,8 +921,7 @@ void main() {
         .text;
 
     Future<void> enterChannel(WidgetTester tester, int i, String text) =>
-        tester.enterText(
-            find.byKey(ValueKey('pdf-color-channel-$i')), text);
+        tester.enterText(find.byKey(ValueKey('pdf-color-channel-$i')), text);
 
     testWidgets('RGB mode shows the channels and drives onChanged',
         (tester) async {

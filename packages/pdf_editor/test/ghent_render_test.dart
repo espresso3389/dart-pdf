@@ -118,10 +118,10 @@ Future<void> _checkBaseline({
         reason: '$name page $page raster size changed '
             '(GHENT_UPDATE=1 to accept)');
 
-    final expectedPixels = (await expected.toByteData(
-            format: ui.ImageByteFormat.rawStraightRgba))!
-        .buffer
-        .asUint8List();
+    final expectedPixels =
+        (await expected.toByteData(format: ui.ImageByteFormat.rawStraightRgba))!
+            .buffer
+            .asUint8List();
 
     var differing = 0;
     final diffMap = Uint8List(pixels.length);

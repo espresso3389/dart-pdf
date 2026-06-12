@@ -119,8 +119,7 @@ void main() {
   });
 
   group('remote replay', () {
-    test('applyRemoteChange lands the annotation and never echoes',
-        () async {
+    test('applyRemoteChange lands the annotation and never echoes', () async {
       // device A authors; device B replays
       final a = PdfEditingController(buildClassicPdf());
       final b = PdfEditingController(buildClassicPdf());
@@ -155,8 +154,7 @@ void main() {
       expect(b.findAnnotationByName(arrived.name!), isNotNull);
     });
 
-    test('a remote modification replaces; a remote removal removes',
-        () async {
+    test('a remote modification replaces; a remote removal removes', () async {
       final a = PdfEditingController(buildClassicPdf());
       final b = PdfEditingController(buildClassicPdf());
       addTearDown(a.dispose);
@@ -270,8 +268,8 @@ void main() {
       final other = PdfEditingController(buildClassicPdf());
       addTearDown(other.dispose);
       expect(other.applyRemoteChange(baseline.single), isTrue);
-      expect(other.document.page(0).annotations.single.name,
-          baseline.single.name);
+      expect(
+          other.document.page(0).annotations.single.name, baseline.single.name);
     });
   });
 }

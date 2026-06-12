@@ -88,7 +88,8 @@ variants, and JPX subsampling/PCRL-CPRL progressions.
   long documents with mixed page sizes.
 - Trackpad pinch and scroll don't fight each other (each gesture commits
   to one or the other), touch pinch zoom works with a tool armed, and
-  horizontal flings carry momentum while zoomed.
+  flings keep their momentum — including finger scrolls while an editing
+  tool owns the gestures.
 - Navigation (search results, links, thumbnails) accounts for the zoom
   window, so jumps land where the user is looking.
 - Pages skip their first interpretation during fast flings and fill in
@@ -116,6 +117,9 @@ variants, and JPX subsampling/PCRL-CPRL progressions.
 - Copy/cut/paste via keyboard and context menu; copies are deep
   snapshots that survive undo and paste into other documents. Z-order
   edits reorder the page's /Annots array so they stick in any viewer.
+  Touch reaches the same context menu with a long-press (on an
+  annotation, a form field, or — with something on the clipboard —
+  empty page area).
 - In-place restyling: color, stroke width, opacity, font, and size of
   the selected annotations, preserving identity, z-order, and authors.
 - Commits never flash: the overlay keeps the committed preview painted
@@ -132,6 +136,8 @@ variants, and JPX subsampling/PCRL-CPRL progressions.
 
 - Fill text, checkbox, radio, and choice fields in place; push-button
   fields take an image (the usual carrier for signatures and logos).
+- Fields are highlighted with a translucent wash and border by default
+  (`PdfViewer.highlightFormFields`), so they're findable at a glance.
 - Field administration (add, rename, retype, delete, flatten) is
   available both as an API and in the UI via drag-out creation and a
   right-click menu.

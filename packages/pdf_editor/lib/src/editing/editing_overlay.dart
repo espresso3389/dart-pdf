@@ -31,10 +31,12 @@ class EditingPageOverlay extends StatefulWidget {
     this.pageColor = const Color(0xFFFFFFFF),
     this.showAnnotations = true,
     this.onPanViewport,
+    this.onPanViewportEnd,
     this.rasterCurrent = true,
     this.zoom = 1,
     this.formImagePicker,
     this.onShowAnnotationMenu,
+    this.onShowFormFieldMenu,
   });
 
   final PdfEditingController controller;
@@ -60,6 +62,11 @@ class EditingPageOverlay extends StatefulWidget {
   /// selection co-existing in the select tool.
   final void Function(Offset delta)? onPanViewport;
 
+  /// A viewport pan ended: hands the gesture's lift-off velocity to the
+  /// viewer so a finger fling keeps its momentum (the overlay's pan path
+  /// bypasses the list's scroll physics, which would otherwise carry it).
+  final void Function(Velocity velocity)? onPanViewportEnd;
+
   /// Whether the page raster on screen already shows the controller's
   /// current revision. While false (an edit just committed and the
   /// re-render is in flight), the overlay keeps painting the committed
@@ -74,10 +81,18 @@ class EditingPageOverlay extends StatefulWidget {
   final double zoom;
 
   /// Opens the annotation context menu at a global position — the
-  /// selection action chip's "more" button, which gives touch input the
-  /// menu that mice reach by right-clicking. The viewer supplies its
-  /// menu (including the host's custom actions).
-  final void Function(Offset globalPosition)? onShowAnnotationMenu;
+  /// selection action chip's "more" button and the touch long-press,
+  /// which give touch input the menu that mice reach by right-clicking.
+  /// The viewer supplies its menu (including the host's custom actions);
+  /// [pagePoint] anchors a paste from a press on empty page area.
+  final void Function(Offset globalPosition, int pageIndex,
+      {(double, double)? pagePoint})? onShowAnnotationMenu;
+
+  /// Opens the form-field context menu (rename/convert/delete/flatten)
+  /// at a global position — the touch long-press counterpart of
+  /// right-clicking a field widget with the form tool armed.
+  final void Function(Offset globalPosition, String fieldName)?
+      onShowFormFieldMenu;
 
   @override
   State<EditingPageOverlay> createState() => _EditingPageOverlayState();
@@ -238,8 +253,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   Rect? _afterGhostTo;
   double _afterGhostRotation = 0;
   double _afterGhostLocalAngle = 0;
-  ({Rect rect, PdfEditTool tool, Color color, double strokeWidth})?
-      _afterShape;
+  ({Rect rect, PdfEditTool tool, Color color, double strokeWidth})? _afterShape;
   ({
     Rect rect,
     String text,
@@ -313,8 +327,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
               .clamp(0.0, 1.0)
           : null;
 
-  bool get _drawTool =>
-      _tool == PdfEditTool.ink || _tool == PdfEditTool.eraser;
+  bool get _drawTool => _tool == PdfEditTool.ink || _tool == PdfEditTool.eraser;
 
   /// Whether a pointer of [kind] draws (or erases) through the raw
   /// event stream instead of the gesture arena. Pan recognizers only
@@ -474,8 +487,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       stroke.add(stroke.single);
       pressures?.add(pressures.single);
     }
-    _controller.addInkStroke(widget.pageIndex, stroke,
-        pressures: pressures);
+    _controller.addInkStroke(widget.pageIndex, stroke, pressures: pressures);
   }
 
   /// Sweeps the circle eraser to the view-space [position]: extends the
@@ -510,8 +522,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         _eraseRects[slot] ??= _geometry.toViewRect(annotation.rect);
         _eraseSliced[slot] = (
           strokes: sliced.strokes,
-          pressures:
-              List<List<double>?>.filled(sliced.strokes.length, null),
+          pressures: List<List<double>?>.filled(sliced.strokes.length, null),
           color: Color(0xFF000000 | (annotation.color ?? 0xD02020)),
           strokeWidth: (annotation.borderWidth ?? 1) * _geometry.scale,
         );
@@ -601,8 +612,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     if (quad == null) return (selected, 0);
     final angle = _quadAngle(quad);
     if (angle == 0) return (selected, 0);
-    final center = Offset(
-        (quad[0].dx + quad[2].dx) / 2, (quad[0].dy + quad[2].dy) / 2);
+    final center =
+        Offset((quad[0].dx + quad[2].dx) / 2, (quad[0].dy + quad[2].dy) / 2);
     return (
       Rect.fromCenter(
         center: center,
@@ -646,8 +657,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   /// scales along the local axes, exactly like the live preview did.
   void _commitWithGhost(VoidCallback commit,
       {Rect? to, double rotation = 0, double localAngle = 0}) {
-    final from =
-        localAngle == 0 ? _selectedViewRect : _selectionChrome?.$1;
+    final from = localAngle == 0 ? _selectedViewRect : _selectionChrome?.$1;
     final ghost = _ghost;
     final before = _controller.document;
     commit();
@@ -766,8 +776,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   /// The rotate knob's view position: above the chrome box's top edge,
   /// riding the annotation's resting [rotation] about the box center.
   Offset _rotateHandleCenter(Rect rect, double rotation) => _rotatePoint(
-        Offset(rect.center.dx,
-            rect.top - _rotateHandleDistance * _chromeScale),
+        Offset(rect.center.dx, rect.top - _rotateHandleDistance * _chromeScale),
         rect.center,
         rotation,
       );
@@ -1074,8 +1083,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       // unrotating the pointer about the chrome center
       final handle = resting == 0 || chrome == null
           ? _handleAt(selected, position)
-          : _handleAt(chrome.$1,
-              _rotatePoint(position, chrome.$1.center, -resting));
+          : _handleAt(
+              chrome.$1, _rotatePoint(position, chrome.$1.center, -resting));
       if (handle != null) {
         setState(() {
           _resizeHandle = handle;
@@ -1087,8 +1096,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         });
         return;
       }
-      if (chrome != null &&
-          _hitsRotateHandle(chrome.$1, resting, position)) {
+      if (chrome != null && _hitsRotateHandle(chrome.$1, resting, position)) {
         setState(() {
           _rotateStartAngle = (position - selected.center).direction;
           _rotateResting = resting;
@@ -1129,6 +1137,49 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     } else if (widget.onPanViewport != null) {
       _viewportPanning = true;
     }
+  }
+
+  /// Whether a touch/stylus long-press at [position] would open a
+  /// context menu — checked on pointer DOWN (the recognizer only joins
+  /// the arena when this is true), so a long-press that has nothing to
+  /// offer never steals the gesture from text selection or the viewer.
+  bool _menuLongPressClaims(Offset position) {
+    if (_gestureBailed) return false;
+    final (x, y) = _geometry.toPagePoint(position);
+    if (_tool == PdfEditTool.form) {
+      return _controller.formFieldAt(widget.pageIndex, x, y) != null &&
+          widget.onShowFormFieldMenu != null;
+    }
+    if (!_selectMode || widget.onShowAnnotationMenu == null) return false;
+    return _controller.selectableAnnotationAt(widget.pageIndex, x, y) != null ||
+        _controller.hasAnnotationClipboard;
+  }
+
+  /// Touch/stylus long-press: the context menu mice reach by
+  /// right-clicking. A pressed annotation joins the selection first
+  /// (an already-selected one keeps a multi-selection intact); empty
+  /// page area opens the paste menu when the clipboard has content.
+  void _onMenuLongPress(LongPressStartDetails details) {
+    final position = details.localPosition;
+    final (x, y) = _geometry.toPagePoint(position);
+    if (_tool == PdfEditTool.form) {
+      final field = _controller.formFieldAt(widget.pageIndex, x, y);
+      if (field == null) return;
+      HapticFeedback.selectionClick();
+      widget.onShowFormFieldMenu?.call(details.globalPosition, field.$1.name);
+      return;
+    }
+    final hit = _controller.selectableAnnotationAt(widget.pageIndex, x, y);
+    if (hit != null) {
+      if (!_controller.isAnnotationSelected(widget.pageIndex, hit.$1)) {
+        _controller.selectAnnotationAt(widget.pageIndex, x, y);
+      }
+    } else if (!_controller.hasAnnotationClipboard) {
+      return;
+    }
+    HapticFeedback.selectionClick();
+    widget.onShowAnnotationMenu
+        ?.call(details.globalPosition, widget.pageIndex, pagePoint: (x, y));
   }
 
   void _panUpdate(DragUpdateDetails details) {
@@ -1223,7 +1274,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       _signatureDrag = false;
     });
 
-    if (panned) return;
+    if (panned) {
+      // momentum: the fling continues in the viewer, which owns the
+      // scroll position and zoom window this pan was feeding
+      widget.onPanViewportEnd?.call(details.velocity);
+      return;
+    }
     if (signaturePlace != null) {
       _placeSignature(signaturePlace);
       return;
@@ -1300,8 +1356,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   /// its preview painted as the afterimage while the page re-renders.
   void _placeSignature(Offset position) {
     final (x, y) = _geometry.toPagePoint(position);
-    final placement =
-        _controller.signaturePlacement(widget.pageIndex, x, y);
+    final placement = _controller.signaturePlacement(widget.pageIndex, x, y);
     if (placement == null) return;
     final before = _controller.document;
     _controller.placeSignature(widget.pageIndex, x, y);
@@ -1549,8 +1604,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           ? null
           : resting == 0 || chrome == null
               ? _handleAt(selected, event.localPosition)
-              : _handleAt(chrome.$1,
-                  _rotatePoint(event.localPosition, chrome.$1.center, -resting));
+              : _handleAt(
+                  chrome.$1,
+                  _rotatePoint(
+                      event.localPosition, chrome.$1.center, -resting));
       if (handle != null) {
         cursor = switch ((handle.dx, handle.dy)) {
           (0, _) => SystemMouseCursors.resizeUpDown,
@@ -1623,8 +1680,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   /// Constant size on screen at any zoom, like the rest of the chrome.
   Widget _buildSelectionChip(Rect selected) {
     final clearance = (_rotateHandleDistance + 16) * _chromeScale;
-    final above =
-        selected.top - clearance - 44 * _chromeScale >= 0;
+    final above = selected.top - clearance - 44 * _chromeScale >= 0;
     // keep the chip's body on the page near the side edges
     final width = _geometry.viewSize.width;
     final halfChip = 80 * _chromeScale;
@@ -1632,9 +1688,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       width <= 2 * halfChip
           ? width / 2
           : selected.center.dx.clamp(halfChip, width - halfChip),
-      above
-          ? selected.top - clearance
-          : selected.bottom + 12 * _chromeScale,
+      above ? selected.top - clearance : selected.bottom + 12 * _chromeScale,
     );
     return Positioned(
       left: anchor.dx,
@@ -1674,7 +1728,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                   onPressed: () {
                     final box = context.findRenderObject() as RenderBox?;
                     if (box == null) return;
-                    widget.onShowAnnotationMenu!(box.localToGlobal(anchor));
+                    widget.onShowAnnotationMenu!(
+                        box.localToGlobal(anchor), widget.pageIndex);
                   },
                 ),
             ]),
@@ -1779,14 +1834,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _InkPaint? signaturePreview;
     if (_signaturePreview != null && _tool == PdfEditTool.signature) {
       final (x, y) = _geometry.toPagePoint(_signaturePreview!);
-      final placement =
-          _controller.signaturePlacement(widget.pageIndex, x, y);
+      final placement = _controller.signaturePlacement(widget.pageIndex, x, y);
       if (placement != null) {
         signaturePreview = (
           strokes: placement.strokes,
           pressures: placement.pressures,
-          color: Color(0xFF000000 | placement.color)
-              .withValues(alpha: 0.55),
+          color: Color(0xFF000000 | placement.color).withValues(alpha: 0.55),
           strokeWidth: placement.strokeWidth * _geometry.scale,
         );
       }
@@ -1872,199 +1925,232 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
               if (_erasePath.isEmpty) _eraserCursor = null;
             });
           },
-          child: Stack(children: [
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _EditingPreviewPainter(
-                  theme: PdfViewerTheme.of(context),
-                  chromeScale: _chromeScale,
-                  tool: _tool,
-                  color: _controller.color,
-                  strokeWidth: _controller.strokeWidth * _geometry.scale,
-                  geometry: _geometry,
-                  strokes: [
-                    ..._controller.strokesOn(widget.pageIndex),
-                    if (_activeStroke != null) _activeStroke!,
-                  ],
-                  pressures: [
-                    ..._controller.strokePressuresOn(widget.pageIndex),
-                    if (_activeStroke != null) _activeStrokePressures,
-                  ],
-                  dragRect: _dragStart != null && _dragCurrent != null
-                      ? Rect.fromPoints(_dragStart!, _dragCurrent!)
-                      : null,
-                  selectionRect: _resizeHandle != null
-                      ? _resizeRect
-                      : chrome?.$1.shift(moveDelta),
-                  extraSelectionRects: extraSelected,
-                  marqueeRect: _marqueeStart != null && _marqueeCurrent != null
-                      ? Rect.fromPoints(_marqueeStart!, _marqueeCurrent!)
-                      : null,
-                  ghost: wrapResize == null ? _ghost : null,
-                  ghostFrom: _resizeHandle != null && _resizeAngle != 0
-                      ? _resizeFrom
-                      : selected,
-                  ghostTo: _resizeHandle != null
-                      ? _resizeRect
-                      : selected?.shift(moveDelta),
-                  dragging: dragging,
-                  rotation:
-                      restingRotation + (rotating ? _rotateDelta : 0),
-                  ghostRotation: rotating ? _rotateDelta : 0,
-                  ghostLocalAngle:
-                      _resizeHandle != null ? _resizeAngle : 0,
-                  extraInk: extraInk,
-                  fadeRects: [
-                    ..._eraseRects.values,
-                    ...?_afterEraseRects,
-                  ],
-                  fadeColor: widget.pageColor.withValues(alpha: 0.72),
-                  eraserCursor: _tool == PdfEditTool.eraser || _rawErasing
-                      ? _eraserCursor
-                      : null,
-                  eraserRadius:
-                      _controller.eraserRadius * _geometry.scale,
-                  afterGhost: _afterGhost != null
-                      ? (
-                          picture: _afterGhost!,
-                          from: _afterGhostFrom!,
-                          to: _afterGhostTo!,
-                          rotation: _afterGhostRotation,
-                          localAngle: _afterGhostLocalAngle,
-                        )
-                      : null,
-                  afterShape: _afterShape,
-                  showHandles: selected != null &&
-                      _controller.canResizeSelected &&
-                      _moveStart == null,
-                  showRotateHandle: selected != null &&
-                      _controller.canRotateSelected &&
-                      _moveStart == null,
-                  elementRect: _selectedElementViewRect,
-                  flashRect: _flashController.isAnimating &&
-                          _flashRect != null
-                      ? _geometry.toViewRect(_flashRect!)
-                      : null,
-                  flashProgress: _flashController.value,
-                ),
-                size: Size.infinite,
+          // touch and stylus long-press opens the context menu (the
+          // recognizer claims only when the press point has a menu to
+          // offer, so text selection and slow drags keep their gestures)
+          child: RawGestureDetector(
+            behavior: HitTestBehavior.opaque,
+            gestures: <Type, GestureRecognizerFactory>{
+              _MenuLongPressRecognizer: GestureRecognizerFactoryWithHandlers<
+                  _MenuLongPressRecognizer>(
+                () => _MenuLongPressRecognizer(debugOwner: this),
+                (recognizer) => recognizer
+                  ..shouldClaim = _menuLongPressClaims
+                  ..onLongPressStart = _onMenuLongPress,
               ),
-            ),
-            // a free-text resize in flight: the text re-wrapped to the
-            // dragged box at its committed size, over a wash hiding the
-            // old rendering — never the ghost's stretched glyphs
-            if (wrapResize != null)
-              _wrappedTextBox(
-                key: const ValueKey('pdf-text-resize-preview'),
-                rect: _resizeRect!,
-                text: wrapResize.text,
-                font: wrapResize.font,
-                size: wrapResize.size,
-                color: wrapResize.color,
-                background: wrapResize.fill ??
-                    widget.pageColor.withValues(alpha: 0.92),
-                rotation: _resizeAngle,
-              ),
-            // a just-committed text edit, frozen until the page raster
-            // catches up (same wash the inline editor painted over old
-            // renderings, so nothing shows through meanwhile)
-            if (_afterText case final after?)
-              _wrappedTextBox(
-                rect: after.rect,
-                text: after.text,
-                font: after.font,
-                size: after.size,
-                color: after.color,
-                background: after.fill ??
-                    (after.washed
-                        ? widget.pageColor.withValues(alpha: 0.92)
-                        : null),
-                rotation: after.rotation,
-              ),
-            if (preview != null)
-              Positioned(
-                left: preview.dx + 14,
-                top: preview.dy - 38,
-                child: IgnorePointer(
-                  child: _EyedropperChip(color: _pickPreview),
+            },
+            child: Stack(children: [
+              Positioned.fill(
+                child: CustomPaint(
+                  painter: _EditingPreviewPainter(
+                    theme: PdfViewerTheme.of(context),
+                    chromeScale: _chromeScale,
+                    tool: _tool,
+                    color: _controller.color,
+                    strokeWidth: _controller.strokeWidth * _geometry.scale,
+                    geometry: _geometry,
+                    strokes: [
+                      ..._controller.strokesOn(widget.pageIndex),
+                      if (_activeStroke != null) _activeStroke!,
+                    ],
+                    pressures: [
+                      ..._controller.strokePressuresOn(widget.pageIndex),
+                      if (_activeStroke != null) _activeStrokePressures,
+                    ],
+                    dragRect: _dragStart != null && _dragCurrent != null
+                        ? Rect.fromPoints(_dragStart!, _dragCurrent!)
+                        : null,
+                    selectionRect: _resizeHandle != null
+                        ? _resizeRect
+                        : chrome?.$1.shift(moveDelta),
+                    extraSelectionRects: extraSelected,
+                    marqueeRect:
+                        _marqueeStart != null && _marqueeCurrent != null
+                            ? Rect.fromPoints(_marqueeStart!, _marqueeCurrent!)
+                            : null,
+                    ghost: wrapResize == null ? _ghost : null,
+                    ghostFrom: _resizeHandle != null && _resizeAngle != 0
+                        ? _resizeFrom
+                        : selected,
+                    ghostTo: _resizeHandle != null
+                        ? _resizeRect
+                        : selected?.shift(moveDelta),
+                    dragging: dragging,
+                    rotation: restingRotation + (rotating ? _rotateDelta : 0),
+                    ghostRotation: rotating ? _rotateDelta : 0,
+                    ghostLocalAngle: _resizeHandle != null ? _resizeAngle : 0,
+                    extraInk: extraInk,
+                    fadeRects: [
+                      ..._eraseRects.values,
+                      ...?_afterEraseRects,
+                    ],
+                    fadeColor: widget.pageColor.withValues(alpha: 0.72),
+                    eraserCursor: _tool == PdfEditTool.eraser || _rawErasing
+                        ? _eraserCursor
+                        : null,
+                    eraserRadius: _controller.eraserRadius * _geometry.scale,
+                    afterGhost: _afterGhost != null
+                        ? (
+                            picture: _afterGhost!,
+                            from: _afterGhostFrom!,
+                            to: _afterGhostTo!,
+                            rotation: _afterGhostRotation,
+                            localAngle: _afterGhostLocalAngle,
+                          )
+                        : null,
+                    afterShape: _afterShape,
+                    showHandles: selected != null &&
+                        _controller.canResizeSelected &&
+                        _moveStart == null,
+                    showRotateHandle: selected != null &&
+                        _controller.canRotateSelected &&
+                        _moveStart == null,
+                    elementRect: _selectedElementViewRect,
+                    flashRect:
+                        _flashController.isAnimating && _flashRect != null
+                            ? _geometry.toViewRect(_flashRect!)
+                            : null,
+                    flashProgress: _flashController.value,
+                  ),
+                  size: Size.infinite,
                 ),
               ),
-            if (_textEditRect != null)
-              Positioned.fromRect(
-                rect: _textEditRect!.inflate(2),
-                child: CallbackShortcuts(
-                  bindings: {
-                    const SingleActivator(LogicalKeyboardKey.escape):
-                        _cancelTextEdit,
-                    const SingleActivator(LogicalKeyboardKey.enter, meta: true):
-                        _commitTextEdit,
-                    const SingleActivator(LogicalKeyboardKey.enter,
-                        control: true): _commitTextEdit,
-                  },
-                  child: Container(
-                    // the chrome border lives in the inflate(2) gutter
-                    // and paints as a FOREGROUND decoration: a regular
-                    // decoration border adds itself to the padding, and
-                    // any net inset shifts the text when the editor
-                    // opens — content must sit exactly on the box
-                    padding: const EdgeInsets.all(2),
-                    // the box's own fill when it has one; otherwise wash
-                    // the paper color over what's underneath: faint for a
-                    // fresh box, near-opaque when editing existing text
-                    // so the old rendering doesn't show through
-                    color: _textEditFill ??
-                        widget.pageColor
-                            .withValues(alpha: _textEditExisting ? 0.92 : 0.3),
-                    foregroundDecoration: BoxDecoration(
-                      border: Border.all(
-                          color: PdfViewerTheme.of(context)
-                                  .annotationChromeColor ??
-                              const Color(0xFF1E88E5),
-                          width: 1.5 * _chromeScale),
-                    ),
-                    child: TextField(
-                      key: ValueKey(_textEditFieldName == null
-                          ? 'pdf-freetext-editor'
-                          : 'pdf-form-text-editor'),
-                      controller: _textEditText,
-                      focusNode: _textEditFocus,
-                      autofocus: true,
-                      // single-line form fields edit single-line: Enter
-                      // commits instead of inserting a newline
-                      maxLines: _textEditFieldName == null ||
-                              _textEditMultiline
-                          ? null
-                          : 1,
-                      expands:
-                          _textEditFieldName == null || _textEditMultiline,
-                      onSubmitted: (_) => _commitTextEdit(),
-                      textAlignVertical: _textEditFieldName == null ||
-                              _textEditMultiline
-                          ? TextAlignVertical.top
-                          : TextAlignVertical.center,
-                      cursorColor: _textEditColor,
-                      // mirrors the committed appearance: same size in view
-                      // pixels, same 1.2 leading, matching family and color
-                      style: TextStyle(
-                        color: _textEditColor,
-                        fontSize: _textEditSize * _geometry.scale,
-                        height: 1.2,
-                        fontFamily: _uiFamily(_textEditFont),
+              // a free-text resize in flight: the text re-wrapped to the
+              // dragged box at its committed size, over a wash hiding the
+              // old rendering — never the ghost's stretched glyphs
+              if (wrapResize != null)
+                _wrappedTextBox(
+                  key: const ValueKey('pdf-text-resize-preview'),
+                  rect: _resizeRect!,
+                  text: wrapResize.text,
+                  font: wrapResize.font,
+                  size: wrapResize.size,
+                  color: wrapResize.color,
+                  background: wrapResize.fill ??
+                      widget.pageColor.withValues(alpha: 0.92),
+                  rotation: _resizeAngle,
+                ),
+              // a just-committed text edit, frozen until the page raster
+              // catches up (same wash the inline editor painted over old
+              // renderings, so nothing shows through meanwhile)
+              if (_afterText case final after?)
+                _wrappedTextBox(
+                  rect: after.rect,
+                  text: after.text,
+                  font: after.font,
+                  size: after.size,
+                  color: after.color,
+                  background: after.fill ??
+                      (after.washed
+                          ? widget.pageColor.withValues(alpha: 0.92)
+                          : null),
+                  rotation: after.rotation,
+                ),
+              if (preview != null)
+                Positioned(
+                  left: preview.dx + 14,
+                  top: preview.dy - 38,
+                  child: IgnorePointer(
+                    child: _EyedropperChip(color: _pickPreview),
+                  ),
+                ),
+              if (_textEditRect != null)
+                Positioned.fromRect(
+                  rect: _textEditRect!.inflate(2),
+                  child: CallbackShortcuts(
+                    bindings: {
+                      const SingleActivator(LogicalKeyboardKey.escape):
+                          _cancelTextEdit,
+                      const SingleActivator(LogicalKeyboardKey.enter,
+                          meta: true): _commitTextEdit,
+                      const SingleActivator(LogicalKeyboardKey.enter,
+                          control: true): _commitTextEdit,
+                    },
+                    child: Container(
+                      // the chrome border lives in the inflate(2) gutter
+                      // and paints as a FOREGROUND decoration: a regular
+                      // decoration border adds itself to the padding, and
+                      // any net inset shifts the text when the editor
+                      // opens — content must sit exactly on the box
+                      padding: const EdgeInsets.all(2),
+                      // the box's own fill when it has one; otherwise wash
+                      // the paper color over what's underneath: faint for a
+                      // fresh box, near-opaque when editing existing text
+                      // so the old rendering doesn't show through
+                      color: _textEditFill ??
+                          widget.pageColor.withValues(
+                              alpha: _textEditExisting ? 0.92 : 0.3),
+                      foregroundDecoration: BoxDecoration(
+                        border: Border.all(
+                            color: PdfViewerTheme.of(context)
+                                    .annotationChromeColor ??
+                                const Color(0xFF1E88E5),
+                            width: 1.5 * _chromeScale),
                       ),
-                      decoration: InputDecoration(
-                        isCollapsed: true,
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.all(3 * _geometry.scale),
+                      child: TextField(
+                        key: ValueKey(_textEditFieldName == null
+                            ? 'pdf-freetext-editor'
+                            : 'pdf-form-text-editor'),
+                        controller: _textEditText,
+                        focusNode: _textEditFocus,
+                        autofocus: true,
+                        // single-line form fields edit single-line: Enter
+                        // commits instead of inserting a newline
+                        maxLines:
+                            _textEditFieldName == null || _textEditMultiline
+                                ? null
+                                : 1,
+                        expands:
+                            _textEditFieldName == null || _textEditMultiline,
+                        onSubmitted: (_) => _commitTextEdit(),
+                        textAlignVertical:
+                            _textEditFieldName == null || _textEditMultiline
+                                ? TextAlignVertical.top
+                                : TextAlignVertical.center,
+                        cursorColor: _textEditColor,
+                        // mirrors the committed appearance: same size in view
+                        // pixels, same 1.2 leading, matching family and color
+                        style: TextStyle(
+                          color: _textEditColor,
+                          fontSize: _textEditSize * _geometry.scale,
+                          height: 1.2,
+                          fontFamily: _uiFamily(_textEditFont),
+                        ),
+                        decoration: InputDecoration(
+                          isCollapsed: true,
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.all(3 * _geometry.scale),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            if (showChip) _buildSelectionChip(chrome?.$1 ?? selected),
-          ]),
+              if (showChip) _buildSelectionChip(chrome?.$1 ?? selected),
+            ]),
+          ),
         ),
       ),
     );
+  }
+}
+
+/// The overlay's context-menu long-press: touch and stylus only, and it
+/// only enters the gesture arena when [shouldClaim] says the press point
+/// has a menu to offer — otherwise a held finger must stay available to
+/// text selection, marquees, and slow move drags.
+class _MenuLongPressRecognizer extends LongPressGestureRecognizer {
+  _MenuLongPressRecognizer({super.debugOwner})
+      : super(supportedDevices: {
+          PointerDeviceKind.touch,
+          PointerDeviceKind.stylus,
+        });
+
+  bool Function(Offset localPosition)? shouldClaim;
+
+  @override
+  void addAllowedPointer(PointerDownEvent event) {
+    if (shouldClaim?.call(event.localPosition) == false) return;
+    super.addAllowedPointer(event);
   }
 }
 
@@ -2212,8 +2298,12 @@ class _EditingPreviewPainter extends CustomPainter {
   })? afterGhost;
 
   /// A just-committed shape's drag preview, same deal.
-  final ({Rect rect, PdfEditTool tool, Color color, double strokeWidth})?
-      afterShape;
+  final ({
+    Rect rect,
+    PdfEditTool tool,
+    Color color,
+    double strokeWidth
+  })? afterShape;
 
   final bool showHandles;
   final bool showRotateHandle;
@@ -2235,20 +2325,15 @@ class _EditingPreviewPainter extends CustomPainter {
   /// stays constant-size on screen while the viewer is zoomed in.
   final double chromeScale;
 
-  Color get _chrome =>
-      theme.annotationChromeColor ?? const Color(0xFF1E88E5);
+  Color get _chrome => theme.annotationChromeColor ?? const Color(0xFF1E88E5);
   Color get _elementChrome =>
       theme.elementChromeColor ?? const Color(0xFFFB8C00);
   Color get _flash => theme.flashColor ?? const Color(0xFFFFB300);
 
   /// Paints one set of page-space ink strokes with the committed
   /// appearance's smoothing and pressure mapping.
-  void _paintInk(
-      Canvas canvas,
-      List<List<(double, double)>> strokes,
-      List<List<double>?> pressures,
-      Color color,
-      double strokeWidth) {
+  void _paintInk(Canvas canvas, List<List<(double, double)>> strokes,
+      List<List<double>?> pressures, Color color, double strokeWidth) {
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.stroke
@@ -2345,8 +2430,7 @@ class _EditingPreviewPainter extends CustomPainter {
 
     _paintInk(canvas, strokes, pressures, color, strokeWidth);
     for (final ink in extraInk) {
-      _paintInk(canvas, ink.strokes, ink.pressures, ink.color,
-          ink.strokeWidth);
+      _paintInk(canvas, ink.strokes, ink.pressures, ink.color, ink.strokeWidth);
     }
 
     final after = afterShape;
@@ -2605,8 +2689,8 @@ void paintAnnotationDragPreview(
   canvas.saveLayer(
       bounds,
       Paint()
-        ..color = const Color(0xFFFFFFFF)
-            .withValues(alpha: opacity.clamp(0.0, 1.0)));
+        ..color =
+            const Color(0xFFFFFFFF).withValues(alpha: opacity.clamp(0.0, 1.0)));
   if (rotation != 0) {
     canvas.translate(to.center.dx, to.center.dy);
     canvas.rotate(rotation);

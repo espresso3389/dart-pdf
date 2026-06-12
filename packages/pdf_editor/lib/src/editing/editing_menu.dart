@@ -31,8 +31,7 @@ class PdfAnnotationMenuRequest {
 
   /// The primary selected annotation — the one right-clicked, when the
   /// click started a fresh selection.
-  PdfAnnotation? get primary =>
-      annotations.isEmpty ? null : annotations.last;
+  PdfAnnotation? get primary => annotations.isEmpty ? null : annotations.last;
 }
 
 /// One entry in the annotation context menu. Hosts add their own through
@@ -134,15 +133,14 @@ Future<void> showPdfAnnotationMenu({
       ),
     ],
   ];
-  final custom = customActions?.call(context, request) ??
-      const <PdfAnnotationMenuItem>[];
+  final custom =
+      customActions?.call(context, request) ?? const <PdfAnnotationMenuItem>[];
 
-  final overlay =
-      Overlay.of(context).context.findRenderObject()! as RenderBox;
+  final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
   final picked = await showMenu<PdfAnnotationMenuItem>(
     context: context,
-    position: RelativeRect.fromRect(
-        position & Size.zero, Offset.zero & overlay.size),
+    position:
+        RelativeRect.fromRect(position & Size.zero, Offset.zero & overlay.size),
     items: [
       for (final item in stock) _menuRow(item),
       if (custom.isNotEmpty) const PopupMenuDivider(),
@@ -178,8 +176,8 @@ Future<void> showPdfFormFieldMenu({
       label: 'Rename…',
       icon: Icons.drive_file_rename_outline,
       onSelected: (_) async {
-        final newName = await textPrompt(context,
-            title: 'Field name', initial: fieldName);
+        final newName =
+            await textPrompt(context, title: 'Field name', initial: fieldName);
         if (newName == null || newName.isEmpty || newName == fieldName) {
           return;
         }
@@ -191,16 +189,16 @@ Future<void> showPdfFormFieldMenu({
       label: 'Convert to text field',
       icon: Icons.text_fields,
       enabled: convertsTo(PdfFormFieldKind.text),
-      onSelected: (_) => controller.changeFormFieldKind(
-          fieldName, PdfFormFieldKind.text),
+      onSelected: (_) =>
+          controller.changeFormFieldKind(fieldName, PdfFormFieldKind.text),
     ),
     PdfAnnotationMenuItem(
       key: const ValueKey('pdf-form-menu-checkbox'),
       label: 'Convert to check box',
       icon: Icons.check_box_outlined,
       enabled: convertsTo(PdfFormFieldKind.checkBox),
-      onSelected: (_) => controller.changeFormFieldKind(
-          fieldName, PdfFormFieldKind.checkBox),
+      onSelected: (_) =>
+          controller.changeFormFieldKind(fieldName, PdfFormFieldKind.checkBox),
     ),
     PdfAnnotationMenuItem(
       key: const ValueKey('pdf-form-menu-button'),
@@ -224,12 +222,11 @@ Future<void> showPdfFormFieldMenu({
     ),
   ];
 
-  final overlay =
-      Overlay.of(context).context.findRenderObject()! as RenderBox;
+  final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
   final picked = await showMenu<PdfAnnotationMenuItem>(
     context: context,
-    position: RelativeRect.fromRect(
-        position & Size.zero, Offset.zero & overlay.size),
+    position:
+        RelativeRect.fromRect(position & Size.zero, Offset.zero & overlay.size),
     items: [for (final item in items) _menuRow(item)],
   );
   // the request param is unused by these closures; reuse the row type
@@ -249,9 +246,7 @@ PopupMenuItem<PdfAnnotationMenuItem> _menuRow(PdfAnnotationMenuItem item) =>
             Builder(
               builder: (context) => Icon(item.icon,
                   size: 18,
-                  color: item.enabled
-                      ? null
-                      : Theme.of(context).disabledColor),
+                  color: item.enabled ? null : Theme.of(context).disabledColor),
             ),
             const SizedBox(width: 10),
           ],

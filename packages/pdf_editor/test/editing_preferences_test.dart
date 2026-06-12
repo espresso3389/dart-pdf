@@ -15,10 +15,11 @@ void main() {
       a.fontSize = 18;
       a.opacity = 0.5;
       a.fingerDrawsInk = false;
-      a.showThumbnailSidebar = true;
+      a.showThumbnailSidebar = false; // non-default, so the write is real
       a.showAnnotationSidebar = true;
       a.author = 'Ben';
       a.colorPickerFormat = PdfColorFormat.cmyk;
+      a.highlightFormFields = false;
       await pumpEventQueue(); // let the unawaited writes land
 
       final b = PdfEditingPreferences();
@@ -28,10 +29,11 @@ void main() {
       expect(b.fontSize, 18);
       expect(b.opacity, 0.5);
       expect(b.fingerDrawsInk, isFalse);
-      expect(b.showThumbnailSidebar, isTrue);
+      expect(b.showThumbnailSidebar, isFalse);
       expect(b.showAnnotationSidebar, isTrue);
       expect(b.author, 'Ben');
       expect(b.colorPickerFormat, PdfColorFormat.cmyk);
+      expect(b.highlightFormFields, isFalse);
     });
 
     test('empty storage leaves the defaults', () async {
@@ -43,14 +45,15 @@ void main() {
       expect(prefs.fontSize, 14);
       expect(prefs.opacity, 1);
       expect(prefs.fingerDrawsInk, isTrue);
-      expect(prefs.showThumbnailSidebar, isFalse);
+      // the thumbnail strip is on by default since 9bbfc87
+      expect(prefs.showThumbnailSidebar, isTrue);
       expect(prefs.showAnnotationSidebar, isFalse);
       expect(prefs.author, isNull);
       expect(prefs.colorPickerFormat, PdfColorFormat.hex);
+      expect(prefs.highlightFormFields, isTrue);
     });
 
-    test('a value set while loading is not clobbered by stored data',
-        () async {
+    test('a value set while loading is not clobbered by stored data', () async {
       SharedPreferences.setMockInitialValues(
           {'pdf_editor.editing.strokeWidth': 9.0});
       final prefs = PdfEditingPreferences()..strokeWidth = 3;

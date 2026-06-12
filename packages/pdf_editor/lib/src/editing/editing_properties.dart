@@ -211,8 +211,7 @@ class _PdfAnnotationPropertiesPanelState
     final picked = await showPdfColorPicker(context,
         initial: initial,
         initialFormat: _preferences.colorPickerFormat,
-        onFormatChanged: (format) =>
-            _preferences.colorPickerFormat = format);
+        onFormatChanged: (format) => _preferences.colorPickerFormat = format);
     if (picked != null) _controller.restyleSelected(color: picked);
   }
 
@@ -220,8 +219,7 @@ class _PdfAnnotationPropertiesPanelState
     final picked = await showPdfColorPicker(context,
         initial: current ?? const Color(0xFFFFF59D),
         initialFormat: _preferences.colorPickerFormat,
-        onFormatChanged: (format) =>
-            _preferences.colorPickerFormat = format);
+        onFormatChanged: (format) => _preferences.colorPickerFormat = format);
     if (picked != null) _controller.restyleSelected(fill: (picked,));
   }
 
@@ -231,9 +229,7 @@ class _PdfAnnotationPropertiesPanelState
       );
 
   Widget _swatchRow(String label, Color? color,
-      {required Key key,
-      required VoidCallback onTap,
-      VoidCallback? onClear}) {
+      {required Key key, required VoidCallback onTap, VoidCallback? onClear}) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -337,8 +333,8 @@ class _PdfAnnotationPropertiesPanelState
           key: key,
           controller: controller,
           enabled: enabled,
-          keyboardType:
-              const TextInputType.numberWithOptions(decimal: true, signed: true),
+          keyboardType: const TextInputType.numberWithOptions(
+              decimal: true, signed: true),
           decoration: InputDecoration(
             labelText: label,
             isDense: true,

@@ -251,8 +251,8 @@ void main() {
       expect(matrixEntry(editing.document, annotation, 0), closeTo(0, 1e-6));
       expect(matrixEntry(editing.document, annotation, 1), closeTo(1, 1e-6));
       // and the appearance was regenerated at the original stroke width
-      final content = String.fromCharCodes(editing.document.cos
-          .decodeStreamData(annotation.normalAppearance!));
+      final content = String.fromCharCodes(
+          editing.document.cos.decodeStreamData(annotation.normalAppearance!));
       expect(content, contains('4 w'));
     });
   });

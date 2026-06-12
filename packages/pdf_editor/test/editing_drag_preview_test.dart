@@ -20,7 +20,8 @@ import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 }
 
 void main() {
-  test('renderAnnotationPicture draws just the appearance, transparent '
+  test(
+      'renderAnnotationPicture draws just the appearance, transparent '
       'elsewhere', () async {
     final editing = PdfEditingController(buildMultiPagePdf(1))
       ..color = const Color(0xFFFF0000)
@@ -28,8 +29,8 @@ void main() {
     final page = editing.document.page(0);
     final annotation = page.annotations.single;
 
-    final picture = await PdfPageRenderer.renderAnnotationPicture(
-        page, annotation);
+    final picture =
+        await PdfPageRenderer.renderAnnotationPicture(page, annotation);
     expect(picture, isNotNull);
     final image = await PdfPageRenderer.rasterize(
         picture!, PdfPageRenderer.pageSize(page), 1);
@@ -141,8 +142,8 @@ void main() {
       final edge = view(100, 700) + delta;
       var sawRed = false;
       for (var dx = -2; dx <= 2 && !sawRed; dx++) {
-        final (r, g, b, _) = pixelAt(data, image.width,
-            edge.dx.round() + dx, edge.dy.round());
+        final (r, g, b, _) =
+            pixelAt(data, image.width, edge.dx.round() + dx, edge.dy.round());
         sawRed = r > 180 && g < 140 && b < 140;
       }
       expect(sawRed, isTrue,

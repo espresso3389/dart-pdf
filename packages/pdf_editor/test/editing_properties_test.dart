@@ -115,14 +115,30 @@ void main() {
       expect(find.text('Square'), findsOneWidget);
       expect(find.text('Page 1'), findsOneWidget);
       // page-space geometry: x=100, y=600, 120×60
-      expect(tester.widget<TextField>(find.byKey(const ValueKey('pdf-prop-x')))
-          .controller!.text, '100');
-      expect(tester.widget<TextField>(find.byKey(const ValueKey('pdf-prop-y')))
-          .controller!.text, '600');
-      expect(tester.widget<TextField>(find.byKey(const ValueKey('pdf-prop-w')))
-          .controller!.text, '120');
-      expect(tester.widget<TextField>(find.byKey(const ValueKey('pdf-prop-h')))
-          .controller!.text, '60');
+      expect(
+          tester
+              .widget<TextField>(find.byKey(const ValueKey('pdf-prop-x')))
+              .controller!
+              .text,
+          '100');
+      expect(
+          tester
+              .widget<TextField>(find.byKey(const ValueKey('pdf-prop-y')))
+              .controller!
+              .text,
+          '600');
+      expect(
+          tester
+              .widget<TextField>(find.byKey(const ValueKey('pdf-prop-w')))
+              .controller!
+              .text,
+          '120');
+      expect(
+          tester
+              .widget<TextField>(find.byKey(const ValueKey('pdf-prop-h')))
+              .controller!
+              .text,
+          '60');
     });
 
     testWidgets('contents and author commit on submit', (tester) async {
@@ -140,8 +156,7 @@ void main() {
       expect(editing.selectedAnnotation?.author, 'Ben');
     });
 
-    testWidgets('X moves and W resizes, anchored bottom-left',
-        (tester) async {
+    testWidgets('X moves and W resizes, anchored bottom-left', (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(1))
         ..addRectangle(0, const PdfRect(100, 600, 220, 660));
       addTearDown(editing.dispose);
@@ -165,12 +180,15 @@ void main() {
       // junk input changes nothing and the field snaps back
       await submit(tester, const ValueKey('pdf-prop-x'), 'abc');
       expect(editing.selectedAnnotation!.rect.left, closeTo(150, 1e-6));
-      expect(tester.widget<TextField>(find.byKey(const ValueKey('pdf-prop-x')))
-          .controller!.text, '150');
+      expect(
+          tester
+              .widget<TextField>(find.byKey(const ValueKey('pdf-prop-x')))
+              .controller!
+              .text,
+          '150');
     });
 
-    testWidgets('the sliders restyle the selection in place',
-        (tester) async {
+    testWidgets('the sliders restyle the selection in place', (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(1))
         ..addRectangle(0, const PdfRect(100, 600, 220, 660));
       addTearDown(editing.dispose);
@@ -178,14 +196,14 @@ void main() {
       editing.selectAnnotation(0, 0);
       await tester.pump();
 
-      await tester.drag(find.byKey(const ValueKey('pdf-prop-stroke')),
-          const Offset(60, 0));
+      await tester.drag(
+          find.byKey(const ValueKey('pdf-prop-stroke')), const Offset(60, 0));
       await tester.pump();
       final width = editing.selectedAnnotation!.borderWidth!;
       expect(width, greaterThan(2));
 
-      await tester.drag(find.byKey(const ValueKey('pdf-prop-opacity')),
-          const Offset(-60, 0));
+      await tester.drag(
+          find.byKey(const ValueKey('pdf-prop-opacity')), const Offset(-60, 0));
       await tester.pump();
       final opacity = editing.selectedAnnotation!.appearanceOpacity;
       expect(opacity, lessThan(1));
@@ -194,8 +212,7 @@ void main() {
       expect(editing.selectedAnnotation!.borderWidth, width);
     });
 
-    testWidgets('the fill clear button removes a shape fill',
-        (tester) async {
+    testWidgets('the fill clear button removes a shape fill', (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(1));
       addTearDown(editing.dispose);
       editing.apply((e) => e.addSquare(0, const PdfRect(100, 600, 220, 660),
@@ -227,8 +244,7 @@ void main() {
       expect(editing.selectedAnnotation?.contents, 'Hello'); // text kept
     });
 
-    testWidgets('a multi-selection styles everything at once',
-        (tester) async {
+    testWidgets('a multi-selection styles everything at once', (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(1))
         ..addRectangle(0, const PdfRect(100, 600, 220, 660))
         ..addEllipse(0, const PdfRect(250, 600, 350, 660));
@@ -241,8 +257,8 @@ void main() {
       // no geometry fields in multi mode
       expect(find.byKey(const ValueKey('pdf-prop-x')), findsNothing);
 
-      await tester.drag(find.byKey(const ValueKey('pdf-prop-opacity')),
-          const Offset(-60, 0));
+      await tester.drag(
+          find.byKey(const ValueKey('pdf-prop-opacity')), const Offset(-60, 0));
       await tester.pump();
       final annotations = editing.document.page(0).annotations;
       expect(annotations[0].appearanceOpacity, lessThan(1));
@@ -251,17 +267,15 @@ void main() {
           closeTo(annotations[1].appearanceOpacity, 1e-6));
     });
 
-    testWidgets('the dragged width persists as a preference',
-        (tester) async {
+    testWidgets('the dragged width persists as a preference', (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(1));
       addTearDown(editing.dispose);
       await pumpPanel(tester, editing);
 
       final grip = find.byKey(const ValueKey('pdf-properties-resize-grip'));
       expect(grip, findsOneWidget);
-      final before = tester
-          .getSize(find.byType(PdfAnnotationPropertiesPanel))
-          .width;
+      final before =
+          tester.getSize(find.byType(PdfAnnotationPropertiesPanel)).width;
       final gesture = await tester.startGesture(tester.getCenter(grip),
           kind: PointerDeviceKind.mouse);
       await gesture.moveBy(const Offset(-60, 0));

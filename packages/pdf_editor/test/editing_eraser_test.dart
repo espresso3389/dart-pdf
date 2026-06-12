@@ -76,8 +76,7 @@ void main() {
       expect(ink.inkList![1].last.$1, closeTo(250, 0.5));
       // one apply: a single undo restores the unbroken stroke
       editing.undo();
-      expect(
-          editing.document.page(0).annotations.single.inkList, hasLength(1));
+      expect(editing.document.page(0).annotations.single.inkList, hasLength(1));
     });
 
     testWidgets('covering a whole annotation removes it', (tester) async {
@@ -94,7 +93,8 @@ void main() {
       expect(editing.document.page(0).annotations, isEmpty);
     });
 
-    testWidgets('erasing one stroke of a two-stroke annotation keeps the '
+    testWidgets(
+        'erasing one stroke of a two-stroke annotation keeps the '
         'other untouched', (tester) async {
       final (editing, _) = await pumpViewer(tester);
       editing
@@ -147,8 +147,7 @@ void main() {
       expect((extraInk.single.strokes as List), hasLength(2));
       // the ring cursor rides the pointer at the page-space radius
       expect(painter.eraserCursor, isNotNull);
-      expect(painter.eraserRadius,
-          closeTo(editing.eraserRadius * scale, 1e-6));
+      expect(painter.eraserRadius, closeTo(editing.eraserRadius * scale, 1e-6));
 
       await g.up();
       await tester.pump();
@@ -165,8 +164,7 @@ void main() {
 
       await tester.tapAt(view(200, 500), kind: PointerDeviceKind.mouse);
       await tester.pump();
-      expect(
-          editing.document.page(0).annotations.single.inkList, hasLength(2));
+      expect(editing.document.page(0).annotations.single.inkList, hasLength(2));
       // immediately after the commit (no raster yet) the wash and the
       // remainder keep painting so the old strokes don't pop back
       final painter = overlayPainter(tester);
@@ -180,8 +178,7 @@ void main() {
       editing.tool = PdfEditTool.eraser;
       await tester.pump();
 
-      final gesture =
-          await tester.createGesture(kind: PointerDeviceKind.mouse);
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await gesture.addPointer(location: const Offset(5, 5));
       addTearDown(gesture.removePointer);
       await tester.pump();

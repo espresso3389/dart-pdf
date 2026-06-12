@@ -64,9 +64,9 @@ void main() {
             password: passwords[name] ?? '');
         final pages = doc.pageCount;
         for (var i = 0; i < pages && i < maxPages; i++) {
-          final image = await PdfPageRenderer.renderImage(doc.page(i),
-                  pixelRatio: 1.0)
-              .timeout(const Duration(seconds: 90));
+          final image =
+              await PdfPageRenderer.renderImage(doc.page(i), pixelRatio: 1.0)
+                  .timeout(const Duration(seconds: 90));
           expect(image.width, greaterThan(0));
           image.dispose();
         }

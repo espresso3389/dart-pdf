@@ -58,10 +58,9 @@ void main() {
     await tester.runAsync(() async {
       final doc = PdfDocument.open(buildMeshPdf());
       final image = await PdfPageRenderer.renderImage(doc.page(0));
-      final data =
-          (await image.toByteData(format: ImageByteFormat.rawRgba))!
-              .buffer
-              .asUint8List();
+      final data = (await image.toByteData(format: ImageByteFormat.rawRgba))!
+          .buffer
+          .asUint8List();
       List<int> at(int x, int y) {
         final i = (y * image.width + x) * 4;
         return [data[i], data[i + 1], data[i + 2]];

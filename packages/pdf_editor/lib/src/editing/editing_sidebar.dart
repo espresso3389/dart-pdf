@@ -109,10 +109,9 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
 
   PdfEditingPreferences get _preferences => widget.controller.preferences;
 
-  double get _width => (_dragWidth ??
-          _preferences.annotationSidebarWidth ??
-          widget.width)
-      .clamp(widget.minWidth, widget.maxWidth);
+  double get _width =>
+      (_dragWidth ?? _preferences.annotationSidebarWidth ?? widget.width)
+          .clamp(widget.minWidth, widget.maxWidth);
 
   @override
   void initState() {
@@ -142,8 +141,7 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
   }
 
   void _onResizeDelta(double delta) => setState(() {
-        _dragWidth =
-            (_width + delta).clamp(widget.minWidth, widget.maxWidth);
+        _dragWidth = (_width + delta).clamp(widget.minWidth, widget.maxWidth);
       });
 
   void _onResizeEnd() {
@@ -294,8 +292,8 @@ class _PdfAnnotationSidebarState extends State<PdfAnnotationSidebar> {
           ? null
           : Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis),
       // viewer multi-selection shows here too
-      selected:
-          !_selecting && widget.controller.isAnnotationSelected(pageIndex, index),
+      selected: !_selecting &&
+          widget.controller.isAnnotationSelected(pageIndex, index),
       onTap: _selecting
           ? (selectable ? () => _toggle(slot) : null)
           : () {

@@ -40,8 +40,8 @@ bool strongRed(int r, int g, int b, int a) => a > 150 && r > 180 && g < 120;
 
 Future<ByteData> capture(WidgetTester tester, GlobalKey boundary) async {
   final image = await tester.runAsync(() async {
-    final render = boundary.currentContext!.findRenderObject()!
-        as RenderRepaintBoundary;
+    final render =
+        boundary.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     return render.toImage();
   });
   return (await tester.runAsync(image!.toByteData))!;
@@ -124,8 +124,7 @@ void main() {
       expect(editing.document.page(0).annotations, isEmpty);
     });
 
-    testWidgets('beginInkStroke holds the timer while drawing',
-        (tester) async {
+    testWidgets('beginInkStroke holds the timer while drawing', (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(1));
       addTearDown(editing.dispose);
       editing.addInkStroke(0, [(100, 500), (150, 520)]);
@@ -159,8 +158,8 @@ void main() {
       addTearDown(viewer.dispose);
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
-          body: PdfEditingToolbar(
-              controller: editing, viewerController: viewer),
+          body:
+              PdfEditingToolbar(controller: editing, viewerController: viewer),
         ),
       ));
       editing.addInkStroke(0, [(100, 500), (150, 520)]);
@@ -226,14 +225,13 @@ void main() {
       // the rotated box's top-edge midpoint: base half-height 65.36px
       // (+2 inflate), swung 45° counterclockwise on screen
       const half = 67.36 * 0.70711;
-      expect(
-          patchHas(data, 800, 600, c.dx - half, c.dy - half, 4, strongBlue),
+      expect(patchHas(data, 800, 600, c.dx - half, c.dy - half, 4, strongBlue),
           isTrue,
           reason: 'the chrome stroke should pass the rotated top edge');
       // the axis-aligned bounds box (the old chrome) had its top edge
       // ~117px above center — nothing should be drawn there now
-      expect(patchHas(data, 800, 600, c.dx, c.dy - 117.5, 3, strongBlue),
-          isFalse,
+      expect(
+          patchHas(data, 800, 600, c.dx, c.dy - 117.5, 3, strongBlue), isFalse,
           reason: 'no chrome along the axis-aligned bounds');
     });
 
@@ -258,8 +256,9 @@ void main() {
 
       // 90 + 90 = 180° in page space: matrix a = cos(180°) = -1
       final annotation = editing.selectedAnnotation!;
-      final matrix = editing.document.cos.resolve(
-          annotation.normalAppearance!.dictionary['Matrix']) as CosArray;
+      final matrix = editing.document.cos
+              .resolve(annotation.normalAppearance!.dictionary['Matrix'])
+          as CosArray;
       final a = editing.document.cos.resolve(matrix[0]);
       expect((a as CosReal).value, closeTo(-1, 1e-9));
     });
@@ -324,8 +323,7 @@ void main() {
 
       // committed, raster pending: the stroke must not blink out
       final data = await capture(tester, boundary);
-      expect(
-          patchHas(data, 800, 600, start.dx + 40, start.dy, 4, strongRed),
+      expect(patchHas(data, 800, 600, start.dx + 40, start.dy, 4, strongRed),
           isTrue,
           reason: 'committed ink should stay painted until the raster lands');
 
@@ -350,8 +348,7 @@ void main() {
       editing.tool = PdfEditTool.signature;
       await tester.pump();
 
-      final mouse =
-          await tester.createGesture(kind: PointerDeviceKind.mouse);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await mouse.addPointer(location: view(290, 510));
       addTearDown(mouse.removePointer);
       await mouse.moveTo(view(300, 500));
@@ -361,8 +358,10 @@ void main() {
       expect(editing.document.page(0).annotations, isEmpty);
       final data = await capture(tester, boundary);
       final p = view(300, 500);
-      expect(patchHas(data, 800, 600, p.dx, p.dy, 4,
-          (r, g, b, a) => a > 80 && r > 150 && g < 160), isTrue,
+      expect(
+          patchHas(data, 800, 600, p.dx, p.dy, 4,
+              (r, g, b, a) => a > 80 && r > 150 && g < 160),
+          isTrue,
           reason: 'the signature preview should ride the pointer');
 
       await tester.tapAt(view(300, 500), kind: PointerDeviceKind.mouse);

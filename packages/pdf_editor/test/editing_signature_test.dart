@@ -156,8 +156,8 @@ void main() {
           isNull);
 
       final pad = find.byKey(const ValueKey('pdf-signature-pad'));
-      await tester.timedDrag(pad, const Offset(120, 30),
-          const Duration(milliseconds: 200));
+      await tester.timedDrag(
+          pad, const Offset(120, 30), const Duration(milliseconds: 200));
       await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, 'Done'));
       await tester.pumpAndSettle();
@@ -199,8 +199,8 @@ void main() {
       await tester.pumpAndSettle();
 
       final pad = find.byKey(const ValueKey('pdf-signature-pad'));
-      await tester.timedDrag(pad, const Offset(80, 20),
-          const Duration(milliseconds: 200));
+      await tester.timedDrag(
+          pad, const Offset(80, 20), const Duration(milliseconds: 200));
       await tester.pump();
       await tester.tap(find.text('Clear'));
       await tester.pump();
@@ -211,8 +211,8 @@ void main() {
           isNull);
 
       // draw again and finish
-      await tester.timedDrag(pad, const Offset(60, -15),
-          const Duration(milliseconds: 200));
+      await tester.timedDrag(
+          pad, const Offset(60, -15), const Duration(milliseconds: 200));
       await tester.pump();
       await tester.tap(find.widgetWithText(FilledButton, 'Done'));
       await tester.pumpAndSettle();

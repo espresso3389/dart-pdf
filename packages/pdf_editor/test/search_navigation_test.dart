@@ -157,13 +157,13 @@ void main() {
           above: PdfPageNumberField(controller: controller));
 
       expect(find.text(' / 5'), findsOneWidget);
-      expect(tester.widget<TextField>(find.byKey(fieldKey)).controller!.text,
-          '1');
+      expect(
+          tester.widget<TextField>(find.byKey(fieldKey)).controller!.text, '1');
 
       unawaited(controller.jumpToPage(2));
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
-      expect(tester.widget<TextField>(find.byKey(fieldKey)).controller!.text,
-          '3');
+      expect(
+          tester.widget<TextField>(find.byKey(fieldKey)).controller!.text, '3');
     });
 
     testWidgets('submitting a number jumps; clamps and junk snap back',
@@ -183,16 +183,16 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
       expect(controller.currentPage, 4);
-      expect(tester.widget<TextField>(find.byKey(fieldKey)).controller!.text,
-          '5');
+      expect(
+          tester.widget<TextField>(find.byKey(fieldKey)).controller!.text, '5');
 
       // non-digits never reach the field; the empty submit snaps back
       await tester.enterText(find.byKey(fieldKey), 'abc');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle(const Duration(milliseconds: 100));
       expect(controller.currentPage, 4);
-      expect(tester.widget<TextField>(find.byKey(fieldKey)).controller!.text,
-          '5');
+      expect(
+          tester.widget<TextField>(find.byKey(fieldKey)).controller!.text, '5');
     });
   });
 
@@ -293,8 +293,7 @@ void main() {
       expect(find.text('No matches for “zzz”'), findsOneWidget);
     });
 
-    testWidgets('the dragged width persists as a preference',
-        (tester) async {
+    testWidgets('the dragged width persists as a preference', (tester) async {
       final controller = PdfViewerController();
       final preferences = PdfEditingPreferences();
       addTearDown(controller.dispose);
@@ -305,8 +304,7 @@ void main() {
 
       final grip = find.byKey(const ValueKey('pdf-search-resize-grip'));
       expect(grip, findsOneWidget);
-      final before =
-          tester.getSize(find.byType(PdfSearchResultsPanel)).width;
+      final before = tester.getSize(find.byType(PdfSearchResultsPanel)).width;
       final gesture = await tester.startGesture(tester.getCenter(grip),
           kind: PointerDeviceKind.mouse);
       // docked left: rightward drag grows the panel (slop eats some)

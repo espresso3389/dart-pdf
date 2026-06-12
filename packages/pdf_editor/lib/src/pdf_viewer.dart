@@ -291,6 +291,7 @@ class PdfViewer extends StatefulWidget {
     this.backgroundColor,
     this.pageColor = const Color(0xFFFFFFFF),
     this.showAnnotations = true,
+    this.highlightFormFields = true,
   });
 
   final PdfDocument document;
@@ -370,6 +371,14 @@ class PdfViewer extends StatefulWidget {
   /// hosts typically disarm editing while hiding.
   final bool showAnnotations;
 
+  /// Washes every visible form-field widget with a translucent tint and
+  /// a hairline border, the way desktop PDF editors mark fields — most
+  /// fields are otherwise invisible until clicked. Display-only; the
+  /// tint comes from [PdfViewerThemeData.formFieldHighlightColor]. Off
+  /// automatically while [showAnnotations] is false (the fields aren't
+  /// rendered, so boxes would mark nothing).
+  final bool highlightFormFields;
+
   @override
   State<PdfViewer> createState() => _PdfViewerState();
 }
@@ -415,6 +424,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   late List<double> _aspects; // height / width, after /Rotate
   final Map<int, PdfPageText> _textCache = {};
   final Map<int, List<PdfAnnotation>> _annotCache = {};
+  final Map<int, List<PdfRect>> _fieldRectCache = {};
   double _viewWidth = 0;
   double _viewHeight = 0;
 
@@ -450,6 +460,20 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   /// scroll position's ballistic simulation can't reach.
   late final AnimationController _panFlinger =
       AnimationController.unbounded(vsync: this)..addListener(_onPanFlingTick);
+
+  /// Carries a touch viewport pan's momentum after lift-off. The editing
+  /// overlay's pan path moves the document through [_grabPanBy] instead
+  /// of the list's scroll physics, so without this every finger fling
+  /// stopped dead the moment it lifted. The controller's value is
+  /// elapsed time (see [_FlingClock]); each tick feeds the friction
+  /// simulations' deltas back through [_grabPanBy], reusing its extent
+  /// clamping and zoom-window spillover.
+  late final AnimationController _touchFlinger =
+      AnimationController.unbounded(vsync: this)
+        ..addListener(_onTouchFlingTick);
+  FrictionSimulation? _flingSimX;
+  FrictionSimulation? _flingSimY;
+  Offset _flingLast = Offset.zero;
 
   final _focusNode = FocusNode(debugLabel: 'PdfViewer');
 
@@ -548,6 +572,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     GestureBinding.instance.pointerSignalResolver.register(event, (event) {
       final scroll = event as PointerScrollEvent;
       _panFlinger.stop();
+      _touchFlinger.stop();
       if (_zoomModifierDown) {
         _applyWheelZoom(scroll);
       } else if (_zoomed) {
@@ -686,6 +711,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       final sameGeometry = _sameGeometryAs(widget.document);
       _textCache.clear();
       _annotCache.clear();
+      _fieldRectCache.clear();
       _controller.clearSearch();
       _clearSelection();
       _loadPages();
@@ -755,6 +781,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     _renderHold.dispose();
     _zoomAnimator.dispose();
     _panFlinger.dispose();
+    _touchFlinger.dispose();
     _focusNode.dispose();
     super.dispose();
   }
@@ -974,6 +1001,14 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
           if (!a.isHidden && !a.isNoView && a.action != null) a,
       ];
 
+  /// Visible form-field widget rects on a page, for the field
+  /// highlight. Cached beside [_annotCache] (same lifecycle: pages are
+  /// reloaded on every document swap).
+  List<PdfRect> _formFieldRects(int index) => _fieldRectCache[index] ??= [
+        for (final a in _pages[index].annotations)
+          if (a is PdfWidgetAnnotation && !a.isHidden && !a.isNoView) a.rect,
+      ];
+
   PdfAnnotation? _annotationAt(Offset local) {
     // hidden annotations don't render, so they don't take taps either —
     // an invisible link navigating would be baffling
@@ -1029,13 +1064,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     if (editing.tool == PdfEditTool.form) {
       final field = editing.formFieldAt(page, x, y);
       if (field != null) {
-        await showPdfFormFieldMenu(
-          context: context,
-          position: details.globalPosition,
-          controller: editing,
-          fieldName: field.$1.name,
-          textPrompt: widget.editingTextPrompt ?? showPdfTextPrompt,
-        );
+        await _showFormFieldMenu(details.globalPosition, field.$1.name);
       }
       return;
     }
@@ -1059,18 +1088,36 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     );
   }
 
-  /// The selection action chip's "more" button: the same context menu
-  /// right-clicking opens, for input that can't right-click.
-  Future<void> _showSelectionMenu(Offset globalPosition) async {
+  /// The selection action chip's "more" button and the editing
+  /// overlay's touch long-press: the same context menu right-clicking
+  /// opens, for input that can't right-click. [pagePoint] anchors a
+  /// paste from a press on empty page area.
+  Future<void> _showSelectionMenu(Offset globalPosition, int pageIndex,
+      {(double, double)? pagePoint}) async {
     final editing = widget.editing;
-    final page = editing?.selectedPage;
-    if (editing == null || page == null) return;
+    if (editing == null) return;
     await showPdfAnnotationMenu(
       context: context,
       position: globalPosition,
       controller: editing,
-      pageIndex: page,
+      pageIndex: pageIndex,
       customActions: widget.annotationMenuBuilder,
+      pagePoint: pagePoint,
+    );
+  }
+
+  /// The form-field context menu, shared by right-click and the editing
+  /// overlay's touch long-press (both with the form tool armed).
+  Future<void> _showFormFieldMenu(
+      Offset globalPosition, String fieldName) async {
+    final editing = widget.editing;
+    if (editing == null) return;
+    await showPdfFormFieldMenu(
+      context: context,
+      position: globalPosition,
+      controller: editing,
+      fieldName: fieldName,
+      textPrompt: widget.editingTextPrompt ?? showPdfTextPrompt,
     );
   }
 
@@ -1173,7 +1220,8 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     final page = _controller.currentPage;
     final editing = widget.editing;
     if (editing != null &&
-        (editing.tool == PdfEditTool.select || editing.hasAnnotationSelection)) {
+        (editing.tool == PdfEditTool.select ||
+            editing.hasAnnotationSelection)) {
       editing.selectAllAnnotationsOn(page);
       return;
     }
@@ -1227,6 +1275,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     _suppressTap = false;
     _lastPointerKind = event.kind;
     _panFlinger.stop();
+    _touchFlinger.stop();
     // a raw listener fires regardless of who wins the gesture arena, so
     // clicking anywhere — including editing overlays — focuses the viewer
     // and its keyboard shortcuts. Not while an in-place text editor is
@@ -1376,7 +1425,10 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   void _onLongPressStart(LongPressStartDetails details) {
     final range = _wordRangeAt(details.localPosition);
     if (range == null) {
-      _clearSelection();
+      // no text under the press: an annotation (or, with something on
+      // the clipboard, empty page area) gets the context menu instead —
+      // reader mode's touch counterpart of a right-click
+      if (!_maybeAnnotationMenu(details)) _clearSelection();
       return;
     }
     HapticFeedback.selectionClick();
@@ -1387,6 +1439,32 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       _selFocus = range.$2;
     });
     _controller._setSelection(_selectedText());
+  }
+
+  /// Reader-mode touch long-press fallback: with no text under the
+  /// press, an annotation joins the selection and gets the context
+  /// menu; empty page area gets the paste menu when the clipboard has
+  /// content. Returns whether a menu opened.
+  bool _maybeAnnotationMenu(LongPressStartDetails details) {
+    final editing = widget.editing;
+    if (editing == null || editing.tool != null || editing.isPickingColor) {
+      return false;
+    }
+    final point = _pagePointAt(details.localPosition);
+    if (point == null) return false;
+    final (page, x, y) = point;
+    final hit = editing.selectableAnnotationAt(page, x, y);
+    if (hit != null) {
+      if (!editing.isAnnotationSelected(page, hit.$1)) {
+        editing.selectAnnotationAt(page, x, y);
+      }
+    } else if (!editing.hasAnnotationClipboard) {
+      return false;
+    }
+    HapticFeedback.selectionClick();
+    unawaited(
+        _showSelectionMenu(details.globalPosition, page, pagePoint: (x, y)));
+    return true;
   }
 
   void _onLongPressMove(LongPressMoveUpdateDetails details) {
@@ -1414,8 +1492,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   }
 
   void _onHandleDragUpdate(Offset globalPosition) {
-    final box =
-        _listSpaceKey.currentContext?.findRenderObject() as RenderBox?;
+    final box = _listSpaceKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return;
     // through the render tree, so the zoom transform is applied for free
     final local = box.globalToLocal(globalPosition);
@@ -1469,6 +1546,51 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   void _grabPanBy(Offset delta) {
     _scrollbarScrollBy(-delta.dy);
     _scrollbarPanBy(-delta.dx);
+  }
+
+  /// Scroll-fling deceleration: velocity decays by e^-2 per second
+  /// (≈ UIScrollView's "normal" rate), so a fling travels about half a
+  /// second's worth of its release velocity. The tolerance stops the
+  /// simulation once motion drops below anything visible.
+  static const double _flingFriction = 0.135;
+  static const Tolerance _flingTolerance = Tolerance(velocity: 5);
+
+  /// Continues a viewport pan with the gesture's lift-off velocity
+  /// (list-space px/s — drag velocity trackers run on local positions,
+  /// so the zoom transform is already divided out).
+  void _flingViewport(Velocity velocity) {
+    final v = velocity.pixelsPerSecond;
+    if (v.distance < kMinFlingVelocity) return;
+    _flingSimX =
+        FrictionSimulation(_flingFriction, 0, v.dx, tolerance: _flingTolerance);
+    _flingSimY =
+        FrictionSimulation(_flingFriction, 0, v.dy, tolerance: _flingTolerance);
+    _flingLast = Offset.zero;
+    _touchFlinger.animateWith(_FlingClock(_flingSimX!, _flingSimY!));
+  }
+
+  /// One frame of the touch fling: both axes' friction deltas go through
+  /// [_grabPanBy] — the scroll extents absorb what they can, the rest
+  /// pans the zoom window, both clamped at the document's edges.
+  void _onTouchFlingTick() {
+    final simX = _flingSimX, simY = _flingSimY;
+    if (simX == null || simY == null) return;
+    final t = _touchFlinger.value;
+    final position = Offset(simX.x(t), simY.x(t));
+    final delta = position - _flingLast;
+    _flingLast = position;
+    final scrollBefore = _scroll.hasClients ? _scroll.position.pixels : 0.0;
+    final txBefore = _transform.value.storage[12];
+    final tyBefore = _transform.value.storage[13];
+    _grabPanBy(delta);
+    // every absorber pinned at its edge: the rest of the simulation
+    // would tick for nothing
+    if (delta != Offset.zero &&
+        (!_scroll.hasClients || _scroll.position.pixels == scrollBefore) &&
+        _transform.value.storage[12] == txBefore &&
+        _transform.value.storage[13] == tyBefore) {
+      _touchFlinger.stop();
+    }
   }
 
   void _clearSelection() {
@@ -1623,6 +1745,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
 
   void _onPinchStart(ScaleStartDetails details) {
     _panFlinger.stop();
+    _touchFlinger.stop();
     _pinchScale = 1;
   }
 
@@ -1631,8 +1754,8 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     // gesture stays claimed but goes quiet until lift-off
     if (details.pointerCount < 2) return;
     if (details.scale > 0 && details.scale != _pinchScale) {
-      _zoomTo(_currentZoom * details.scale / _pinchScale,
-          details.localFocalPoint);
+      _zoomTo(
+          _currentZoom * details.scale / _pinchScale, details.localFocalPoint);
       _pinchScale = details.scale;
     }
     // focalPointDelta is local to the receiver, which sits inside the
@@ -1680,6 +1803,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
 
   void _onTrackpadPanZoomStart(PointerPanZoomStartEvent event) {
     _panFlinger.stop();
+    _touchFlinger.stop();
     _trackpadScale = 1;
     _trackpadIntent = _TrackpadIntent.undecided;
     _trackpadPendingPan = Offset.zero;
@@ -1882,6 +2006,9 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                 index: index,
                 pageColor: widget.pageColor,
                 showAnnotations: widget.showAnnotations,
+                formFields: widget.highlightFormFields && widget.showAnnotations
+                    ? _formFieldRects(index)
+                    : const [],
                 scale: _renderScale,
                 settleGeneration: _settleGeneration,
                 matches: _controller._matchesOn(index),
@@ -1896,7 +2023,9 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                     widget.editingTextPrompt ?? showPdfTextPrompt,
                 formImagePicker: widget.formImagePicker,
                 onPanViewport: _grabPanBy,
+                onPanViewportEnd: _flingViewport,
                 onShowAnnotationMenu: _showSelectionMenu,
+                onShowFormFieldMenu: _showFormFieldMenu,
                 transformScale: _transformScale,
                 renderHold: _renderHold,
               ),
@@ -2067,8 +2196,8 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                                     ..onStart = _onSelectionStart
                                     ..onUpdate = _onSelectionUpdate
                                     ..onEnd = _onSelectionEnd
-                                    ..onCancel = () =>
-                                        _onSelectionEnd(DragEndDetails()),
+                                    ..onCancel =
+                                        () => _onSelectionEnd(DragEndDetails()),
                                 ),
                                 // touch text selection starts with a long
                                 // press instead; stands aside while an
@@ -2081,8 +2210,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                                   (recognizer) => recognizer
                                     ..isEnabled = (() =>
                                         widget.editing?.tool == null &&
-                                        widget.editing?.isPickingColor !=
-                                            true)
+                                        widget.editing?.isPickingColor != true)
                                     ..onLongPressStart = _onLongPressStart
                                     ..onLongPressMoveUpdate = _onLongPressMove
                                     ..onLongPressEnd =
@@ -2152,6 +2280,7 @@ class _PdfViewerPage extends StatefulWidget {
     required this.index,
     required this.pageColor,
     required this.showAnnotations,
+    required this.formFields,
     required this.scale,
     required this.settleGeneration,
     required this.matches,
@@ -2163,7 +2292,9 @@ class _PdfViewerPage extends StatefulWidget {
     required this.editingTextPrompt,
     required this.formImagePicker,
     required this.onPanViewport,
+    required this.onPanViewportEnd,
     required this.onShowAnnotationMenu,
+    required this.onShowFormFieldMenu,
     required this.transformScale,
     required this.renderHold,
   });
@@ -2172,6 +2303,11 @@ class _PdfViewerPage extends StatefulWidget {
   final int index;
   final Color pageColor;
   final bool showAnnotations;
+
+  /// Visible form-field widget rects, washed by the field highlight.
+  /// Empty when the highlight is off (or annotations are hidden).
+  final List<PdfRect> formFields;
+
   final double scale;
   final int settleGeneration;
   final List<PdfTextMatch> matches;
@@ -2188,8 +2324,16 @@ class _PdfViewerPage extends StatefulWidget {
   final PdfFormImagePicker? formImagePicker;
   final void Function(Offset delta) onPanViewport;
 
+  /// See [EditingPageOverlay.onPanViewportEnd].
+  final void Function(Velocity velocity) onPanViewportEnd;
+
   /// See [EditingPageOverlay.onShowAnnotationMenu].
-  final void Function(Offset globalPosition) onShowAnnotationMenu;
+  final void Function(Offset globalPosition, int pageIndex,
+      {(double, double)? pagePoint}) onShowAnnotationMenu;
+
+  /// See [EditingPageOverlay.onShowFormFieldMenu].
+  final void Function(Offset globalPosition, String fieldName)
+      onShowFormFieldMenu;
 
   /// The viewer transform's scale — the editing overlay's chrome divides
   /// by it to stay constant-size on screen while zoomed.
@@ -2238,6 +2382,19 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
         onRasterReady: _onRasterReady,
         renderHold: widget.renderHold,
       ),
+      // the field highlight sits under text highlights and overlays:
+      // it marks where fields are, everything else paints over it
+      if (widget.formFields.isNotEmpty)
+        Positioned.fill(
+          child: CustomPaint(
+            painter: _FormFieldPainter(
+              box: widget.page.cropBox,
+              rotation: widget.page.rotation,
+              fields: widget.formFields,
+              theme: PdfViewerTheme.of(context),
+            ),
+          ),
+        ),
       Positioned.fill(
         child: CustomPaint(
           painter: _HighlightPainter(
@@ -2286,8 +2443,9 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
                               pageColor: widget.pageColor,
                               showAnnotations: widget.showAnnotations,
                               onPanViewport: widget.onPanViewport,
-                              onShowAnnotationMenu:
-                                  widget.onShowAnnotationMenu,
+                              onPanViewportEnd: widget.onPanViewportEnd,
+                              onShowAnnotationMenu: widget.onShowAnnotationMenu,
+                              onShowFormFieldMenu: widget.onShowFormFieldMenu,
                               rasterCurrent: _rastered,
                               zoom: zoom,
                             ),
@@ -2313,6 +2471,47 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
         ),
     ]);
   }
+}
+
+/// Washes every visible form-field widget with a translucent tint and a
+/// hairline border so fields read at a glance ([PdfViewer.
+/// highlightFormFields] — most fields are invisible until focused).
+class _FormFieldPainter extends CustomPainter {
+  _FormFieldPainter({
+    required this.box,
+    required this.rotation,
+    required this.fields,
+    required this.theme,
+  });
+
+  final PdfRect box;
+  final int rotation;
+  final List<PdfRect> fields;
+  final PdfViewerThemeData theme;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (box.width <= 0 || box.height <= 0) return;
+    final geometry =
+        PdfPageGeometry(cropBox: box, rotation: rotation, viewSize: size);
+    final fill = theme.formFieldHighlightColor ?? const Color(0x2E4D90FE);
+    final fillPaint = Paint()..color = fill;
+    final borderPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = fill.withValues(alpha: (fill.a * 2.5).clamp(0.0, 1.0));
+    for (final field in fields) {
+      final rect = geometry.toViewRect(field);
+      canvas.drawRect(rect, fillPaint);
+      canvas.drawRect(rect.deflate(0.5), borderPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_FormFieldPainter oldDelegate) =>
+      oldDelegate.fields != fields ||
+      oldDelegate.rotation != rotation ||
+      oldDelegate.theme != theme;
 }
 
 class _HighlightPainter extends CustomPainter {
@@ -2360,6 +2559,25 @@ class _HighlightPainter extends CustomPainter {
       oldDelegate.currentMatch != currentMatch ||
       oldDelegate.selection != selection ||
       oldDelegate.theme != theme;
+}
+
+/// Drives the touch fling controller: the controller's value is elapsed
+/// time, and the tick handler samples both axes' friction simulations at
+/// it (an AnimationController carries one double; the fling needs two).
+class _FlingClock extends Simulation {
+  _FlingClock(this.horizontal, this.vertical);
+
+  final Simulation horizontal;
+  final Simulation vertical;
+
+  @override
+  double x(double time) => time;
+
+  @override
+  double dx(double time) => 1;
+
+  @override
+  bool isDone(double time) => horizontal.isDone(time) && vertical.isDone(time);
 }
 
 /// What a trackpad pan-zoom gesture is doing. Decided once per gesture:
@@ -2596,8 +2814,7 @@ class _TextSelectionChrome extends StatelessWidget {
                 onPressed: selection.onCopy,
                 child: const Text('Copy'),
               ),
-              const SizedBox(
-                  height: 24, child: VerticalDivider(width: 1)),
+              const SizedBox(height: 24, child: VerticalDivider(width: 1)),
               TextButton(
                 key: const ValueKey('pdf-text-selection-chip-select-all'),
                 onPressed: selection.onSelectAll,

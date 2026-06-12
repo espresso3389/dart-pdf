@@ -108,8 +108,7 @@ void main() {
         child: OverflowBox(
           maxWidth: double.infinity,
           maxHeight: double.infinity,
-          child: SizedBox(
-              width: 6120, child: PdfPageView(page: doc.page(0))),
+          child: SizedBox(width: 6120, child: PdfPageView(page: doc.page(0))),
         ),
       ),
     );

@@ -32,7 +32,8 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: Center(
         child: SizedBox(
-            width: 400, child: PdfPageView(page: document.page(0), renderHold: hold)),
+            width: 400,
+            child: PdfPageView(page: document.page(0), renderHold: hold)),
       ),
     ));
 
@@ -69,8 +70,8 @@ void main() {
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 60));
       // give an unheld render every chance to (wrongly) complete
-      await tester
-          .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)));
     }
     // mid-flight and just arrived (settle pending): the pages that flew
     // past — and the destination — still show their placeholders; page 0's

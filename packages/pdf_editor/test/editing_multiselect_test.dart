@@ -57,7 +57,8 @@ void main() {
       expect(editing.selectedAnnotationSlots, [(0, 0), (0, 1)]);
     });
 
-    test('select all takes every selectable annotation, skipping links '
+    test(
+        'select all takes every selectable annotation, skipping links '
         'and form fields', () {
       // page 0 carries 5 links (one hidden) and a Widget — all unselectable
       final editing = PdfEditingController(buildAnnotatedPdf())
@@ -158,8 +159,8 @@ void main() {
     }
 
     /// The square + circle the controller tests use, on screen.
-    Future<void> addShapes(WidgetTester tester,
-        PdfEditingController editing) async {
+    Future<void> addShapes(
+        WidgetTester tester, PdfEditingController editing) async {
       editing
         ..addRectangle(0, const PdfRect(100, 650, 180, 700))
         ..addEllipse(0, const PdfRect(250, 650, 330, 700));
@@ -237,7 +238,8 @@ void main() {
       expect(editing.selectedAnnotationSlots, [(0, 0), (0, 1)]);
     });
 
-    testWidgets('cmd+A selects every annotation on the current page '
+    testWidgets(
+        'cmd+A selects every annotation on the current page '
         'while the select tool is armed', (tester) async {
       final (editing, _) = await pumpEditor(tester);
       await addShapes(tester, editing);
@@ -297,7 +299,8 @@ void main() {
       await settle(tester);
     });
 
-    testWidgets('a touch drag on empty page area still pans the document '
+    testWidgets(
+        'a touch drag on empty page area still pans the document '
         'in select mode', (tester) async {
       final (editing, viewer) = await pumpEditor(tester, pages: 3);
       editing.tool = PdfEditTool.select;

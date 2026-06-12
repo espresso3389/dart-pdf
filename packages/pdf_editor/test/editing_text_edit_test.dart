@@ -54,8 +54,7 @@ void main() {
         ..textBorderColor = const Color(0xFF1E88E5)
         ..addFreeText(0, const PdfRect(100, 600, 300, 660), 'Boxed');
 
-      final style =
-          editing.document.page(0).annotations.single.freeTextStyle!;
+      final style = editing.document.page(0).annotations.single.freeTextStyle!;
       expect(style.fillColor, 0xFFF59D);
       expect(style.borderColor, 0x1E88E5);
       expect(style.borderWidth, 3);
@@ -384,13 +383,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('pdf-text-border-0')));
       await tester.pumpAndSettle();
 
-      final style =
-          editing.document.page(0).annotations.single.freeTextStyle!;
+      final style = editing.document.page(0).annotations.single.freeTextStyle!;
       expect(style.fillColor, 0xFFD100);
       expect(style.borderColor, 0xE53935);
       expect(style.borderWidth, 2.5);
-      expect(
-          editing.document.page(0).annotations.single.contents, 'Boxed');
+      expect(editing.document.page(0).annotations.single.contents, 'Boxed');
     });
 
     testWidgets('the inline editor previews the fill of a fresh box',
@@ -490,8 +487,8 @@ void main() {
       await gesture.moveTo(view(360, 560));
       await tester.pump();
 
-      expect(find.byKey(const ValueKey('pdf-text-resize-preview')),
-          findsNothing);
+      expect(
+          find.byKey(const ValueKey('pdf-text-resize-preview')), findsNothing);
       await gesture.up();
       await tester.pump();
       await settle(tester);

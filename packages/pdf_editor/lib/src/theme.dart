@@ -52,8 +52,8 @@ class PdfScrollbarThemeData {
       other.trackActiveColor == trackActiveColor;
 
   @override
-  int get hashCode => Object.hash(thumbColor, thumbActiveColor, outlineColor,
-      trackColor, trackActiveColor);
+  int get hashCode => Object.hash(
+      thumbColor, thumbActiveColor, outlineColor, trackColor, trackActiveColor);
 }
 
 /// Visual styling for [PdfViewer] and its companion widgets — the
@@ -84,6 +84,7 @@ class PdfViewerThemeData {
     this.annotationChromeColor,
     this.elementChromeColor,
     this.flashColor,
+    this.formFieldHighlightColor,
     this.scrollbar,
   });
 
@@ -118,6 +119,12 @@ class PdfViewerThemeData {
   /// The attention pulse around an annotation the sidebar zoomed to.
   final Color? flashColor;
 
+  /// The wash over form-field widgets while
+  /// [PdfViewer.highlightFormFields] is on. Used as given (carry your
+  /// own alpha — the default is translucent blue); the fields' hairline
+  /// border derives from it.
+  final Color? formFieldHighlightColor;
+
   /// Scrollbar colors, shared by the viewer's bars and the sidebars'.
   final PdfScrollbarThemeData? scrollbar;
 
@@ -132,6 +139,7 @@ class PdfViewerThemeData {
       other.annotationChromeColor == annotationChromeColor &&
       other.elementChromeColor == elementChromeColor &&
       other.flashColor == flashColor &&
+      other.formFieldHighlightColor == formFieldHighlightColor &&
       other.scrollbar == scrollbar;
 
   @override
@@ -144,6 +152,7 @@ class PdfViewerThemeData {
       annotationChromeColor,
       elementChromeColor,
       flashColor,
+      formFieldHighlightColor,
       scrollbar);
 }
 
@@ -157,9 +166,7 @@ class PdfViewerTheme extends InheritedWidget {
 
   /// The nearest theme above [context], or an all-defaults one.
   static PdfViewerThemeData of(BuildContext context) =>
-      context
-          .dependOnInheritedWidgetOfExactType<PdfViewerTheme>()
-          ?.data ??
+      context.dependOnInheritedWidgetOfExactType<PdfViewerTheme>()?.data ??
       const PdfViewerThemeData();
 
   @override

@@ -34,8 +34,7 @@ void main() {
   }
 
   group('controller form API', () {
-    test('acroForm is cached per revision and formFieldAt resolves hits',
-        () {
+    test('acroForm is cached per revision and formFieldAt resolves hits', () {
       final editing = controller();
       expect(identical(editing.acroForm, editing.acroForm), isTrue);
 
@@ -92,9 +91,8 @@ void main() {
 
     test('setFormButtonImage fills a push button, rejects junk', () {
       final editing = controller();
-      final name =
-          editing.addFormField(PdfFormFieldKind.pushButton, 0,
-              const PdfRect(400, 600, 500, 640))!;
+      final name = editing.addFormField(
+          PdfFormFieldKind.pushButton, 0, const PdfRect(400, 600, 500, 640))!;
       expect(editing.setFormButtonImage(name, _png), isTrue);
       final field = editing.acroForm!.fieldNamed(name)!;
       expect(widgetAppearance(editing.document, field), contains('/Img0 Do'));
@@ -124,8 +122,8 @@ void main() {
       expect(editing.renameFormField('missing', 'x'), isFalse);
       expect(editing.isModified, isFalse);
       expect(editing.renameFormField('name', 'step/1/response'), isTrue);
-      expect(editing.acroForm!.fieldNamed('step/1/response')!.value,
-          'prefilled');
+      expect(
+          editing.acroForm!.fieldNamed('step/1/response')!.value, 'prefilled');
       expect(editing.acroForm!.fieldNamed('name'), isNull);
     });
 
@@ -197,8 +195,7 @@ void main() {
             ),
           ),
           bottomNavigationBar: toolbar
-              ? PdfEditingToolbar(
-                  controller: editing, viewerController: viewer)
+              ? PdfEditingToolbar(controller: editing, viewerController: viewer)
               : null,
         ),
       ));
@@ -244,8 +241,7 @@ void main() {
       await settle(tester);
     });
 
-    testWidgets('check box and radio taps toggle their states',
-        (tester) async {
+    testWidgets('check box and radio taps toggle their states', (tester) async {
       final editing = await pumpEditor(tester);
       editing.tool = PdfEditTool.form;
       await tester.pump();
@@ -314,8 +310,7 @@ void main() {
       await settle(tester);
     });
 
-    testWidgets('tapping a push button runs the image picker',
-        (tester) async {
+    testWidgets('tapping a push button runs the image picker', (tester) async {
       PdfFormField? picked;
       final editing = await pumpEditor(tester, imagePicker: (context, field) {
         picked = field;
@@ -337,8 +332,7 @@ void main() {
       await settle(tester);
     });
 
-    testWidgets('right-clicking a field opens the form menu',
-        (tester) async {
+    testWidgets('right-clicking a field opens the form menu', (tester) async {
       final editing = await pumpEditor(tester);
       editing.tool = PdfEditTool.form;
       await tester.pump();
@@ -364,8 +358,10 @@ void main() {
       final editing = await pumpEditor(tester, toolbar: true);
 
       final toolbarScrollable = find.descendant(
-          of: find.byType(PdfEditingToolbar), matching: find.byType(Scrollable));
-      final formButton = find.byTooltip('Form fields — tap to fill, drag to add');
+          of: find.byType(PdfEditingToolbar),
+          matching: find.byType(Scrollable));
+      final formButton =
+          find.byTooltip('Form fields — tap to fill, drag to add');
       await tester.scrollUntilVisible(formButton, 80,
           scrollable: toolbarScrollable);
       await tester.tap(formButton);

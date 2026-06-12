@@ -255,8 +255,8 @@ void main() {
       expect(find.text('No matching annotations'), findsOneWidget);
       expect(find.text('Note'), findsNothing);
 
-      await tester.tap(
-          find.byKey(const ValueKey('pdf-annotation-search-clear')));
+      await tester
+          .tap(find.byKey(const ValueKey('pdf-annotation-search-clear')));
       await tester.pump();
       expect(find.text('Note'), findsOneWidget);
       expect(find.text('No matching annotations'), findsNothing);

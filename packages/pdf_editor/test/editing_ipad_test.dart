@@ -163,8 +163,7 @@ void main() {
       expect(viewer.zoom, closeTo(1, 0.01));
     });
 
-    testWidgets('a finger draws raw when finger drawing is on',
-        (tester) async {
+    testWidgets('a finger draws raw when finger drawing is on', (tester) async {
       final (editing, _) = await pumpViewer(tester);
       editing.tool = PdfEditTool.ink;
       expect(editing.fingerDrawsInk, isTrue);
@@ -181,8 +180,7 @@ void main() {
   });
 
   group('multi-touch bail', () {
-    testWidgets('a second finger cancels the stroke in flight',
-        (tester) async {
+    testWidgets('a second finger cancels the stroke in flight', (tester) async {
       final (editing, _) = await pumpViewer(tester);
       editing.tool = PdfEditTool.ink;
       await tester.pump();
@@ -226,8 +224,7 @@ void main() {
       expect(annotations.single.inkList, hasLength(1));
     });
 
-    testWidgets('palm touches do not cancel a stylus stroke',
-        (tester) async {
+    testWidgets('palm touches do not cancel a stylus stroke', (tester) async {
       final (editing, _) = await pumpViewer(tester);
       editing.tool = PdfEditTool.ink;
       await tester.pump();
@@ -301,8 +298,7 @@ void main() {
       }
     });
 
-    testWidgets('a stylus erases raw, from the pointer-down',
-        (tester) async {
+    testWidgets('a stylus erases raw, from the pointer-down', (tester) async {
       final (editing, _) = await pumpViewer(tester);
       editing
         ..addInkStroke(0, [(150, 500), (250, 500)])
@@ -347,8 +343,7 @@ void main() {
   });
 
   group('selection action chip', () {
-    testWidgets('shows for a touch selection; delete deletes',
-        (tester) async {
+    testWidgets('shows for a touch selection; delete deletes', (tester) async {
       final (editing, _) = await pumpViewer(tester);
       editing
         ..addRectangle(0, const PdfRect(150, 450, 300, 550))
@@ -360,8 +355,8 @@ void main() {
       expect(editing.hasAnnotationSelection, isTrue);
       expect(find.byKey(const ValueKey('pdf-selection-chip')), findsOneWidget);
       // a plain shape offers no text edit
-      expect(find.byKey(const ValueKey('pdf-selection-chip-edit')),
-          findsNothing);
+      expect(
+          find.byKey(const ValueKey('pdf-selection-chip-edit')), findsNothing);
 
       await tester.tap(find.byKey(const ValueKey('pdf-selection-chip-delete')));
       await tester.pump(const Duration(milliseconds: 400));
@@ -397,8 +392,8 @@ void main() {
       // touch taps resolve only after the viewer's double-tap timeout
       await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('pdf-annot-menu-delete')),
-          findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('pdf-annot-menu-delete')), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('pdf-annot-menu-delete')));
       await tester.pump(const Duration(milliseconds: 400));

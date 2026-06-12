@@ -116,8 +116,7 @@ void main() {
           final doc = PdfDocument.open(buildRotatedPdf(rotation));
           final page = doc.page(0);
           final image = await PdfPageRenderer.renderImage(page);
-          final size =
-              Size(image.width.toDouble(), image.height.toDouble());
+          final size = Size(image.width.toDouble(), image.height.toDouble());
           final geometry = PdfPageGeometry(
             cropBox: page.cropBox,
             rotation: page.rotation,

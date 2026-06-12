@@ -245,8 +245,8 @@ void main() {
     await tester.runAsync(() async {
       // a 3-component ICC profile stream standing in for sRGB; the decoder
       // only reads /N
-      final profile = CosStream(
-          CosDictionary({'N': const CosInteger(3)}), Uint8List(0));
+      final profile =
+          CosStream(CosDictionary({'N': const CosInteger(3)}), Uint8List(0));
       final image = CosStream(
         CosDictionary({
           'Width': const CosInteger(2),
@@ -320,8 +320,7 @@ void main() {
     });
   });
 
-  testWidgets('/Decode inverts platform-decoded JPEG samples',
-      (tester) async {
+  testWidgets('/Decode inverts platform-decoded JPEG samples', (tester) async {
     await tester.runAsync(() async {
       final image = CosStream(
         CosDictionary({
@@ -351,9 +350,8 @@ void main() {
   testWidgets('ICCBased images convert through the real profile',
       (tester) async {
     await tester.runAsync(() async {
-      final profile =
-          CosStream(CosDictionary({'N': const CosInteger(3)}),
-              adobeRgb1998Icc());
+      final profile = CosStream(
+          CosDictionary({'N': const CosInteger(3)}), adobeRgb1998Icc());
       final image = CosStream(
         CosDictionary({
           'Width': const CosInteger(1),
@@ -374,9 +372,8 @@ void main() {
 
   testWidgets('ICCBased CMYK images use the LUT profile', (tester) async {
     await tester.runAsync(() async {
-      final profile =
-          CosStream(CosDictionary({'N': const CosInteger(4)}),
-              genericCmykIcc());
+      final profile = CosStream(
+          CosDictionary({'N': const CosInteger(4)}), genericCmykIcc());
       final image = CosStream(
         CosDictionary({
           'Width': const CosInteger(1),
@@ -482,8 +479,7 @@ void main() {
             const CosName('Indexed'),
             const CosName('DeviceRGB'),
             const CosInteger(2),
-            CosString(
-                Uint8List.fromList([255, 0, 0, 0, 255, 0, 0, 0, 255])),
+            CosString(Uint8List.fromList([255, 0, 0, 0, 255, 0, 0, 0, 255])),
           ]),
         }),
         // rows are byte-aligned: 0,1,2 then 2,1,0

@@ -64,9 +64,9 @@ class PdfPageRenderer {
     canvas.scale(1, -1);
     canvas.translate(-box.left, -box.bottom);
 
-    final painting =
-        PdfInterpreter(cos: cos, device: CanvasPdfDevice(canvas, images: images))
-          ..drawPage(page);
+    final painting = PdfInterpreter(
+        cos: cos, device: CanvasPdfDevice(canvas, images: images))
+      ..drawPage(page);
     if (annotations) painting.drawAnnotations(page);
     return recorder.endRecording();
   }

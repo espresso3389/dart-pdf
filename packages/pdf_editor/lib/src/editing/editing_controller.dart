@@ -305,8 +305,7 @@ class PdfEditingController extends ChangeNotifier {
         case PdfAnnotationChangeKind.modified:
           final name = snapshot?.name;
           if (snapshot == null || name == null) return false;
-          if (change.pageIndex < 0 ||
-              change.pageIndex >= _document.pageCount) {
+          if (change.pageIndex < 0 || change.pageIndex >= _document.pageCount) {
             return false;
           }
           // the upsert may also remove the annotation's previous
@@ -373,8 +372,7 @@ class PdfEditingController extends ChangeNotifier {
   /// Finds the annotation whose /NM is [name] in the current revision,
   /// or null. Pair with [PdfViewerController.showRect] to navigate to a
   /// synced annotation.
-  (int pageIndex, PdfAnnotation annotation)? findAnnotationByName(
-      String name) {
+  (int pageIndex, PdfAnnotation annotation)? findAnnotationByName(String name) {
     for (var pageIndex = 0; pageIndex < _document.pageCount; pageIndex++) {
       for (final annotation in _page(pageIndex).annotations) {
         if (annotation.name == name) return (pageIndex, annotation);
@@ -695,35 +693,40 @@ class PdfEditingController extends ChangeNotifier {
     }, pages: quadsByPage.keys);
   }
 
-  void addRectangle(int pageIndex, PdfRect rect) =>
-      apply((e) => e.addSquare(pageIndex, rect,
+  void addRectangle(int pageIndex, PdfRect rect) => apply(
+      (e) => e.addSquare(pageIndex, rect,
           strokeColor: _colorValue,
           strokeWidth: preferences.strokeWidth,
           opacity: preferences.opacity,
-          author: author), pages: [pageIndex]);
+          author: author),
+      pages: [pageIndex]);
 
-  void addEllipse(int pageIndex, PdfRect rect) =>
-      apply((e) => e.addCircle(pageIndex, rect,
+  void addEllipse(int pageIndex, PdfRect rect) => apply(
+      (e) => e.addCircle(pageIndex, rect,
           strokeColor: _colorValue,
           strokeWidth: preferences.strokeWidth,
           opacity: preferences.opacity,
-          author: author), pages: [pageIndex]);
+          author: author),
+      pages: [pageIndex]);
 
-  void addFreeText(int pageIndex, PdfRect rect, String text) =>
-      apply((e) => e.addFreeText(pageIndex, rect, text,
+  void addFreeText(int pageIndex, PdfRect rect, String text) => apply(
+      (e) => e.addFreeText(pageIndex, rect, text,
           fontSize: preferences.fontSize,
           font: preferences.fontFamily,
           color: _colorValue,
           fillColor: _rgbOf(preferences.textFillColor),
           borderColor: _rgbOf(preferences.textBorderColor),
           borderWidth: preferences.strokeWidth,
-          author: author), pages: [pageIndex]);
+          author: author),
+      pages: [pageIndex]);
 
   void addStamp(int pageIndex, PdfRect rect, String text, {int? color}) =>
-      apply((e) => e.addStamp(pageIndex, rect, text,
-          color: color ?? _colorValue,
-          opacity: preferences.opacity,
-          author: author), pages: [pageIndex]);
+      apply(
+          (e) => e.addStamp(pageIndex, rect, text,
+              color: color ?? _colorValue,
+              opacity: preferences.opacity,
+              author: author),
+          pages: [pageIndex]);
 
   /// Adds a sticky note with its top-left corner at ([x], [y]).
   void addNote(int pageIndex, double x, double y, String text) => apply(
@@ -1035,8 +1038,7 @@ class PdfEditingController extends ChangeNotifier {
   /// centerline (padded by half the pen width), not merely inside the
   /// bounding rect, so crossing strokes don't erase together. An Ink
   /// annotation without a usable /InkList falls back to its rect.
-  (int index, PdfAnnotation)? inkAnnotationAt(
-      int pageIndex, double x, double y,
+  (int index, PdfAnnotation)? inkAnnotationAt(int pageIndex, double x, double y,
       {double tolerance = 4}) {
     final annotations = _page(pageIndex).annotations;
     for (var i = annotations.length - 1; i >= 0; i--) {
@@ -1088,8 +1090,7 @@ class PdfEditingController extends ChangeNotifier {
     final dx = bx - ax, dy = by - ay;
     final lengthSquared = dx * dx + dy * dy;
     if (lengthSquared == 0) return _distanceSquared(x, y, ax, ay);
-    final t = (((x - ax) * dx + (y - ay) * dy) / lengthSquared)
-        .clamp(0.0, 1.0);
+    final t = (((x - ax) * dx + (y - ay) * dy) / lengthSquared).clamp(0.0, 1.0);
     return _distanceSquared(x, y, ax + t * dx, ay + t * dy);
   }
 
@@ -1160,8 +1161,8 @@ class PdfEditingController extends ChangeNotifier {
     final box = _page(pageIndex).cropBox;
     return selectAnnotationsIn(
         pageIndex,
-        PdfRect(box.left - 1e6, box.bottom - 1e6, box.right + 1e6,
-            box.top + 1e6));
+        PdfRect(
+            box.left - 1e6, box.bottom - 1e6, box.right + 1e6, box.top + 1e6));
   }
 
   /// Selects the annotation in slot [index] of [pageIndex]'s /Annots
@@ -1197,8 +1198,7 @@ class PdfEditingController extends ChangeNotifier {
       final (page, slot) = _selected[i];
       if (page == pageIndex && slot > index) _selected[i] = (page, slot - 1);
     }
-    apply((e) => e.removeAnnotation(pageIndex, annotation),
-        pages: [pageIndex]);
+    apply((e) => e.removeAnnotation(pageIndex, annotation), pages: [pageIndex]);
   }
 
   /// Removes several annotations — (pageIndex, /Annots slot) pairs — in
@@ -1500,7 +1500,9 @@ class PdfEditingController extends ChangeNotifier {
   /// whether anything changed.
   bool restyleSelected(
       {Color? color, (Color?,)? fill, double? strokeWidth, double? opacity}) {
-    if (color == null && fill == null && strokeWidth == null &&
+    if (color == null &&
+        fill == null &&
+        strokeWidth == null &&
         opacity == null) {
       return false;
     }
@@ -1603,7 +1605,8 @@ class PdfEditingController extends ChangeNotifier {
     final annotation = selectedAnnotation;
     if (annotation == null || !canResizeSelected) return;
     if (localTo.width < 1 || localTo.height < 1) return;
-    apply((e) => e.resizeAnnotationLocal(_selected.last.$1, annotation, localTo),
+    apply(
+        (e) => e.resizeAnnotationLocal(_selected.last.$1, annotation, localTo),
         pages: [_selected.last.$1]);
   }
 

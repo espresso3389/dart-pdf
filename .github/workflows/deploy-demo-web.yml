@@ -1,0 +1,44 @@
+name: Deploy Demo Web
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-demo-web.yml
+      - pubspec.yaml
+      - packages/pdf_cos/**
+      - packages/pdf_document/**
+      - packages/pdf_graphics/**
+      - packages/dart_pdf_editor/**
+
+concurrency:
+  group: demo-web
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.0
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - run: flutter build web --release
+        working-directory: packages/dart_pdf_editor/example
+
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_DART_PDF_DEMO }}
+          projectId: dart-pdf-demo
+          channelId: live
+          entryPoint: packages/dart_pdf_editor/example

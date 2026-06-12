@@ -64,6 +64,7 @@ void main() {
         await loadSystemFonts();
         final doc = PdfDocument.open(file.readAsBytesSync());
         for (var i = 0; i < doc.pageCount; i++) {
+          final baseline = File('${root.path}/_baselines/$name.p$i.png');
           final image = await PdfPageRenderer.renderImage(doc.page(i),
                   pixelRatio: _pixelRatio)
               .timeout(const Duration(seconds: 90));
@@ -85,7 +86,12 @@ void main() {
               update: update,
             );
             if (gallery != null) {
-              await gallery.add(pdfName: name, page: i, image: image);
+              await gallery.add(
+                pdfName: name,
+                page: i,
+                image: image,
+                baseline: baseline.existsSync() ? baseline : null,
+              );
             }
           } finally {
             image.dispose();

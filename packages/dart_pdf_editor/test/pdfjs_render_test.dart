@@ -11,7 +11,11 @@
 // For visual review, set PDFJS_RENDER_OUT to write PNGs plus an index.html:
 //   PDFJS_RENDER_OUT=../../test_corpora/pdfjs/_renders \
 //     fvm flutter test test/pdfjs_render_test.dart
+// For PDF.js reference comparison, first generate baselines with
+// tool/pdfjs_baseline, then set PDFJS_BASELINE_DIR.
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_document/pdf_document.dart';
@@ -41,9 +45,18 @@ const skipped = {
   'print_protection.pdf',
 };
 
+/// Files the Dart renderer intentionally smoke-tests, but PDF.js itself cannot
+/// produce a reference PNG for.
+const baselineUnavailable = {
+  'Pages-tree-refs.pdf',
+};
+
 /// Pages rendered per file: enough to hit every codec the file carries
 /// without rasterizing all of a long document.
 const maxPages = 5;
+
+const _channelTolerance = 8;
+const _maxDifferingFraction = 0.0005;
 
 void main() {
   final root = Directory('../../test_corpora/pdfjs');
@@ -56,6 +69,18 @@ void main() {
       renderOut == null ? null : RenderGallery(Directory(renderOut));
   final visualMaxPages = _envPositiveInt('PDFJS_RENDER_MAX_PAGES', maxPages);
   final visualPixelRatio = _envPositiveDouble('PDFJS_RENDER_PIXEL_RATIO', 1.0);
+  final baselineEnv = Platform.environment['PDFJS_BASELINE_DIR'];
+  final defaultBaselineDir = Directory('../../test_corpora/pdfjs/_baselines');
+  final baselineDir = baselineEnv == null
+      ? gallery != null && defaultBaselineDir.existsSync()
+          ? defaultBaselineDir
+          : null
+      : Directory(baselineEnv);
+  final compareBaselines = baselineEnv != null;
+  final channelTolerance =
+      _envPositiveInt('PDFJS_COMPARE_CHANNEL_TOLERANCE', _channelTolerance);
+  final maxDifferingFraction = _envPositiveDouble(
+      'PDFJS_COMPARE_MAX_DIFF_FRACTION', _maxDifferingFraction);
 
   final files = root
       .listSync()
@@ -78,12 +103,56 @@ void main() {
           final image = await PdfPageRenderer.renderImage(doc.page(i),
                   pixelRatio: visualPixelRatio)
               .timeout(const Duration(seconds: 90));
-          expect(image.width, greaterThan(0));
-          expect(image.height, greaterThan(0));
-          if (gallery != null) {
-            await gallery.add(pdfName: name, page: i, image: image);
+          _Comparison? comparison;
+          final baseline = baselineDir == null
+              ? null
+              : File('${baselineDir.path}/${_safeName(name)}.p$i.png');
+          try {
+            expect(image.width, greaterThan(0));
+            expect(image.height, greaterThan(0));
+
+            if (baseline != null) {
+              if (!baseline.existsSync()) {
+                if (compareBaselines && !baselineUnavailable.contains(name)) {
+                  fail('missing PDF.js baseline for $name page $i: '
+                      '${baseline.path}');
+                }
+              } else {
+                comparison = await _compareBaseline(
+                  actual: image,
+                  baseline: baseline,
+                  channelTolerance: channelTolerance,
+                );
+              }
+            }
+
+            if (gallery != null) {
+              await gallery.add(
+                pdfName: name,
+                page: i,
+                image: image,
+                baseline: baseline?.existsSync() == true ? baseline : null,
+                diff: comparison?.diff,
+                differenceFraction: comparison?.differenceFraction,
+              );
+            }
+
+            if (compareBaselines && comparison != null) {
+              if (comparison.sizeMismatch != null) {
+                fail('${comparison.sizeMismatch} for $name page $i');
+              }
+              expect(
+                comparison.differenceFraction,
+                lessThanOrEqualTo(maxDifferingFraction),
+                reason: '$name page $i differs from the PDF.js baseline in '
+                    '${(comparison.differenceFraction * 100).toStringAsFixed(3)}% '
+                    'of pixels',
+              );
+            }
+          } finally {
+            comparison?.diff?.dispose();
+            image.dispose();
           }
-          image.dispose();
         }
       });
     }, timeout: const Timeout(Duration(minutes: 3)));
@@ -98,4 +167,90 @@ int _envPositiveInt(String name, int fallback) {
 double _envPositiveDouble(String name, double fallback) {
   final value = double.tryParse(Platform.environment[name] ?? '');
   return value == null || value <= 0 ? fallback : value;
+}
+
+String _safeName(String name) =>
+    name.replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '_');
+
+Future<_Comparison> _compareBaseline({
+  required ui.Image actual,
+  required File baseline,
+  required int channelTolerance,
+}) async {
+  final codec = await ui.instantiateImageCodec(baseline.readAsBytesSync());
+  final expected = (await codec.getNextFrame()).image;
+  try {
+    if (actual.width != expected.width || actual.height != expected.height) {
+      return _Comparison(
+        differenceFraction: 1,
+        sizeMismatch:
+            'raster size changed: Dart ${actual.width}x${actual.height}, '
+            'PDF.js ${expected.width}x${expected.height}',
+      );
+    }
+
+    final actualPixels =
+        (await actual.toByteData(format: ui.ImageByteFormat.rawStraightRgba))!
+            .buffer
+            .asUint8List();
+    final expectedPixels =
+        (await expected.toByteData(format: ui.ImageByteFormat.rawStraightRgba))!
+            .buffer
+            .asUint8List();
+    final diffMap = Uint8List(actualPixels.length);
+    var differing = 0;
+    for (var i = 0; i < actualPixels.length; i += 4) {
+      var maxDiff = 0;
+      for (var c = 0; c < 3; c++) {
+        final d = (actualPixels[i + c] - expectedPixels[i + c]).abs();
+        if (d > maxDiff) maxDiff = d;
+      }
+      final differs = maxDiff > channelTolerance;
+      if (differs) differing++;
+      diffMap[i] = differs ? 255 : actualPixels[i];
+      diffMap[i + 1] = differs ? 0 : actualPixels[i + 1];
+      diffMap[i + 2] = differs ? 0 : actualPixels[i + 2];
+      diffMap[i + 3] = 255;
+    }
+
+    final diff = await _imageFromRgba(
+      diffMap,
+      width: actual.width,
+      height: actual.height,
+    );
+    return _Comparison(
+      differenceFraction: differing / (actualPixels.length ~/ 4),
+      diff: diff,
+    );
+  } finally {
+    expected.dispose();
+  }
+}
+
+Future<ui.Image> _imageFromRgba(
+  Uint8List rgba, {
+  required int width,
+  required int height,
+}) async {
+  final buffer = await ui.ImmutableBuffer.fromUint8List(rgba);
+  final descriptor = ui.ImageDescriptor.raw(
+    buffer,
+    width: width,
+    height: height,
+    pixelFormat: ui.PixelFormat.rgba8888,
+  );
+  final codec = await descriptor.instantiateCodec();
+  return (await codec.getNextFrame()).image;
+}
+
+class _Comparison {
+  const _Comparison({
+    required this.differenceFraction,
+    this.diff,
+    this.sizeMismatch,
+  });
+
+  final double differenceFraction;
+  final ui.Image? diff;
+  final String? sizeMismatch;
 }

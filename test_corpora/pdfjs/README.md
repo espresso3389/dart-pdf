@@ -14,7 +14,11 @@ Test layers:
   per-file pinned expectations (opens / controlled failure / password /
   may-be-blank); every page must interpret without throwing.
 - `packages/dart_pdf_editor/test/pdfjs_render_test.dart` — rasterizes every
-  page (no baselines): the decode pipeline must not throw.
+  page: by default the decode pipeline must not throw; with
+  `PDFJS_BASELINE_DIR` set, Dart rasters are pixel-compared against
+  generated PDF.js reference PNGs. Generate those references from the repo
+  root:
+  `cd packages/dart_pdf_editor/tool/pdfjs_baseline && npm install && npm run render`.
 
 ## Structure & lenient parsing
 

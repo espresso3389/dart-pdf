@@ -2183,8 +2183,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         onPanUpdate: _panUpdate,
         onPanEnd: _panEnd,
         onTapUp: _onTapUp,
-        onDoubleTapDown: _onDoubleTapDown,
-        onDoubleTap: _onDoubleTap,
+        onDoubleTapDown: _polyTool ? _onDoubleTapDown : null,
+        onDoubleTap: _polyTool ? _onDoubleTap : null,
         child: MouseRegion(
           cursor: _cursor,
           onHover: _onHover,

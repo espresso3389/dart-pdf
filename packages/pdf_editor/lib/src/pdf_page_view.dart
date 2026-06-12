@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -5,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:pdf_document/pdf_document.dart';
 
+import 'preview_cache.dart';
 import 'renderer.dart';
 
 /// Displays a single PDF page, rendered natively in Dart.
@@ -25,9 +27,22 @@ class PdfPageView extends StatefulWidget {
     this.showAnnotations = true,
     this.onRasterReady,
     this.renderHold,
+    this.previewCache,
+    this.previewIndex = 0,
   });
 
   final PdfPage page;
+
+  /// Shared low-res previews (see [PdfPagePreviewCache]): while this
+  /// page's full render is pending — most visibly under [renderHold]
+  /// during fast scrolling — the cached preview paints instead of the
+  /// blank paper placeholder. When the full render lands, its picture
+  /// refreshes the cache, so a page seen once keeps a preview after
+  /// this state is long disposed.
+  final PdfPagePreviewCache? previewCache;
+
+  /// This page's index in [previewCache].
+  final int previewIndex;
 
   /// While true, a page that has not been interpreted yet keeps its
   /// paper placeholder instead of starting the (UI-thread) interpreter
@@ -73,6 +88,10 @@ class _PdfPageViewState extends State<PdfPageView> {
   Rect? _detailFraction; // patch placement as fractions of the page
   int _detailGeneration = 0;
 
+  /// Clone of this page's cached low-res preview; painted while no full
+  /// raster exists, dropped (to free the buffer) the moment one lands.
+  ui.Image? _preview;
+
   /// A render that arrived while [PdfPageView.renderHold] was up — it
   /// fires the moment the hold releases.
   bool _holdPending = false;
@@ -87,6 +106,8 @@ class _PdfPageViewState extends State<PdfPageView> {
   void initState() {
     super.initState();
     widget.renderHold?.addListener(_onRenderHoldChanged);
+    widget.previewCache?.addListener(_onPreviewCacheChanged);
+    _refreshPreview();
   }
 
   void _onRenderHoldChanged() {
@@ -94,6 +115,22 @@ class _PdfPageViewState extends State<PdfPageView> {
       _holdPending = false;
       if (mounted) _render();
     }
+  }
+
+  /// A background prerender landed somewhere; if this page is still
+  /// showing its placeholder, its preview may just have arrived.
+  void _onPreviewCacheChanged() {
+    if (!mounted || _image != null || _preview != null) return;
+    setState(_refreshPreview);
+  }
+
+  void _refreshPreview() {
+    final cache = widget.previewCache;
+    if (cache == null || _image != null) return;
+    final next = cache.imageFor(widget.previewIndex);
+    if (next == null) return; // keep whatever we already hold
+    _preview?.dispose();
+    _preview = next;
   }
 
   @override
@@ -130,6 +167,14 @@ class _PdfPageViewState extends State<PdfPageView> {
       widget.renderHold?.addListener(_onRenderHoldChanged);
       _onRenderHoldChanged();
     }
+    if (!identical(oldWidget.previewCache, widget.previewCache) ||
+        oldWidget.previewIndex != widget.previewIndex) {
+      oldWidget.previewCache?.removeListener(_onPreviewCacheChanged);
+      widget.previewCache?.addListener(_onPreviewCacheChanged);
+      _preview?.dispose();
+      _preview = null;
+      _refreshPreview();
+    }
     if (!identical(oldWidget.page, widget.page) ||
         oldWidget.pageColor != widget.pageColor ||
         oldWidget.showAnnotations != widget.showAnnotations) {
@@ -149,9 +194,11 @@ class _PdfPageViewState extends State<PdfPageView> {
   @override
   void dispose() {
     widget.renderHold?.removeListener(_onRenderHoldChanged);
+    widget.previewCache?.removeListener(_onPreviewCacheChanged);
     _dropPicture();
     _image?.dispose();
     _detailImage?.dispose();
+    _preview?.dispose();
     super.dispose();
   }
 
@@ -217,8 +264,17 @@ class _PdfPageViewState extends State<PdfPageView> {
     setState(() {
       _image?.dispose();
       _image = image;
+      _preview?.dispose();
+      _preview = null;
     });
     widget.onRasterReady?.call();
+    // feed the preview cache from the picture we already paid to
+    // interpret — this is how previews appear for pages the background
+    // prerender hasn't reached (and refresh after edits)
+    final cache = widget.previewCache;
+    if (cache != null && !cache.isFresh(widget.previewIndex, widget.page)) {
+      unawaited(cache.putFromPicture(widget.previewIndex, widget.page, picture));
+    }
     await _updateDetail();
   }
 
@@ -313,9 +369,16 @@ class _PdfPageViewState extends State<PdfPageView> {
               fit: StackFit.expand,
               children: [
                 if (_image == null)
-                  // the placeholder matches the paper, so the page doesn't
-                  // flash white before the first render lands
-                  ColoredBox(color: widget.pageColor)
+                  // before the first render lands: the low-res preview if
+                  // the cache has one (fast scroll past a known page), else
+                  // a placeholder matching the paper so nothing flashes
+                  _preview == null
+                      ? ColoredBox(color: widget.pageColor)
+                      : RawImage(
+                          image: _preview,
+                          fit: BoxFit.contain,
+                          filterQuality: FilterQuality.medium,
+                        )
                 else
                   RawImage(
                     image: _image,

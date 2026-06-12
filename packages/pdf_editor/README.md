@@ -50,6 +50,10 @@ Built on the pure-Dart
 - Zooming/panning viewer with fit-page and fit-width modes, deep-zoom
   detail rendering past the raster caps, and exact scroll metrics on
   long mixed-size documents.
+- Smooth fast scrolling on heavy documents: pages flying past show
+  low-res previews (filled in by a background prerender) instead of
+  blank paper, and full rendering resumes the moment scrolling
+  settles.
 - Text selection (mouse, and touch with selection handles), full-text
   search with a results panel, link navigation, outlines.
 - Theming via `PdfViewerTheme`, dark mode, arbitrary page colors, and a

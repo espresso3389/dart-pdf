@@ -17,12 +17,18 @@ void main() {
     await tester.pump();
   }
 
-  Future<void> waitForRaster(WidgetTester tester) async {
-    for (var i = 0; i < 50 && find.byType(RawImage).evaluate().isEmpty; i++) {
+  Future<void> waitFor(WidgetTester tester, Finder finder) async {
+    for (var i = 0; i < 50 && finder.evaluate().isEmpty; i++) {
       await settle(tester);
     }
-    expect(find.byType(RawImage), findsWidgets);
+    expect(finder, findsWidgets);
   }
+
+  // a full-page raster (vs the small fast-scroll previews, ≤200px)
+  final fullRaster = find.byWidgetPredicate((w) =>
+      w is RawImage &&
+      w.image != null &&
+      (w.image!.width > 200 || w.image!.height > 200));
 
   testWidgets('PdfPageView.renderHold defers the first render until released',
       (tester) async {
@@ -44,7 +50,7 @@ void main() {
     expect(find.byType(RawImage), findsNothing);
 
     hold.value = false;
-    await waitForRaster(tester);
+    await waitFor(tester, find.byType(RawImage));
   });
 
   testWidgets('a fast jump holds page rendering until the scroll settles',
@@ -63,7 +69,7 @@ void main() {
     ));
     await tester.pump();
     // an idle viewer renders normally
-    await waitForRaster(tester);
+    await waitFor(tester, fullRaster);
 
     // a long jump animates 250ms at far past the velocity threshold
     unawaited(controller.jumpToPage(6));
@@ -73,13 +79,14 @@ void main() {
       await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 10)));
     }
-    // mid-flight and just arrived (settle pending): the pages that flew
-    // past — and the destination — still show their placeholders; page 0's
-    // raster is long unmounted
-    expect(find.byType(RawImage), findsNothing);
+    // mid-flight and just arrived (settle pending): no page got a FULL
+    // render — page 0's raster is long unmounted, the destination is
+    // held. (Low-res previews are allowed: that's the fast-scroll
+    // preview feature, covered in page_preview_test.dart.)
+    expect(fullRaster, findsNothing);
 
     // the scroll-settle timer releases the hold and the target renders
     await tester.pump(const Duration(milliseconds: 300));
-    await waitForRaster(tester);
+    await waitFor(tester, fullRaster);
   });
 }

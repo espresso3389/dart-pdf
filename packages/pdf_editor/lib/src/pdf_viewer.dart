@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, visibleForTesting;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
@@ -17,6 +18,7 @@ import 'editing/text_prompt.dart';
 import 'exact_extent_list.dart';
 import 'page_geometry.dart';
 import 'pdf_page_view.dart';
+import 'preview_cache.dart';
 import 'scrollbar.dart';
 import 'theme.dart';
 
@@ -73,6 +75,11 @@ class PdfViewerController extends ChangeNotifier {
   /// Every hit of the current [query] in document order, with context
   /// snippets — what a search results panel lists.
   List<PdfSearchResult> get searchResults => _results;
+
+  /// Test hook: the attached viewer's low-res preview cache (see
+  /// [PdfViewer.pagePreviews]); null when no viewer is attached.
+  @visibleForTesting
+  PdfPagePreviewCache? get debugPreviewCache => _state?._previews;
 
   String _selectedText = '';
 
@@ -292,6 +299,7 @@ class PdfViewer extends StatefulWidget {
     this.pageColor = const Color(0xFFFFFFFF),
     this.showAnnotations = true,
     this.highlightFormFields = true,
+    this.pagePreviews = true,
   });
 
   final PdfDocument document;
@@ -379,6 +387,17 @@ class PdfViewer extends StatefulWidget {
   /// rendered, so boxes would mark nothing).
   final bool highlightFormFields;
 
+  /// Low-resolution page previews under fast scrolling, the way desktop
+  /// editors show them: pages whose full render is deferred (the
+  /// fast-scroll hold) paint a small cached raster stretched to page
+  /// size instead of blank paper. Previews fall out of full renders for
+  /// free as pages are viewed; pages never seen are filled in by a
+  /// background prerender (nearest the viewport first, paused while the
+  /// user scrolls). Costs one interpreter walk per page over the
+  /// session plus up to ~40 MB of preview pixels on very long
+  /// documents.
+  final bool pagePreviews;
+
   @override
   State<PdfViewer> createState() => _PdfViewerState();
 }
@@ -419,6 +438,16 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   /// at most one per frame, for the velocity estimate behind
   /// [_renderHold].
   final List<(Duration, double)> _scrollSamples = [];
+
+  /// Low-res previews painted while a page's full render is pending —
+  /// what keeps fast-scrolled pages from being blank (see
+  /// [PdfViewer.pagePreviews]).
+  final _previews = PdfPagePreviewCache();
+
+  /// Pages the background prerender already tried (by page object
+  /// identity), so a page whose render throws can't be retried forever.
+  final _previewAttempts = Set<PdfPage>.identity();
+  bool _prerendering = false;
 
   late List<PdfPage> _pages;
   late List<double> _aspects; // height / width, after /Rotate
@@ -543,6 +572,9 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
         setState(() => _zoomModifierDown = false);
       }
     });
+    // background preview prerender starts once the first frame (and the
+    // scroll metrics the priority order needs) exists
+    WidgetsBinding.instance.addPostFrameCallback((_) => _prerenderPreviews());
   }
 
   late final AppLifecycleListener _lifecycle;
@@ -673,7 +705,78 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       _scrollSamples.clear();
       _renderHold.value = false;
       if (mounted) setState(() => _settleGeneration++);
+      // the prerender pauses while the user scrolls; pick it back up
+      _prerenderPreviews();
     });
+  }
+
+  /// Fills [_previews] for pages that have never rendered on screen, one
+  /// page at a time, nearest the viewport first. Each page is a
+  /// synchronous interpreter walk on the UI thread (the same cost the
+  /// page would incur when first viewed), so the loop runs only while
+  /// the viewer is idle: it bails between pages whenever a scroll is in
+  /// progress, and the scroll-settle timer restarts it.
+  Future<void> _prerenderPreviews() async {
+    if (_prerendering || !mounted || !widget.pagePreviews) return;
+    _prerendering = true;
+    try {
+      while (mounted && widget.pagePreviews) {
+        if (_renderHold.value || (_scrollSettleTimer?.isActive ?? false)) {
+          return; // restarted by the settle timer
+        }
+        final pages = _pages;
+        final index = _nextPreviewIndex(pages);
+        if (index == null) return; // every page covered (or attempted)
+        final page = pages[index];
+        _previewAttempts.add(page);
+        await _previews.renderPreview(index, page,
+            pageColor: widget.pageColor, annotations: widget.showAnnotations);
+        if (!mounted) return;
+        // breathe between interpreter walks — each is a synchronous
+        // UI-thread chunk, so give the engine a frame for input and
+        // animations (endOfFrame schedules one when idle; deliberately
+        // not a Timer, which would pend in widget tests)
+        await SchedulerBinding.instance.endOfFrame;
+      }
+    } finally {
+      _prerendering = false;
+    }
+  }
+
+  /// The next page worth prerendering: missing a fresh preview, not yet
+  /// attempted, and not near the viewport (pages in or around the build
+  /// window render fully on their own — their full picture feeds the
+  /// cache, so prerendering them too would interpret twice).
+  int? _nextPreviewIndex(List<PdfPage> pages) {
+    final current =
+        pages.isEmpty ? 0 : _controller.currentPage.clamp(0, pages.length - 1);
+    final hasMetrics = _scroll.hasClients && _viewWidth > 0;
+    // just past the list's 250px cacheExtent: pages inside it build and
+    // render fully on their own, pages beyond it are prerender's job
+    const nearSlack = 300.0;
+    final nearTop = hasMetrics ? _scroll.position.pixels - nearSlack : 0.0;
+    final nearBottom = hasMetrics
+        ? _scroll.position.pixels +
+            _scroll.position.viewportDimension +
+            nearSlack
+        : double.infinity; // pre-layout: every page counts as near
+    int? best;
+    var bestDistance = 1 << 30;
+    var offset = 0.0;
+    for (var i = 0; i < pages.length; i++) {
+      final height = _pageHeight(i) + widget.pageSpacing;
+      final top = offset;
+      offset += height;
+      if (top + height >= nearTop && top <= nearBottom) continue;
+      if (_previewAttempts.contains(pages[i])) continue;
+      if (_previews.isFresh(i, pages[i])) continue;
+      final distance = (i - current).abs();
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = i;
+      }
+    }
+    return best;
   }
 
   /// Estimates the scroll velocity over a ~200ms window of per-frame
@@ -715,6 +818,16 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       _controller.clearSearch();
       _clearSelection();
       _loadPages();
+      // an edit revision keeps its previews (rebound to the new page
+      // objects — edited pages refresh from their on-screen render); a
+      // different document starts clean
+      if (sameGeometry) {
+        _previews.rebind(_pages);
+      } else {
+        _previews.clear();
+      }
+      _previewAttempts.clear();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _prerenderPreviews());
       if (!sameGeometry) {
         // didUpdateWidget runs mid-build, and jumpTo synchronously
         // dispatches a ScrollNotification — ancestors listening through a
@@ -729,6 +842,13 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
         _appliedInitialFit = false;
       }
       setState(() {});
+    }
+    if (oldWidget.pageColor != widget.pageColor ||
+        oldWidget.showAnnotations != widget.showAnnotations) {
+      // previews bake the paper color and annotation visibility in
+      _previews.clear();
+      _previewAttempts.clear();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _prerenderPreviews());
     }
   }
 
@@ -779,6 +899,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     _transform.dispose();
     _transformScale.dispose();
     _renderHold.dispose();
+    _previews.dispose();
     _zoomAnimator.dispose();
     _panFlinger.dispose();
     _touchFlinger.dispose();
@@ -2031,6 +2152,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                 onShowFormFieldMenu: _showFormFieldMenu,
                 transformScale: _transformScale,
                 renderHold: _renderHold,
+                previewCache: widget.pagePreviews ? _previews : null,
               ),
             ),
           ),
@@ -2300,6 +2422,7 @@ class _PdfViewerPage extends StatefulWidget {
     required this.onShowFormFieldMenu,
     required this.transformScale,
     required this.renderHold,
+    required this.previewCache,
   });
 
   final PdfPage page;
@@ -2345,6 +2468,9 @@ class _PdfViewerPage extends StatefulWidget {
   /// See [PdfPageView.renderHold].
   final ValueListenable<bool> renderHold;
 
+  /// See [PdfPageView.previewCache]; null when previews are off.
+  final PdfPagePreviewCache? previewCache;
+
   @override
   State<_PdfViewerPage> createState() => _PdfViewerPageState();
 }
@@ -2384,6 +2510,8 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
         showAnnotations: widget.showAnnotations,
         onRasterReady: _onRasterReady,
         renderHold: widget.renderHold,
+        previewCache: widget.previewCache,
+        previewIndex: widget.index,
       ),
       // the field highlight sits under text highlights and overlays:
       // it marks where fields are, everything else paints over it

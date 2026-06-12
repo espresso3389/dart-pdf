@@ -12,7 +12,9 @@ Initial release.
   off; styling via the Material theme and `PdfViewerTheme`).
 - `PdfViewer`: zooming/panning viewer with text selection, search,
   link navigation, page-fit modes, deep-zoom detail rendering,
-  theming (`PdfViewerTheme`), dark mode, and custom page colors.
+  low-res page previews under fast scrolling (`PdfPagePreviewCache` +
+  background prerender), theming (`PdfViewerTheme`), dark mode, and
+  custom page colors.
 - `PdfEditingController` + tool overlays: highlight/ink (pressure +
   Catmull-Rom smoothing)/shapes/free text/notes/stamps/signatures,
   select/move/resize/rotate with live previews, slicing eraser,

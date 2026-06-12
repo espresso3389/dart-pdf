@@ -20,6 +20,7 @@ export 'src/pdf_editor_view.dart';
 export 'src/pdf_page_view.dart';
 export 'src/pdf_reader.dart';
 export 'src/pdf_viewer.dart';
+export 'src/preview_cache.dart';
 export 'src/renderer.dart';
 export 'src/search_panel.dart';
 export 'src/scrollbar.dart';

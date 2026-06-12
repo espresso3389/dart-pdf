@@ -1583,3 +1583,42 @@ URL — out of the pub archive, renders once the repo is public. Tests:
 pdf_shell_test.dart (16); the example tests passed unchanged (their
 coordinates derive from the live viewer rect, so the 48px header is
 absorbed).
+Fast-scroll previews (Ben: "Bluebeam shows low-res content while
+scrolling, ours is blank"): the render hold stays — held pages now
+paint a small cached raster stretched to page size instead of blank
+paper. `PdfPagePreviewCache` (preview_cache.dart, exported) — LRU
+(capacity 300) of ≤200px-longest-side images keyed by page INDEX,
+each entry remembering the page object it was rendered from
+(`isFresh`); `imageFor` hands out `ui.Image.clone()`s so eviction/
+clear can't pull pixels from a painting widget. Two fill paths:
+`putFromPicture` (PdfPageView feeds the cache from the picture it
+already interpreted, raster-thread downscale only — pages seen once
+keep a preview after their state dies) and `renderPreview` (full
+interpret, the background path). PdfPageView gained
+`previewCache`/`previewIndex`: placeholder branch paints the preview
+when one exists, the clone drops the moment a full raster lands, and
+a cache listener refreshes blank pages when a prerender arrives.
+Viewer: `PdfViewer.pagePreviews` (default true), `_previews` +
+`_prerenderPreviews()` — one page at a time, nearest the viewport
+first, SKIPPING pages within ~300px of the viewport (they render
+fully on their own; prerendering them would interpret twice), bails
+between pages whenever a scroll is live (hold up or settle timer
+active) and is restarted by the settle timer; between pages it
+`await SchedulerBinding.instance.endOfFrame` — deliberately NOT a
+Timer (fake timers pend at widget-test end) and endOfFrame schedules
+a frame when idle so the loop can't stall. `_previewAttempts`
+(identity set) stops a throwing page from being retried forever.
+Doc swaps: same geometry → `rebind` (entries re-point at the new
+page objects WITHOUT re-render — re-interpreting 300 pages per pen
+stroke is the alternative; off-screen edited pages stay briefly
+stale and refresh when viewed), different document / pageColor /
+showAnnotations change → clear. `PdfViewerController.
+debugPreviewCache` (@visibleForTesting) is the test hook. Tests:
+page_preview_test.dart (5: cache LRU/clones, held page paints
+preview then full render, putFromPicture freshness, viewer
+integration via debugPreviewCache + jump — full rasters held while
+previews paint — and pagePreviews:false); render_hold_test's
+mid-flight assertion is now "no FULL raster" (RawImage ≤200px =
+preview, the feature working as intended). Verified live on macOS
+against corpus AMT-SP-101.pdf (291 pages): mid-scrollbar-drag pages
+show soft content, settle renders crisp.

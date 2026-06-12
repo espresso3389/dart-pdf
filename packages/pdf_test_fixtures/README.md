@@ -1,0 +1,24 @@
+# pdf_test_fixtures
+
+Programmatic builders for structurally-correct PDF test files, shared by
+the [dart-pdf suite](https://github.com/ben-milanko/dart-pdf)'s test
+suites and useful for testing any PDF tooling.
+
+Because fixtures are built in code, byte offsets, xref entries, and
+stream lengths are always correct — no hand-edited files to drift.
+
+## Builders
+
+- Classic xref-table and xref-stream documents.
+- Multi-page and varied-height documents (defeats uniform-extent
+  assumptions in viewers).
+- Annotated documents (links, GoTo actions, markup annotations).
+- AcroForm documents (text, checkbox, radio, choice fields).
+- Encrypted documents.
+- A test signer identity (key + certificate) for signature tests.
+
+```dart
+import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
+
+final bytes = buildMultiPagePdf(5);
+```

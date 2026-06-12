@@ -1,0 +1,176 @@
+// Ghent PDF Output Suite V5.0 — rasterization regression suite.
+//
+// One test per patch PDF in test_corpora/ghent. Every page is rendered
+// through the real pipeline and must
+//   1. rasterize without throwing,
+//   2. actually put ink on the page (patches are never blank), and
+//   3. match the stored baseline raster pixel-for-pixel within tolerance.
+//
+// Baselines live in test_corpora/ghent/_baselines (checked in). A missing
+// baseline is seeded automatically on first run; to accept an intentional
+// rendering change:
+//   GHENT_UPDATE=1 fvm flutter test test/ghent_render_test.dart
+// On mismatch the actual render and a per-pixel diff map are written to
+// test_corpora/ghent/_failures (git-ignored) for inspection.
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_editor/pdf_editor.dart';
+
+import 'render_smoke_test.dart' show loadSystemFonts;
+
+const _pixelRatio = 2.0;
+
+/// Per-channel difference below this is treated as identical.
+const _channelTolerance = 8;
+
+/// Fraction of differing pixels allowed before the test fails.
+const _maxDifferingFraction = 0.0005;
+
+void main() {
+  final root = Directory('../../test_corpora/ghent');
+  if (!root.existsSync()) {
+    test('Ghent suite', skip: 'test_corpora/ghent not found', () {});
+    return;
+  }
+  final update = Platform.environment['GHENT_UPDATE'] == '1';
+
+  final files = root
+      .listSync(recursive: true)
+      .whereType<File>()
+      .where((f) =>
+          f.path.toLowerCase().endsWith('.pdf') &&
+          !f.path.contains('/_baselines/') &&
+          !f.path.contains('/_failures/'))
+      .toList()
+    ..sort((a, b) => a.path.compareTo(b.path));
+
+  for (final file in files) {
+    final name = file.path.substring(root.path.length + 1);
+    testWidgets(name, (tester) async {
+      await tester.runAsync(() async {
+        await loadSystemFonts();
+        final doc = PdfDocument.open(file.readAsBytesSync());
+        for (var i = 0; i < doc.pageCount; i++) {
+          final image = await PdfPageRenderer.renderImage(doc.page(i),
+                  pixelRatio: _pixelRatio)
+              .timeout(const Duration(seconds: 90));
+          try {
+            final pixels = (await image.toByteData(
+                    format: ui.ImageByteFormat.rawStraightRgba))!
+                .buffer
+                .asUint8List();
+
+            expect(_inkFraction(pixels), greaterThan(0.0005),
+                reason: '$name page $i rendered (nearly) blank');
+
+            await _checkBaseline(
+              root: root,
+              name: name,
+              page: i,
+              image: image,
+              pixels: pixels,
+              update: update,
+            );
+          } finally {
+            image.dispose();
+          }
+        }
+      });
+    }, timeout: const Timeout(Duration(minutes: 3)));
+  }
+}
+
+/// Fraction of pixels that are not (close to) the white page background.
+double _inkFraction(Uint8List rgba) {
+  var ink = 0;
+  for (var i = 0; i < rgba.length; i += 4) {
+    if (rgba[i] < 250 || rgba[i + 1] < 250 || rgba[i + 2] < 250) ink++;
+  }
+  return ink / (rgba.length ~/ 4);
+}
+
+Future<void> _checkBaseline({
+  required Directory root,
+  required String name,
+  required int page,
+  required ui.Image image,
+  required Uint8List pixels,
+  required bool update,
+}) async {
+  final baseline = File('${root.path}/_baselines/$name.p$page.png');
+
+  if (update || !baseline.existsSync()) {
+    baseline.parent.createSync(recursive: true);
+    final png = await image.toByteData(format: ui.ImageByteFormat.png);
+    baseline.writeAsBytesSync(png!.buffer.asUint8List());
+    return;
+  }
+
+  final codec = await ui.instantiateImageCodec(baseline.readAsBytesSync());
+  final expected = (await codec.getNextFrame()).image;
+  try {
+    expect('${image.width}x${image.height}',
+        '${expected.width}x${expected.height}',
+        reason: '$name page $page raster size changed '
+            '(GHENT_UPDATE=1 to accept)');
+
+    final expectedPixels = (await expected.toByteData(
+            format: ui.ImageByteFormat.rawStraightRgba))!
+        .buffer
+        .asUint8List();
+
+    var differing = 0;
+    final diffMap = Uint8List(pixels.length);
+    for (var i = 0; i < pixels.length; i += 4) {
+      var maxDiff = 0;
+      for (var c = 0; c < 3; c++) {
+        final d = (pixels[i + c] - expectedPixels[i + c]).abs();
+        if (d > maxDiff) maxDiff = d;
+      }
+      final differs = maxDiff > _channelTolerance;
+      if (differs) differing++;
+      diffMap[i] = differs ? 255 : pixels[i];
+      diffMap[i + 1] = differs ? 0 : pixels[i + 1];
+      diffMap[i + 2] = differs ? 0 : pixels[i + 2];
+      diffMap[i + 3] = 255;
+    }
+    final fraction = differing / (pixels.length ~/ 4);
+
+    if (fraction > _maxDifferingFraction) {
+      await _writeFailure(root, name, page, image, diffMap);
+    }
+    expect(fraction, lessThanOrEqualTo(_maxDifferingFraction),
+        reason: '$name page $page deviates from the baseline in '
+            '${(fraction * 100).toStringAsFixed(3)}% of pixels — actual and '
+            'diff written to test_corpora/ghent/_failures '
+            '(GHENT_UPDATE=1 to accept)');
+  } finally {
+    expected.dispose();
+  }
+}
+
+Future<void> _writeFailure(Directory root, String name, int page,
+    ui.Image actual, Uint8List diffMap) async {
+  final dir = Directory('${root.path}/_failures')..createSync(recursive: true);
+  final flat = name.replaceAll('/', '_');
+
+  final png = await actual.toByteData(format: ui.ImageByteFormat.png);
+  File('${dir.path}/$flat.p$page.actual.png')
+      .writeAsBytesSync(png!.buffer.asUint8List());
+
+  final buffer = await ui.ImmutableBuffer.fromUint8List(diffMap);
+  final descriptor = ui.ImageDescriptor.raw(buffer,
+      width: actual.width,
+      height: actual.height,
+      pixelFormat: ui.PixelFormat.rgba8888);
+  final codec = await descriptor.instantiateCodec();
+  final diffImage = (await codec.getNextFrame()).image;
+  final diffPng = await diffImage.toByteData(format: ui.ImageByteFormat.png);
+  File('${dir.path}/$flat.p$page.diff.png')
+      .writeAsBytesSync(diffPng!.buffer.asUint8List());
+  diffImage.dispose();
+}

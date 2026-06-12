@@ -9,13 +9,13 @@ Monorepo using **pub workspaces** (root `pubspec.yaml` lists members under
 - `fvm flutter pub get` (at repo root — resolves every workspace package)
 - `fvm dart analyze` (at root)
 - `cd packages/<pkg> && fvm dart test` (pure-Dart packages)
-- `cd packages/pdf_flutter && fvm flutter test`
+- `cd packages/pdf_editor && fvm flutter test`
 
 ## Layering rules (strict)
 
-`pdf_cos` ← `pdf_document` ← `pdf_graphics` ← `pdf_flutter`
+`pdf_cos` ← `pdf_document` ← `pdf_graphics` ← `pdf_editor`
 
-- `dart:ui` and Flutter imports are **only** allowed in `pdf_flutter`.
+- `dart:ui` and Flutter imports are **only** allowed in `pdf_editor`.
   Everything else must run on the Dart VM (server/CLI/tests) and on the web.
 - `dart:io` is not allowed anywhere in `lib/` (web support); use
   `package:archive` for compression.
@@ -39,7 +39,7 @@ folders and OneDrive — CAD drawings, scanned docs, reports, forms. Use them
 to validate changes:
 
 - Parse check: `cd packages/pdf_document && fvm dart tool/inspect.dart ../../corpus/*.pdf`
-- Render check: `cd packages/pdf_flutter && PDF_PATH=../../corpus/<file>.pdf PDF_PAGE=0 fvm flutter test test/render_smoke_test.dart` (writes /tmp/dart_pdf_render.png)
+- Render check: `cd packages/pdf_editor && PDF_PATH=../../corpus/<file>.pdf PDF_PAGE=0 fvm flutter test test/render_smoke_test.dart` (writes /tmp/dart_pdf_render.png)
 
 `test_corpora/ghent/` (checked in) is the Ghent PDF Output Suite V5.0 —
 54 print-conformance PDFs (overprint, DeviceN, spot, ICC v2/v4, 16-bit,
@@ -48,7 +48,7 @@ JBIG2/JPX) incl. 3 composite test pages. Two test layers:
 
 - `packages/pdf_graphics/test/ghent_corpus_test.dart` — pure-Dart: every
   page must interpret without throwing and paint > 0 ops.
-- `packages/pdf_flutter/test/ghent_render_test.dart` — rasterizes every
+- `packages/pdf_editor/test/ghent_render_test.dart` — rasterizes every
   page and diffs against checked-in baselines in
   `test_corpora/ghent/_baselines` (fail when >0.05% of pixels differ by
   >8/channel). Missing baselines seed on first run; accept intentional
@@ -100,7 +100,7 @@ files still refused), trust-store chain validation
 (`verifyCertificateChain` in pdf_cos cms.dart, `PdfTrustStore` +
 `validate(trustStore:)` in pdf_document), mesh shadings 4-7
 (`PdfMeshParser`/`PdfMesh`, device `fillMesh`, drawVertices in
-pdf_flutter), CCITT G3/G4 (`CcittDecoder`, KAT vs libtiff), JBIG2
+pdf_editor), CCITT G3/G4 (`CcittDecoder`, KAT vs libtiff), JBIG2
 embedded profile (`Jbig2Decoder` + shared `MqDecoder` in
 filters/mq.dart, KAT vs jbig2enc/jbig2dec), JPEG 2000 (`JpxDecoder`,
 lossless bit-perfect vs OpenJPEG, lossy ±1), deep-zoom detail patch
@@ -110,7 +110,7 @@ gray TRC, matrix/TRC, mft1/mft2/mAB LUTs, validated vs littleCMS;
 wired into sc/scn and image decoding). Remaining gaps: text reflow,
 RSASSA-PSS, JBIG2 Huffman/refinement, JPX subsampling + PCRL/CPRL,
 rendering intents/BPC in ICC.
-The editing UI is in (pdf_flutter `src/editing/`): `PdfEditingController`
+The editing UI is in (pdf_editor `src/editing/`): `PdfEditingController`
 owns the edit session — every edit is an incremental save, so revisions
 are byte prefixes of one buffer and undo/redo is a stack of lengths;
 `PdfViewer(editing:)` injects per-page tool overlays (markup/ink/shapes/
@@ -177,7 +177,7 @@ handler no-ops while picking). dart:typed_data must be imported
 explicitly for ByteData (flutter/painting doesn't re-export it).
 Persisted UI preferences (Ben: save them locally, default behavior):
 `PdfEditingPreferences` (editing_preferences.dart, backed by
-shared_preferences, keys `pdf_flutter.editing.*`) — color/strokeWidth/
+shared_preferences, keys `pdf_editor.editing.*`) — color/strokeWidth/
 fontSize/opacity/fingerDrawsInk plus host-chrome flags
 showThumbnailSidebar/showAnnotationSidebar. The controller's style
 state proxies to it (no duplicate fields; `preferences.addListener(
@@ -674,7 +674,7 @@ toString + data bytes) for inline requests, stream identity for
 XObjects (the xref cache makes those stable); ImageCollector now
 collects requests, decodeImages takes requests and keys by
 pdfImageKey, CanvasPdfDevice.images is Map<Object, ui.Image>.
-Regression test: pdf_flutter/test/inline_image_test.dart. Two Ghent
+Regression test: pdf_editor/test/inline_image_test.dart. Two Ghent
 baselines moved because GWG090's Type 3 bitmap-font row (CharProcs
 painting inline images) now renders — re-baselined as an improvement.
 Batch 3, session 1 (resize correctness): three fixes sharing one root —
@@ -1099,7 +1099,7 @@ clears it unless mid-swipe). Commit on lift → `sliceErase`, afterimage
 menu only while the eraser is armed — the legacy 3-slider count test
 still holds. Tests: pdf_document/test/ink_slice_test.dart (geometry
 KATs — the vertical-spine cut of a horizontal line lands exactly at
-|x−cx| = r; pressure recovery round-trip 3.28/4.72 w), pdf_flutter
+|x−cx| = r; pressure recovery round-trip 3.28/4.72 w), pdf_editor
 editing_eraser_test.dart (live preview via the dynamic painter cast —
 record fields ARE dynamically accessible; afterimage; hover ring;
 slider; pref round-trip) and editing_ipad_test.dart eraser group
@@ -1210,7 +1210,7 @@ AND restyles selection when canRestyleSelected); stroke/opacity
 sliders show the selection's values and restyle on release
 (_draggingStroke/_draggingOpacity mirror the font-size pattern).
 Tests: pdf_document annotation_clipboard_test (7) +
-annotation_restyle_test (8), pdf_flutter editing_clipboard_test (16).
+annotation_restyle_test (8), pdf_editor editing_clipboard_test (16).
 Remaining batch-4: properties panel, annotation-panel search,
 page-number jump field, slimmer search bar + results panel, PDF.js
 corpus.
@@ -1256,7 +1256,7 @@ contents, field name/value, link text/target); page headers only
 survive with matching tiles; query non-empty + all filtered → 'No
 matching annotations'; the query deliberately survives revisions
 (the document-identity reset clears checkboxes, not the search).
-Tests: pdf_document annotation_metadata_test (3), pdf_flutter
+Tests: pdf_document annotation_metadata_test (3), pdf_editor
 editing_properties_test (11: 3 controller + 8 panel widget tests),
 editing_sidebar_test +3 search tests. Gotchas: the search TextField
 hosts its own Scrollable — pdf_theme_test's annotation-bar test had
@@ -1326,7 +1326,7 @@ ELXRTQWS, encrypted-attachment 000000}, print_protection must throw
 CosPasswordException (pdf.js shows its password dialog too — NOT a
 bug), 6 fuzz files pinned "controlled CosParseException or zero
 reachable pages", 14 mayBeBlank files annotated in-test) and
-pdfjs_render_test.dart (pdf_flutter, rasterizes ≤5 pages/file at
+pdfjs_render_test.dart (pdf_editor, rasterizes ≤5 pages/file at
 ratio 1, no baselines — exercises the image decoders; skips the
 unopenable+password files).
 Bugs the corpus caught (all fixed, all with inline-fixture regression
@@ -1419,7 +1419,7 @@ reads phantom `modified`s. Remote applies join the undo stack (byte
 prefixes can't skip revisions) — undoing past one reverts it locally
 and re-broadcasts the revert; documented, deliberate. Tests:
 pdf_document/test/annotation_sync_test.dart (17),
-pdf_flutter/test/editing_sync_test.dart (9 — incl. two piped
+pdf_editor/test/editing_sync_test.dart (9 — incl. two piped
 controllers converging both ways). Remaining trax gaps: per-annotation
 read-only enforcement (host predicate + /F readOnly), hide-all
 annotations viewer toggle.
@@ -1457,3 +1457,28 @@ visibility/visibility_off toggle wired into viewer + thumbnails.
 Tests: annotation_metadata_test +1 (flags round-trip),
 editing_readonly_test.dart (7), annotations_visibility_test.dart (6).
 The trax-replacement gap list is now empty.
+Publishing round (Ben: pub.dev hosting + web demo): the Flutter package
+is now **pdf_editor** (pub.dev already had a `pdf_flutter`; Ben picked
+the name) — directory, lib entry, and every reference renamed
+(mechanical sed; suites re-ran green). All five packages are
+publish-ready: Apache-2.0 LICENSE at root + copied per package,
+CHANGELOG.md + README.md per package, pubspecs carry repository
+(tree/main/packages/<pkg>), issue_tracker, and topics; `publish_to:
+none` removed everywhere except the example. `false_secrets` allowlists
+the deliberate test keys (pdf_cos /test/pki_test.dart, pdf_test_fixtures
+/lib/src/signer_identity.dart) — pub's secret scanner blocks publish
+otherwise. dump_charproc.dart moved pdf_cos→pdf_document tool/ (it
+imports pdf_document; publish validation rejects undeclared imports —
+also killed the long-standing analyzer info). All 5 dry-runs pass with
+only the dirty-git warning; archives 63–500KB. First-publish order
+(hosted constraints must resolve): pdf_cos → pdf_test_fixtures →
+pdf_document → pdf_graphics → pdf_editor; repo must be PUBLIC first so
+pub.dev verifies the repository links; publishing is Ben's manual step
+(needs his pub.dev auth). pdf_test_fixtures publishes too — it's a dev
+dep of the others, and pana resolves dev deps, so leaving it private
+would tank scores. Web demo: Firebase project `dart-pdf-demo` (Ben's
+account), hosting serves example/build/web at
+https://dart-pdf-demo.web.app (firebase.json + .firebaserc in example/;
+no immutable cache headers — main.dart.js isn't content-hashed);
+redeploy = build web --release + firebase deploy --only hosting.
+Text reflow (#128) is deferred on the roadmap at Ben's request.

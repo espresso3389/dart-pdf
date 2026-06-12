@@ -1,9 +1,15 @@
 name: pdf_graphics
 description: >-
-  PDF content-stream parsing, and (coming) the interpreter, device interface,
-  and font engine. Pure Dart, builds on pdf_cos.
+  PDF content interpreter, device interface, font engine, shadings, ICC color,
+  and text extraction — render pages to any device. Pure Dart, web-ready.
 version: 0.1.0
-publish_to: none
+repository: https://github.com/ben-milanko/dart-pdf/tree/main/packages/pdf_graphics
+issue_tracker: https://github.com/ben-milanko/dart-pdf/issues
+topics:
+  - pdf
+  - rendering
+  - fonts
+  - text-extraction
 resolution: workspace
 
 environment:

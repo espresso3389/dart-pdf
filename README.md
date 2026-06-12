@@ -15,19 +15,27 @@ and digital-signature-safe editing — built natively for Flutter.
 > viewer with deep-zoom detail rendering, text selection, search, and
 > rotated-page support, annotation authoring and flattening, AcroForm
 > filling, page manipulation, digital signatures with trust-store chain
-> validation, and content editing. Current frontier: the editing UI.
+> validation, and content editing — plus the full editing UI: tools,
+> panels, forms, touch/stylus input, theming, and a sync surface for
+> collaborative annotation stores.
+
+**Live demo:** <https://dart-pdf-demo.web.app> — the example app running
+on Flutter web, opening onto a six-page feature showcase. Drop in your
+own PDF with the open button.
 
 ## Architecture
 
-Strictly layered packages; `dart:ui` is only allowed in `pdf_flutter`, so the
-core runs on servers and in plain Dart tests.
+Strictly layered packages; `dart:ui` is only allowed in `pdf_editor`, so the
+core runs on servers and in plain Dart tests. Each package is published
+on pub.dev under its directory name.
 
 | Package | Role |
 |---|---|
-| `packages/pdf_cos` | The PDF file format itself: tokenizer, parser, filters, cross-reference machinery, serializer. |
-| `packages/pdf_document` | Document semantics: page tree, inherited attributes, info, (later) annotations and forms. |
-| `packages/pdf_graphics` | Content-stream parsing and (later) the interpreter + device interface and font engine. |
-| `packages/pdf_flutter` | Canvas-backed rendering device and viewer widgets. |
+| [`pdf_cos`](packages/pdf_cos) | The PDF file format itself: tokenizer, parser, filters (incl. CCITT/JBIG2/JPX), encryption, cross-reference machinery, serializer, crypto primitives. |
+| [`pdf_document`](packages/pdf_document) | Document semantics: page tree, annotations, AcroForm, digital signatures, and the incremental-save `PdfEditor`. |
+| [`pdf_graphics`](packages/pdf_graphics) | Content-stream interpreter, device interface, font engine, ICC color, text extraction. |
+| [`pdf_editor`](packages/pdf_editor) | Flutter viewer and editing UI: canvas device, `PdfViewer`, tools, panels, forms. |
+| [`pdf_test_fixtures`](packages/pdf_test_fixtures) | Programmatic, structurally-correct PDF builders for tests. |
 
 ## Roadmap
 
@@ -80,7 +88,7 @@ and real ICC color management all landed. Invisible text (the OCR
 layer of scanned documents) flows through extraction, so selection and
 search work on scans.
 
-The editing UI shipped with `pdf_flutter`: a `PdfEditingController`
+The editing UI shipped with `pdf_editor`: a `PdfEditingController`
 (edit session with zero-cost undo/redo — incremental updates make every
 revision a byte prefix of the next, so undo is just a shorter view of
 the same buffer), tool overlays on every page (text markup from the
@@ -377,9 +385,33 @@ rows (none / palette / custom color) set the defaults new boxes are
 created with — persisted with the other preferences — and restyle the
 selected box in place; the border's weight follows the stroke-width
 slider. Still
-open: richer text editing (reflow),
-RSASSA-PSS signatures, JBIG2 Huffman/refinement variants, and JPX
-subsampling/PCRL-CPRL progressions.
+open, deliberately deferred on the roadmap: richer text editing
+(paragraph/reading-order inference and reflow), RSASSA-PSS signatures,
+JBIG2 Huffman/refinement variants, and JPX subsampling/PCRL-CPRL
+progressions.
+
+## Publishing
+
+The packages publish to pub.dev straight from the workspace. First-time
+publishes must go in dependency order so every hosted constraint
+resolves:
+
+```sh
+cd packages/pdf_cos           && dart pub publish
+cd packages/pdf_test_fixtures && dart pub publish
+cd packages/pdf_document      && dart pub publish
+cd packages/pdf_graphics      && dart pub publish
+cd packages/pdf_editor        && dart pub publish
+```
+
+The repo must be public before publishing so pub.dev can verify the
+`repository:` links. The web demo redeploys with:
+
+```sh
+cd packages/pdf_editor/example
+fvm flutter build web --release
+firebase deploy --only hosting   # → https://dart-pdf-demo.web.app
+```
 
 ## Development
 
@@ -391,7 +423,7 @@ fvm dart analyze
 cd packages/pdf_cos && fvm dart test
 ```
 
-The example app (`packages/pdf_flutter/example`) runs on all six Flutter
+The example app (`packages/pdf_editor/example`) runs on all six Flutter
 platforms — macOS, iOS, Android, web, Windows, Linux — with
 platform-native file handling: the system picker to open, and a save
 dialog, browser download, or share sheet to save, whichever the platform
@@ -419,7 +451,7 @@ compression. Two layers run over it:
 
 - `pdf_graphics/test/ghent_corpus_test.dart` interprets every page on
   the plain Dart VM (parse + paint-op assertions, no rasterization).
-- `pdf_flutter/test/ghent_render_test.dart` rasterizes every page and
+- `pdf_editor/test/ghent_render_test.dart` rasterizes every page and
   compares it pixel-wise against checked-in baseline renders;
   regressions dump actual/diff images for inspection, and
   `GHENT_UPDATE=1` re-baselines after an intentional change.
@@ -434,5 +466,5 @@ which files open, which fail with a controlled exception, which need
 passwords, and which legitimately render blank (see the README in the
 corpus directory for provenance and per-file notes). Two layers again:
 `pdf_graphics/test/pdfjs_corpus_test.dart` (pure-Dart open + interpret)
-and `pdf_flutter/test/pdfjs_render_test.dart` (rasterization smoke over
+and `pdf_editor/test/pdfjs_render_test.dart` (rasterization smoke over
 the real decode pipeline, no baselines).

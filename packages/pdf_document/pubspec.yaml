@@ -1,9 +1,15 @@
 name: pdf_document
 description: >-
-  Document-level PDF semantics: page tree, inherited attributes, metadata.
-  Pure Dart, builds on pdf_cos.
+  Document-level PDF semantics: page tree, annotations, AcroForm filling,
+  digital signatures, and an incremental-save editor. Pure Dart, web-ready.
 version: 0.1.0
-publish_to: none
+repository: https://github.com/ben-milanko/dart-pdf/tree/main/packages/pdf_document
+issue_tracker: https://github.com/ben-milanko/dart-pdf/issues
+topics:
+  - pdf
+  - annotations
+  - forms
+  - digital-signatures
 resolution: workspace
 
 environment:

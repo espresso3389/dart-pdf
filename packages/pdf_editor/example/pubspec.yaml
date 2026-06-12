@@ -1,0 +1,26 @@
+name: pdf_viewer_example
+description: Example PDF viewer built on pdf_editor.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.5.0
+  flutter: '>=3.24.0'
+
+dependencies:
+  file_selector: ^1.0.3
+  flutter:
+    sdk: flutter
+  pdf_document: ^0.1.0
+  pdf_editor: ^0.1.0
+  share_plus: ^13.1.0
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+  flutter_test:
+    sdk: flutter
+  shared_preferences: ^2.3.0
+
+flutter:
+  uses-material-design: true

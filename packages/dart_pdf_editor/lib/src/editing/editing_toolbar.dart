@@ -295,6 +295,11 @@ class PdfEditingToolbar extends StatelessWidget {
                     'Rectangle'),
                 toolButton(
                     PdfEditTool.ellipse, Icons.circle_outlined, 'Ellipse'),
+                toolButton(PdfEditTool.line, Icons.horizontal_rule, 'Line'),
+                toolButton(PdfEditTool.arrow, Icons.arrow_right_alt, 'Arrow'),
+                toolButton(PdfEditTool.polyline, Icons.timeline, 'Polyline'),
+                toolButton(
+                    PdfEditTool.polygon, Icons.change_history, 'Polygon'),
                 toolButton(PdfEditTool.freeText, Icons.text_fields, 'Text box'),
                 toolButton(
                     PdfEditTool.note, Icons.sticky_note_2_outlined, 'Note'),
@@ -671,6 +676,15 @@ class _StyleMenuState extends State<_StyleMenu> {
                       setState(() => _draggingOpacity = null);
                     },
                   ),
+                  if (!restylingAnnotation)
+                    SwitchListTile(
+                      key: const ValueKey('pdf-dashed-stroke'),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Dashed line'),
+                      value: controller.dashedStroke,
+                      onChanged: (value) => controller.dashedStroke = value,
+                    ),
                   _slider(
                     label: 'Font size',
                     value: _draggingFontSize ??

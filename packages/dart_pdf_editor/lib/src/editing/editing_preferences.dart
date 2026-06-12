@@ -49,6 +49,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   double _fontSize = 14;
   PdfStandardFont _fontFamily = PdfStandardFont.helvetica;
   double _opacity = 1;
+  bool _dashedStroke = false;
   bool _fingerDrawsInk = true;
   bool _showThumbnailSidebar = true;
   bool _hasShowThumbnailSidebarPreference = false;
@@ -92,6 +93,7 @@ class PdfEditingPreferences extends ChangeNotifier {
             PdfStandardFont.values.asNameMap()[fontFamily] ?? _fontFamily;
       }
       _opacity = store.getDouble('${_prefix}opacity') ?? _opacity;
+      _dashedStroke = store.getBool('${_prefix}dashedStroke') ?? _dashedStroke;
       _fingerDrawsInk =
           store.getBool('${_prefix}fingerDrawsInk') ?? _fingerDrawsInk;
       const thumbnailSidebarKey = '${_prefix}showThumbnailSidebar';
@@ -223,6 +225,16 @@ class PdfEditingPreferences extends ChangeNotifier {
     if (value == _opacity) return;
     _opacity = value;
     _write((s) => s.setDouble('${_prefix}opacity', value));
+    notifyListeners();
+  }
+
+  /// Whether new line-family annotations use a dashed border style.
+  bool get dashedStroke => _dashedStroke;
+
+  set dashedStroke(bool value) {
+    if (value == _dashedStroke) return;
+    _dashedStroke = value;
+    _write((s) => s.setBool('${_prefix}dashedStroke', value));
     notifyListeners();
   }
 

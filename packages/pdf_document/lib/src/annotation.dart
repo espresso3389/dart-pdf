@@ -23,8 +23,7 @@ class PdfAnnotation {
     final cos = document.cos;
     final subtypeName = cos.resolve(dict['Subtype']);
     final subtype = subtypeName is CosName ? subtypeName.value : '';
-    final rect =
-        pdfRectFrom(cos, dict['Rect']) ?? const PdfRect(0, 0, 0, 0);
+    final rect = pdfRectFrom(cos, dict['Rect']) ?? const PdfRect(0, 0, 0, 0);
     final f = cos.resolve(dict['F']);
     final flags = f is CosInteger ? f.value : 0;
 
@@ -129,6 +128,49 @@ class PdfAnnotation {
     return w is CosReal ? w.value : null;
   }
 
+  /// The /BS dash array, or null for solid or malformed borders.
+  List<double>? get borderDash {
+    final bs = document.cos.resolve(dict['BS']);
+    if (bs is! CosDictionary) return null;
+    final d = document.cos.resolve(bs['D']);
+    if (d is! CosArray) return null;
+    final values = <double>[];
+    for (final item in d.items) {
+      final n = _number(document.cos.resolve(item));
+      if (n == null || n < 0) return null;
+      values.add(n);
+    }
+    return values.any((value) => value > 0) ? values : null;
+  }
+
+  /// The endpoints of a /Line annotation, page space.
+  ((double, double), (double, double))? get line {
+    if (subtype != 'Line') return null;
+    final l = document.cos.resolve(dict['L']);
+    if (l is! CosArray || l.length < 4) return null;
+    final x1 = _number(document.cos.resolve(l[0]));
+    final y1 = _number(document.cos.resolve(l[1]));
+    final x2 = _number(document.cos.resolve(l[2]));
+    final y2 = _number(document.cos.resolve(l[3]));
+    if (x1 == null || y1 == null || x2 == null || y2 == null) return null;
+    return ((x1, y1), (x2, y2));
+  }
+
+  /// The vertices of a /PolyLine or /Polygon annotation, page space.
+  List<(double, double)>? get vertices {
+    if (subtype != 'PolyLine' && subtype != 'Polygon') return null;
+    final raw = document.cos.resolve(dict['Vertices']);
+    if (raw is! CosArray) return null;
+    final points = <(double, double)>[];
+    for (var i = 0; i + 1 < raw.items.length; i += 2) {
+      final x = _number(document.cos.resolve(raw.items[i]));
+      final y = _number(document.cos.resolve(raw.items[i + 1]));
+      if (x == null || y == null) return null;
+      points.add((x, y));
+    }
+    return points;
+  }
+
   static double? _number(CosObject? value) => switch (value) {
         CosInteger(:final value) => value.toDouble(),
         CosReal(:final value) => value,
@@ -185,9 +227,8 @@ class PdfAnnotation {
   PdfFreeTextStyle? get freeTextStyle {
     if (subtype != 'FreeText') return null;
     final da = defaultAppearance;
-    final tf = da == null
-        ? null
-        : RegExp(r'/(\S+)\s+([\d.]+)\s+Tf').firstMatch(da);
+    final tf =
+        da == null ? null : RegExp(r'/(\S+)\s+([\d.]+)\s+Tf').firstMatch(da);
     final size = double.tryParse(tf?.group(2) ?? '');
     if (tf == null || size == null) return null;
 
@@ -206,8 +247,8 @@ class PdfAnnotation {
     int? gray() {
       final m = RegExp(r'([\d.]+)\s+g\b').allMatches(da!).lastOrNull;
       if (m == null) return null;
-      final v = ((double.tryParse(m.group(1)!) ?? 0).clamp(0.0, 1.0) * 255)
-          .round();
+      final v =
+          ((double.tryParse(m.group(1)!) ?? 0).clamp(0.0, 1.0) * 255).round();
       return (v << 16) | (v << 8) | v;
     }
 
@@ -604,8 +645,12 @@ class PdfDestination {
   static PdfDestination? parse(PdfDocument document, CosObject? raw) {
     final cos = document.cos;
     var value = cos.resolve(raw);
-    if (value is CosName) value = cos.resolve(_lookupNamed(document, value.value));
-    if (value is CosString) value = cos.resolve(_lookupNamed(document, value.text));
+    if (value is CosName) {
+      value = cos.resolve(_lookupNamed(document, value.value));
+    }
+    if (value is CosString) {
+      value = cos.resolve(_lookupNamed(document, value.text));
+    }
     if (value is CosDictionary) value = cos.resolve(value['D']);
     if (value is! CosArray || value.length == 0) return null;
 

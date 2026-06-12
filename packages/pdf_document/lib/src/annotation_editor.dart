@@ -33,6 +33,16 @@ List<((double, double), (double, double))> pdfInkCurveControls(
   ];
 }
 
+/// Line ending styles supported by [PdfEditor.addLine].
+enum PdfLineEnding {
+  none('None'),
+  closedArrow('ClosedArrow');
+
+  const PdfLineEnding(this.pdfName);
+
+  final String pdfName;
+}
+
 /// Slices ink [strokes] with one stamp of a circular eraser swept from
 /// [from] to [to] (a capsule of [radius]): every part of a stroke's
 /// centerline within [radius] of that segment is removed, splitting
@@ -82,8 +92,8 @@ List<((double, double), (double, double))> pdfInkCurveControls(
     // at most one erased t-interval per segment (a capsule is convex)
     List<(double, double)?>? intervals;
     for (var i = 0; i + 1 < stroke.length; i++) {
-      final interval = _capsuleInterval(stroke[i], stroke[i + 1], from, to,
-          radius,
+      final interval = _capsuleInterval(
+          stroke[i], stroke[i + 1], from, to, radius,
           boundsLeft: boundsLeft,
           boundsRight: boundsRight,
           boundsBottom: boundsBottom,
@@ -232,9 +242,9 @@ double _distanceToSegment(
 /// should check before offering to restyle a selection.
 ///
 /// True for the subtypes the editor authors (shapes, ink, free text,
-/// the four text markups, notes, stamps) when the dictionary carries
+/// line-family annotations, the four text markups, notes, stamps) when the dictionary carries
 /// enough style to rebuild the artwork: shapes must not be cloudy
-/// (/BE) or dashed (/BS /D), free text needs a standard-font /DA, ink
+/// (/BE) or dashed (/BS /D), lines need /L or /Vertices, free text needs a standard-font /DA, ink
 /// needs a usable /InkList, markups need axis-aligned /QuadPoints,
 /// stamps need their caption in /Contents.
 bool pdfCanRestyleAnnotation(PdfAnnotation annotation) {
@@ -245,6 +255,14 @@ bool pdfCanRestyleAnnotation(PdfAnnotation annotation) {
       if (annotation.dict['BE'] != null) return false;
       final bs = cos.resolve(annotation.dict['BS']);
       return bs is! CosDictionary || bs['D'] == null;
+    case 'Line':
+      return annotation.normalAppearance != null && annotation.line != null;
+    case 'PolyLine':
+      return annotation.normalAppearance != null &&
+          (annotation.vertices?.length ?? 0) >= 2;
+    case 'Polygon':
+      return annotation.normalAppearance != null &&
+          (annotation.vertices?.length ?? 0) >= 3;
     case 'FreeText':
       if (annotation.normalAppearance == null) return false;
       final style = annotation.freeTextStyle;
@@ -350,9 +368,8 @@ extension PdfAnnotationEditing on PdfEditor {
     String? author,
     String? name,
   }) =>
-      _addTextMarkup(
-          'Highlight', pageIndex, quads, color, opacity, contents, author,
-          name);
+      _addTextMarkup('Highlight', pageIndex, quads, color, opacity, contents,
+          author, name);
 
   /// Adds an underline beneath each quad in [quads].
   void addUnderline(int pageIndex, List<PdfRect> quads,
@@ -361,8 +378,8 @@ extension PdfAnnotationEditing on PdfEditor {
           String? contents,
           String? author,
           String? name}) =>
-      _addTextMarkup(
-          'Underline', pageIndex, quads, color, opacity, contents, author, name);
+      _addTextMarkup('Underline', pageIndex, quads, color, opacity, contents,
+          author, name);
 
   /// Adds a strike-out through each quad in [quads].
   void addStrikeOut(int pageIndex, List<PdfRect> quads,
@@ -371,8 +388,8 @@ extension PdfAnnotationEditing on PdfEditor {
           String? contents,
           String? author,
           String? name}) =>
-      _addTextMarkup(
-          'StrikeOut', pageIndex, quads, color, opacity, contents, author, name);
+      _addTextMarkup('StrikeOut', pageIndex, quads, color, opacity, contents,
+          author, name);
 
   /// Adds a squiggly (jagged) underline beneath each quad in [quads].
   void addSquiggly(int pageIndex, List<PdfRect> quads,
@@ -384,8 +401,14 @@ extension PdfAnnotationEditing on PdfEditor {
       _addTextMarkup(
           'Squiggly', pageIndex, quads, color, opacity, contents, author, name);
 
-  void _addTextMarkup(String subtype, int pageIndex, List<PdfRect> quads,
-      int color, double opacity, String? contents, String? author,
+  void _addTextMarkup(
+      String subtype,
+      int pageIndex,
+      List<PdfRect> quads,
+      int color,
+      double opacity,
+      String? contents,
+      String? author,
       String? name) {
     final rect = _boundsOf(quads);
     final (w, gs) = _markupContent(subtype, quads, color, opacity);
@@ -616,9 +639,8 @@ extension PdfAnnotationEditing on PdfEditor {
     if (strokes == null || strokes.isEmpty) return false;
     final form = annotation.normalAppearance;
     final strokeWidth = annotation.borderWidth ?? 1;
-    var pressures = form == null
-        ? null
-        : _recoverInkPressures(form, strokes, strokeWidth);
+    var pressures =
+        form == null ? null : _recoverInkPressures(form, strokes, strokeWidth);
     final capsules = path.length == 1
         ? [(path[0], path[0])]
         : [for (var i = 0; i + 1 < path.length; i++) (path[i], path[i + 1])];
@@ -761,6 +783,127 @@ extension PdfAnnotationEditing on PdfEditor {
       _addShape('Circle', pageIndex, rect, strokeColor, strokeWidth, fillColor,
           opacity, contents, author, name);
 
+  /// Adds a straight /Line annotation from [start] to [end]. Set
+  /// [endEnding] to [PdfLineEnding.closedArrow] for a standard arrow.
+  void addLine(
+    int pageIndex,
+    (double, double) start,
+    (double, double) end, {
+    int strokeColor = 0xD02020,
+    double strokeWidth = 2,
+    double opacity = 1,
+    bool dashed = false,
+    PdfLineEnding startEnding = PdfLineEnding.none,
+    PdfLineEnding endEnding = PdfLineEnding.none,
+    String? contents,
+    String? author,
+    String? name,
+  }) {
+    if (start == end) {
+      throw ArgumentError.value(end, 'end', 'must differ from start');
+    }
+    final points = [start, end];
+    final arrowPoints = <(double, double)>[
+      if (startEnding == PdfLineEnding.closedArrow)
+        ..._arrowHead(start, end, strokeWidth),
+      if (endEnding == PdfLineEnding.closedArrow)
+        ..._arrowHead(end, start, strokeWidth),
+    ];
+    final rect = _pointBounds(
+        [...points, ...arrowPoints], strokeWidth + (dashed ? strokeWidth : 0));
+    final gs = _alphaState(opacity);
+    final w = _lineContent(points,
+        strokeColor: strokeColor,
+        strokeWidth: strokeWidth,
+        dashed: dashed,
+        closed: false,
+        fillColor: null,
+        startEnding: startEnding,
+        endEnding: endEnding,
+        hasAlpha: gs != null);
+    final dict = _markupDict('Line', rect, strokeColor, contents, author)
+      ..['L'] = CosArray([
+        CosReal(start.$1),
+        CosReal(start.$2),
+        CosReal(end.$1),
+        CosReal(end.$2),
+      ])
+      ..['LE'] = CosArray([
+        CosName(startEnding.pdfName),
+        CosName(endEnding.pdfName),
+      ])
+      ..['BS'] = _borderStyle(strokeWidth, dashed: dashed);
+    _addAnnotation(
+        pageIndex, dict, _form(rect, w, resources: _resources(extGState: gs)),
+        name: name);
+  }
+
+  /// Adds a /PolyLine annotation through [vertices].
+  void addPolyLine(
+    int pageIndex,
+    List<(double, double)> vertices, {
+    int strokeColor = 0xD02020,
+    double strokeWidth = 2,
+    double opacity = 1,
+    bool dashed = false,
+    String? contents,
+    String? author,
+    String? name,
+  }) {
+    if (vertices.length < 2) {
+      throw ArgumentError.value(vertices, 'vertices', 'must have 2+ points');
+    }
+    final rect = _pointBounds(vertices, strokeWidth);
+    final gs = _alphaState(opacity);
+    final w = _lineContent(vertices,
+        strokeColor: strokeColor,
+        strokeWidth: strokeWidth,
+        dashed: dashed,
+        closed: false,
+        fillColor: null,
+        hasAlpha: gs != null);
+    final dict = _markupDict('PolyLine', rect, strokeColor, contents, author)
+      ..['Vertices'] = _pointArray(vertices)
+      ..['BS'] = _borderStyle(strokeWidth, dashed: dashed);
+    _addAnnotation(
+        pageIndex, dict, _form(rect, w, resources: _resources(extGState: gs)),
+        name: name);
+  }
+
+  /// Adds a /Polygon annotation through [vertices].
+  void addPolygon(
+    int pageIndex,
+    List<(double, double)> vertices, {
+    int strokeColor = 0xD02020,
+    double strokeWidth = 2,
+    int? fillColor,
+    double opacity = 1,
+    bool dashed = false,
+    String? contents,
+    String? author,
+    String? name,
+  }) {
+    if (vertices.length < 3) {
+      throw ArgumentError.value(vertices, 'vertices', 'must have 3+ points');
+    }
+    final rect = _pointBounds(vertices, strokeWidth);
+    final gs = _alphaState(opacity);
+    final w = _lineContent(vertices,
+        strokeColor: strokeColor,
+        strokeWidth: strokeWidth,
+        dashed: dashed,
+        closed: true,
+        fillColor: fillColor,
+        hasAlpha: gs != null);
+    final dict = _markupDict('Polygon', rect, strokeColor, contents, author)
+      ..['Vertices'] = _pointArray(vertices)
+      ..['BS'] = _borderStyle(strokeWidth, dashed: dashed);
+    if (fillColor != null) dict['IC'] = _colorComponents(fillColor);
+    _addAnnotation(
+        pageIndex, dict, _form(rect, w, resources: _resources(extGState: gs)),
+        name: name);
+  }
+
   /// Adds a free-text annotation: [text] rendered directly on the page in
   /// [font] (12pt Helvetica by default), wrapped to fit [rect] and
   /// clipped to it.
@@ -795,10 +938,9 @@ extension PdfAnnotationEditing on PdfEditor {
     final da = '${rgb(color)} rg '
         '${borderColor != null ? '${rgb(borderColor)} RG ' : ''}'
         '/${font.resourceName} ${ContentWriter.fmt(fontSize)} Tf';
-    final dict =
-        _markupDict('FreeText', rect, fillColor ?? color, text, author)
-          ..['DA'] = CosString.fromText(da)
-          ..['Q'] = const CosInteger(0);
+    final dict = _markupDict('FreeText', rect, fillColor ?? color, text, author)
+      ..['DA'] = CosString.fromText(da)
+      ..['Q'] = const CosInteger(0);
     if (borderColor != null && borderWidth > 0) {
       dict['BS'] = _borderStyle(borderWidth);
     }
@@ -1114,8 +1256,7 @@ extension PdfAnnotationEditing on PdfEditor {
   /// Conforming viewers honor the same bits. The appearance is
   /// untouched; remember that bit 1 (hidden) and bit 3 (print) change
   /// what renders.
-  void setAnnotationFlags(
-      int pageIndex, PdfAnnotation annotation, int flags) {
+  void setAnnotationFlags(int pageIndex, PdfAnnotation annotation, int flags) {
     annotation.dict['F'] = CosInteger(flags);
     _markAnnotationChanged(pageIndex, annotation.dict);
   }
@@ -1298,15 +1439,15 @@ extension PdfAnnotationEditing on PdfEditor {
       // PdfAnnotation parses /Rect once, so rotate a re-wrapped view of
       // the dict instead of the stale [annotation]
       annotation.dict['Rect'] = _rectArray(localTo);
-      rotateAnnotation(pageIndex,
+      rotateAnnotation(
+          pageIndex,
           PdfAnnotation.fromDict(document, annotation.dict),
           theta * 180 / math.pi);
       return;
     }
 
     final form = annotation.normalAppearance;
-    final baked =
-        form == null ? null : _bakedFormMatrix(form, annotation.rect);
+    final baked = form == null ? null : _bakedFormMatrix(form, annotation.rect);
     if (form == null || baked == null) {
       // nothing can be rotated without a matrix-carrying appearance;
       // degrade to a page-space resize of the bounds
@@ -1323,8 +1464,7 @@ extension PdfAnnotationEditing on PdfEditor {
     // scale, back out, recenter — T(-c) · R(-θ) · S · R(θ) · T(c')
     final local = _mulAffine(
       _mulAffine(
-        _mulAffine(
-            [1, 0, 0, 1, -cx, -cy], [cosT, -sinT, sinT, cosT, 0, 0]),
+        _mulAffine([1, 0, 0, 1, -cx, -cy], [cosT, -sinT, sinT, cosT, 0, 0]),
         [sx, 0, 0, sy, 0, 0],
       ),
       _mulAffine([cosT, sinT, -sinT, cosT, 0, 0], [1, 0, 0, 1, tcx, tcy]),
@@ -1363,12 +1503,13 @@ extension PdfAnnotationEditing on PdfEditor {
     return angle.abs() < 0.005 ? 0 : angle;
   }
 
-  /// Regenerates the appearance of a Square, Circle, or FreeText at
+  /// Regenerates the appearance of a Square, Circle, FreeText, Line,
+  /// PolyLine, or Polygon at
   /// [to] from the style its dictionary carries, replacing the /AP /N
   /// stream. Returns false — leaving the caller on the §12.5.5 stretch
   /// path — for other subtypes and for styles it can't reproduce
-  /// faithfully: cloudy (/BE) or dashed (/BS /D) borders, free text
-  /// whose /DA doesn't name a standard font.
+  /// faithfully: cloudy (/BE) shape borders, free text whose /DA doesn't
+  /// name a standard font.
   ///
   /// [opacity], when given, replaces the alpha the old appearance
   /// carried — [restyleAnnotation]'s opacity path.
@@ -1408,9 +1549,77 @@ extension PdfAnnotationEditing on PdfEditor {
         _replaceAppearance(dict, form, to, w,
             resources: _resources(font: _standardFont(font)));
         return true;
+      case 'Line':
+        final line = annotation.line;
+        if (line == null) return false;
+        final from = annotation.rect;
+        final sx = to.width / from.width;
+        final sy = to.height / from.height;
+        (double, double) map((double, double) p) => (
+              to.left + (p.$1 - from.left) * sx,
+              to.bottom + (p.$2 - from.bottom) * sy,
+            );
+        return _regenerateLineLikeAppearance(annotation, to,
+            points: [map(line.$1), map(line.$2)], opacity: opacity);
+      case 'PolyLine' || 'Polygon':
+        final vertices = annotation.vertices;
+        if (vertices == null || vertices.isEmpty) return false;
+        final from = annotation.rect;
+        final sx = to.width / from.width;
+        final sy = to.height / from.height;
+        final mapped = [
+          for (final (x, y) in vertices)
+            (to.left + (x - from.left) * sx, to.bottom + (y - from.bottom) * sy)
+        ];
+        return _regenerateLineLikeAppearance(annotation, to,
+            points: mapped, opacity: opacity);
       default:
         return false;
     }
+  }
+
+  bool _regenerateLineLikeAppearance(PdfAnnotation annotation, PdfRect rect,
+      {required List<(double, double)> points, double? opacity}) {
+    final form = annotation.normalAppearance;
+    if (form == null) return false;
+    final width = annotation.borderWidth ?? 1;
+    final stroke = annotation.color;
+    if (stroke == null || width <= 0) return false;
+    final dashed = annotation.borderDash != null;
+    final fill =
+        annotation.subtype == 'Polygon' ? annotation.interiorColor : null;
+    final endings = _lineEndings(annotation);
+    final gs = _alphaState(opacity ?? _appearanceOpacity(form));
+    final w = _lineContent(points,
+        strokeColor: stroke,
+        strokeWidth: width,
+        dashed: dashed,
+        closed: annotation.subtype == 'Polygon',
+        fillColor: fill,
+        startEnding: endings.$1,
+        endEnding: endings.$2,
+        hasAlpha: gs != null);
+    _replaceAppearance(annotation.dict, form, rect, w,
+        resources: _resources(extGState: gs));
+    return true;
+  }
+
+  (PdfLineEnding, PdfLineEnding) _lineEndings(PdfAnnotation annotation) {
+    if (annotation.subtype != 'Line') {
+      return (PdfLineEnding.none, PdfLineEnding.none);
+    }
+    final le = document.cos.resolve(annotation.dict['LE']);
+    PdfLineEnding read(int index) {
+      if (le is! CosArray || le.length <= index) return PdfLineEnding.none;
+      final name = document.cos.resolve(le[index]);
+      if (name is! CosName) return PdfLineEnding.none;
+      return PdfLineEnding.values.firstWhere(
+        (ending) => ending.pdfName == name.value,
+        orElse: () => PdfLineEnding.none,
+      );
+    }
+
+    return (read(0), read(1));
   }
 
   /// Restyles [annotation] in place: new colors, stroke width, or
@@ -1473,8 +1682,8 @@ extension PdfAnnotationEditing on PdfEditor {
               resources: _resources(extGState: gs));
         } else {
           dict['AP'] = CosDictionary({
-            'N': _updater
-                .addObject(_form(rect, w, resources: _resources(extGState: gs))),
+            'N': _updater.addObject(
+                _form(rect, w, resources: _resources(extGState: gs))),
           });
         }
         _markAnnotationChanged(pageIndex, dict);
@@ -1495,8 +1704,8 @@ extension PdfAnnotationEditing on PdfEditor {
               resources: _resources(extGState: gs));
         } else {
           dict['AP'] = CosDictionary({
-            'N': _updater
-                .addObject(_form(rect, w, resources: _resources(extGState: gs))),
+            'N': _updater.addObject(
+                _form(rect, w, resources: _resources(extGState: gs))),
           });
         }
         _markAnnotationChanged(pageIndex, dict);
@@ -1513,6 +1722,23 @@ extension PdfAnnotationEditing on PdfEditor {
           dict['IC'] = _colorComponents(fill);
         } else {
           dict.entries.remove('IC');
+        }
+        return _restyleRegenerate(pageIndex, dict, opacity: opacity);
+      case 'Line' || 'PolyLine' || 'Polygon':
+        final width = strokeWidth ?? annotation.borderWidth ?? 1;
+        final stroke = color ?? annotation.color;
+        if (stroke == null || width <= 0) return false;
+        final dashed = annotation.borderDash != null;
+        dict['C'] = _colorComponents(stroke);
+        dict['BS'] = _borderStyle(width, dashed: dashed);
+        if (annotation.subtype == 'Polygon') {
+          final fill =
+              fillColor != null ? fillColor.$1 : annotation.interiorColor;
+          if (fill != null) {
+            dict['IC'] = _colorComponents(fill);
+          } else {
+            dict.entries.remove('IC');
+          }
         }
         return _restyleRegenerate(pageIndex, dict, opacity: opacity);
       case 'FreeText':
@@ -1586,7 +1812,12 @@ extension PdfAnnotationEditing on PdfEditor {
   bool _regenerateStyledAppearance(PdfAnnotation annotation, PdfRect to,
       {double? opacity}) {
     switch (annotation.subtype) {
-      case 'Square' || 'Circle' || 'FreeText':
+      case 'Square' ||
+            'Circle' ||
+            'FreeText' ||
+            'Line' ||
+            'PolyLine' ||
+            'Polygon':
         return _regenerateResizedAppearance(annotation, to, opacity: opacity);
       case 'Stamp':
         final form = annotation.normalAppearance;
@@ -1775,8 +2006,7 @@ extension PdfAnnotationEditing on PdfEditor {
 
   /// [flattenAnnotations] restricted to annotations matching [select]
   /// (used by [PdfFormAdmin.flattenForm] to take widgets only).
-  void _flattenAnnotations(
-      int pageIndex, bool Function(PdfAnnotation) select) {
+  void _flattenAnnotations(int pageIndex, bool Function(PdfAnnotation) select) {
     final cos = document.cos;
     final page = document.page(pageIndex);
 
@@ -1973,6 +2203,95 @@ extension PdfAnnotationEditing on PdfEditor {
     return w;
   }
 
+  ContentWriter _lineContent(
+    List<(double, double)> points, {
+    required int strokeColor,
+    required double strokeWidth,
+    required bool dashed,
+    required bool closed,
+    required int? fillColor,
+    PdfLineEnding startEnding = PdfLineEnding.none,
+    PdfLineEnding endEnding = PdfLineEnding.none,
+    required bool hasAlpha,
+  }) {
+    final w = ContentWriter();
+    if (hasAlpha) w.extGState('GS0');
+    if (fillColor != null) w.fillColor(fillColor);
+    w
+      ..strokeColor(strokeColor)
+      ..lineWidth(strokeWidth)
+      ..lineCap(0)
+      ..lineJoin(1);
+    if (dashed) w.dash(_dashPattern(strokeWidth));
+    w.moveTo(points.first.$1, points.first.$2);
+    for (final (x, y) in points.skip(1)) {
+      w.lineTo(x, y);
+    }
+    if (closed) w.closePath();
+    if (closed && fillColor != null) {
+      w.fillAndStroke();
+    } else {
+      w.stroke();
+    }
+    if (dashed) w.dash(const []);
+    if (startEnding == PdfLineEnding.closedArrow) {
+      _drawArrowHead(w, points.first, points[1], strokeColor, strokeWidth);
+    }
+    if (endEnding == PdfLineEnding.closedArrow) {
+      _drawArrowHead(
+          w, points.last, points[points.length - 2], strokeColor, strokeWidth);
+    }
+    return w;
+  }
+
+  void _drawArrowHead(ContentWriter w, (double, double) tip,
+      (double, double) from, int color, double strokeWidth) {
+    final head = _arrowHead(tip, from, strokeWidth);
+    w
+      ..fillColor(color)
+      ..moveTo(tip.$1, tip.$2)
+      ..lineTo(head[0].$1, head[0].$2)
+      ..lineTo(head[1].$1, head[1].$2)
+      ..closePath()
+      ..fill();
+  }
+
+  List<(double, double)> _arrowHead(
+      (double, double) tip, (double, double) from, double strokeWidth) {
+    final dx = from.$1 - tip.$1;
+    final dy = from.$2 - tip.$2;
+    final len = math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-9) return [tip, tip];
+    final ux = dx / len, uy = dy / len;
+    final size = math.max(10.0, strokeWidth * 5);
+    final half = size * 0.38;
+    final bx = tip.$1 + ux * size;
+    final by = tip.$2 + uy * size;
+    final px = -uy, py = ux;
+    return [(bx + px * half, by + py * half), (bx - px * half, by - py * half)];
+  }
+
+  List<double> _dashPattern(double strokeWidth) =>
+      [math.max(2, strokeWidth * 3), math.max(2, strokeWidth * 2)];
+
+  PdfRect _pointBounds(List<(double, double)> points, double pad) {
+    if (points.isEmpty) {
+      throw ArgumentError.value(points, 'points', 'must be non-empty');
+    }
+    var left = points.first.$1;
+    var right = points.first.$1;
+    var bottom = points.first.$2;
+    var top = points.first.$2;
+    for (final (x, y) in points.skip(1)) {
+      if (x < left) left = x;
+      if (x > right) right = x;
+      if (y < bottom) bottom = y;
+      if (y > top) top = y;
+    }
+    final inset = math.max(1.0, pad / 2 + 1);
+    return PdfRect(left - inset, bottom - inset, right + inset, top + inset);
+  }
+
   /// The common annotation dictionary: /C carries [color], /F sets Print
   /// so the annotation survives printing and flattening.
   CosDictionary _markupDict(String subtype, PdfRect rect, int color,
@@ -2081,17 +2400,29 @@ extension PdfAnnotationEditing on PdfEditor {
         }),
       });
 
-  CosDictionary _borderStyle(double width) => CosDictionary({
-        'Type': const CosName('Border'),
-        'W': CosReal(width),
-        'S': const CosName('S'),
-      });
+  CosDictionary _borderStyle(double width, {bool dashed = false}) {
+    final dict = CosDictionary({
+      'Type': const CosName('Border'),
+      'W': CosReal(width),
+      'S': CosName(dashed ? 'D' : 'S'),
+    });
+    if (dashed) {
+      dict['D'] = CosArray([
+        for (final value in _dashPattern(width)) CosReal(value),
+      ]);
+    }
+    return dict;
+  }
 
   CosArray _rectArray(PdfRect rect) => CosArray([
         CosReal(rect.left),
         CosReal(rect.bottom),
         CosReal(rect.right),
         CosReal(rect.top),
+      ]);
+
+  CosArray _pointArray(List<(double, double)> points) => CosArray([
+        for (final (x, y) in points) ...[CosReal(x), CosReal(y)],
       ]);
 
   /// QuadPoints in the order real-world writers use (upper-left,

@@ -35,6 +35,18 @@ enum PdfEditTool {
   /// Drag out an ellipse (/Circle) annotation.
   ellipse,
 
+  /// Drag a straight line (/Line) annotation.
+  line,
+
+  /// Drag a straight line with a closed arrow ending (/Line /LE).
+  arrow,
+
+  /// Drag to create a sampled multi-segment /PolyLine annotation.
+  polyline,
+
+  /// Drag to create a sampled closed /Polygon annotation.
+  polygon,
+
   /// Drag out a box, then type the text shown inside it (/FreeText).
   freeText,
 
@@ -434,6 +446,10 @@ class PdfEditingController extends ChangeNotifier {
 
   set opacity(double value) => preferences.opacity = value;
 
+  bool get dashedStroke => preferences.dashedStroke;
+
+  set dashedStroke(bool value) => preferences.dashedStroke = value;
+
   /// The background fill new text boxes get, or null for none (the
   /// default — a bare text box, like before). Persisted.
   Color? get textFillColor => preferences.textFillColor;
@@ -736,6 +752,36 @@ class PdfEditingController extends ChangeNotifier {
           author: author),
       pages: [pageIndex]);
 
+  void addLine(int pageIndex, (double, double) start, (double, double) end,
+          {bool arrow = false}) =>
+      apply(
+          (e) => e.addLine(pageIndex, start, end,
+              strokeColor: _colorValue,
+              strokeWidth: preferences.strokeWidth,
+              opacity: preferences.opacity,
+              dashed: preferences.dashedStroke,
+              endEnding: arrow ? PdfLineEnding.closedArrow : PdfLineEnding.none,
+              author: author),
+          pages: [pageIndex]);
+
+  void addPolyLine(int pageIndex, List<(double, double)> points) => apply(
+      (e) => e.addPolyLine(pageIndex, points,
+          strokeColor: _colorValue,
+          strokeWidth: preferences.strokeWidth,
+          opacity: preferences.opacity,
+          dashed: preferences.dashedStroke,
+          author: author),
+      pages: [pageIndex]);
+
+  void addPolygon(int pageIndex, List<(double, double)> points) => apply(
+      (e) => e.addPolygon(pageIndex, points,
+          strokeColor: _colorValue,
+          strokeWidth: preferences.strokeWidth,
+          opacity: preferences.opacity,
+          dashed: preferences.dashedStroke,
+          author: author),
+      pages: [pageIndex]);
+
   void addFreeText(int pageIndex, PdfRect rect, String text) => apply(
       (e) => e.addFreeText(pageIndex, rect, text,
           fontSize: preferences.fontSize,
@@ -925,7 +971,16 @@ class PdfEditingController extends ChangeNotifier {
 
   /// Subtypes whose geometry is defined by /Rect (plus point arrays the
   /// editor rescales), so resizing keeps them consistent everywhere.
-  static const _resizable = {'Square', 'Circle', 'FreeText', 'Stamp', 'Ink'};
+  static const _resizable = {
+    'Square',
+    'Circle',
+    'FreeText',
+    'Stamp',
+    'Ink',
+    'Line',
+    'PolyLine',
+    'Polygon',
+  };
 
   /// Subtypes whose text the controller can rewrite in place.
   static const _textEditable = {'FreeText', 'Stamp', 'Text'};

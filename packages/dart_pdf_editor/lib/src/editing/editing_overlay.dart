@@ -138,6 +138,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   // shape/text/stamp drag
   Offset? _dragStart;
   Offset? _dragCurrent;
+  List<Offset>? _polyPoints;
+  Offset? _polyHover;
+  Offset? _polyDoubleTapPosition;
 
   // eyedropper: one page raster serves every preview sample
   PdfPageColorSampler? _sampler;
@@ -256,6 +259,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   double _afterGhostLocalAngle = 0;
   ({Rect rect, PdfEditTool tool, Color color, double strokeWidth})? _afterShape;
   ({
+    List<Offset> points,
+    PdfEditTool tool,
+    Color color,
+    double strokeWidth,
+    bool dashed,
+  })? _afterPath;
+  ({
     Rect rect,
     String text,
     PdfStandardFont font,
@@ -329,6 +339,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           : null;
 
   bool get _drawTool => _tool == PdfEditTool.ink || _tool == PdfEditTool.eraser;
+  bool get _polyTool =>
+      _tool == PdfEditTool.polyline || _tool == PdfEditTool.polygon;
 
   /// Whether a pointer of [kind] draws (or erases) through the raw
   /// event stream instead of the gesture arena. Pan recognizers only
@@ -641,6 +653,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterGhostRotation = 0;
     _afterGhostLocalAngle = 0;
     _afterShape = null;
+    _afterPath = null;
     _afterText = null;
     _afterSignature = null;
     _afterEraseRects = null;
@@ -1041,6 +1054,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         });
       case PdfEditTool.rectangle ||
             PdfEditTool.ellipse ||
+            PdfEditTool.line ||
+            PdfEditTool.arrow ||
             PdfEditTool.freeText ||
             PdfEditTool.stamp:
         setState(() {
@@ -1066,6 +1081,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
             _signaturePreview = position;
           });
         }
+      case PdfEditTool.polyline || PdfEditTool.polygon:
+        break; // taps add vertices; double-tap finishes
       case PdfEditTool.note || PdfEditTool.content:
         break; // driven by taps
     }
@@ -1346,6 +1363,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           pressures: strokePressures);
     } else if (dragStart != null && dragCurrent != null) {
       final viewRect = Rect.fromPoints(dragStart, dragCurrent);
+      if (_tool == PdfEditTool.line || _tool == PdfEditTool.arrow) {
+        if ((dragCurrent - dragStart).distance < 4) return; // a click
+        _commitLineDrag(dragStart, dragCurrent);
+        return;
+      }
       if (viewRect.width < 4 || viewRect.height < 4) return; // a click
       if (_tool == PdfEditTool.freeText) {
         // type into the box just dragged out, instead of a dialog
@@ -1375,6 +1397,75 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterDocument = _controller.document;
     // the next hover re-arms the preview; touch shouldn't keep a stale one
     _signaturePreview = null;
+  }
+
+  void _commitLineDrag(Offset start, Offset end) {
+    final before = _controller.document;
+    _controller.addLine(widget.pageIndex, _geometry.toPagePoint(start),
+        _geometry.toPagePoint(end),
+        arrow: _tool == PdfEditTool.arrow);
+    if (identical(before, _controller.document)) return;
+    _clearAfterimage();
+    _afterPath = (
+      points: [start, end],
+      tool: _tool!,
+      color: _controller.color
+          .withValues(alpha: _controller.opacity.clamp(0.0, 1.0)),
+      strokeWidth: _controller.strokeWidth * _geometry.scale,
+      dashed: _controller.dashedStroke,
+    );
+    _afterDocument = _controller.document;
+  }
+
+  void _addPolyPoint(Offset point) {
+    setState(() {
+      final points = _polyPoints ?? <Offset>[];
+      if (points.isEmpty || (point - points.last).distance >= 2) {
+        _polyPoints = [...points, point];
+      }
+      _polyHover = null;
+    });
+  }
+
+  void _finishPolyPath([Offset? finalPoint]) {
+    final existing = _polyPoints;
+    if (existing == null) return;
+    final points = List<Offset>.of(existing);
+    if (finalPoint != null &&
+        (points.isEmpty || (finalPoint - points.last).distance >= 2)) {
+      points.add(finalPoint);
+    }
+    final minPoints = _tool == PdfEditTool.polygon ? 3 : 2;
+    if (points.length < minPoints) return;
+    final simplified = <Offset>[];
+    for (final point in points) {
+      if (simplified.isEmpty || (point - simplified.last).distance >= 2) {
+        simplified.add(point);
+      }
+    }
+    if (simplified.length < minPoints) return;
+    final pagePoints = [for (final p in simplified) _geometry.toPagePoint(p)];
+    final before = _controller.document;
+    if (_tool == PdfEditTool.polygon) {
+      _controller.addPolygon(widget.pageIndex, pagePoints);
+    } else {
+      _controller.addPolyLine(widget.pageIndex, pagePoints);
+    }
+    if (identical(before, _controller.document)) return;
+    _clearAfterimage();
+    setState(() {
+      _polyPoints = null;
+      _polyHover = null;
+    });
+    _afterPath = (
+      points: simplified,
+      tool: _tool!,
+      color: _controller.color
+          .withValues(alpha: _controller.opacity.clamp(0.0, 1.0)),
+      strokeWidth: _controller.strokeWidth * _geometry.scale,
+      dashed: _controller.dashedStroke,
+    );
+    _afterDocument = _controller.document;
   }
 
   Future<void> _commitRect(Rect viewRect) async {
@@ -1554,6 +1645,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       _commitTextEdit();
       return;
     }
+    if (_polyTool) {
+      _addPolyPoint(details.localPosition);
+      return;
+    }
     final (x, y) = _geometry.toPagePoint(details.localPosition);
     if (_selectMode) {
       // tapping the already-selected free text edits it in place,
@@ -1593,6 +1688,16 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       default:
         break;
     }
+  }
+
+  void _onDoubleTapDown(TapDownDetails details) {
+    _polyDoubleTapPosition = details.localPosition;
+  }
+
+  void _onDoubleTap() {
+    if (!_polyTool) return;
+    _finishPolyPath(_polyDoubleTapPosition);
+    _polyDoubleTapPosition = null;
   }
 
   void _onHover(PointerHoverEvent event) {
@@ -1647,6 +1752,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       if (_controller.signature != null &&
           event.localPosition != _signaturePreview) {
         setState(() => _signaturePreview = event.localPosition);
+      }
+      cursor = SystemMouseCursors.precise;
+    } else if (_polyTool) {
+      if (_polyPoints != null && event.localPosition != _polyHover) {
+        setState(() => _polyHover = event.localPosition);
       }
       cursor = SystemMouseCursors.precise;
     } else if (_tool == PdfEditTool.content) {
@@ -1799,6 +1909,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
             !identical(_afterDocument, _controller.document))) {
       _clearAfterimage();
     }
+    if (_polyPoints != null && !_polyTool) {
+      _polyPoints = null;
+      _polyHover = null;
+    }
     // switching tools mid-edit commits the text, like leaving the ink tool
     if (_textEditRect != null && _tool != _textEditTool) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1875,6 +1989,14 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     // warm the eyedropper's raster so the first preview is instant-ish
     if (_controller.isPickingColor) unawaited(_ensureSampler());
     final preview = _controller.isPickingColor ? _pickPosition : null;
+    final polyPreview = _polyPoints == null
+        ? null
+        : [
+            ..._polyPoints!,
+            if (_polyHover != null &&
+                (_polyHover! - _polyPoints!.last).distance >= 2)
+              _polyHover!,
+          ];
     // touch and stylus get the hover/right-click affordances as a
     // floating action chip beside the selection
     final showChip = (_lastPointerKind == PointerDeviceKind.touch ||
@@ -1913,13 +2035,16 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         onPanUpdate: _panUpdate,
         onPanEnd: _panEnd,
         onTapUp: _onTapUp,
+        onDoubleTapDown: _onDoubleTapDown,
+        onDoubleTap: _onDoubleTap,
         child: MouseRegion(
           cursor: _cursor,
           onHover: _onHover,
           onExit: (_) {
             if (_pickPosition == null &&
                 (_signaturePreview == null || _signatureDrag) &&
-                (_eraserCursor == null || _erasePath.isNotEmpty)) {
+                (_eraserCursor == null || _erasePath.isNotEmpty) &&
+                _polyHover == null) {
               return;
             }
             setState(() {
@@ -1927,6 +2052,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
               _pickPreview = null;
               if (!_signatureDrag) _signaturePreview = null;
               if (_erasePath.isEmpty) _eraserCursor = null;
+              _polyHover = null;
             });
           },
           // touch and stylus long-press opens the context menu (the
@@ -1964,6 +2090,14 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                     dragRect: _dragStart != null && _dragCurrent != null
                         ? Rect.fromPoints(_dragStart!, _dragCurrent!)
                         : null,
+                    dragLine: _dragStart != null &&
+                            _dragCurrent != null &&
+                            (_tool == PdfEditTool.line ||
+                                _tool == PdfEditTool.arrow)
+                        ? (_dragStart!, _dragCurrent!)
+                        : null,
+                    dragPath: polyPreview,
+                    dashed: _controller.dashedStroke,
                     selectionRect: _resizeHandle != null
                         ? _resizeRect
                         : chrome?.$1.shift(moveDelta),
@@ -2004,6 +2138,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                           )
                         : null,
                     afterShape: _afterShape,
+                    afterPath: _afterPath,
                     showHandles: selected != null &&
                         _controller.canResizeSelected &&
                         _moveStart == null,
@@ -2209,6 +2344,9 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.strokes,
     required this.pressures,
     required this.dragRect,
+    required this.dragLine,
+    required this.dragPath,
+    required this.dashed,
     required this.selectionRect,
     required this.extraSelectionRects,
     required this.marqueeRect,
@@ -2226,6 +2364,7 @@ class _EditingPreviewPainter extends CustomPainter {
     this.eraserRadius = 0,
     required this.afterGhost,
     required this.afterShape,
+    required this.afterPath,
     required this.showHandles,
     required this.showRotateHandle,
     required this.elementRect,
@@ -2244,6 +2383,9 @@ class _EditingPreviewPainter extends CustomPainter {
   final List<List<double>?> pressures;
 
   final Rect? dragRect;
+  final (Offset, Offset)? dragLine;
+  final List<Offset>? dragPath;
+  final bool dashed;
   final Rect? selectionRect;
 
   /// The non-primary members of a multi-selection on this page: chrome
@@ -2312,6 +2454,15 @@ class _EditingPreviewPainter extends CustomPainter {
     Color color,
     double strokeWidth
   })? afterShape;
+
+  /// A just-committed line-family preview, held until the new raster lands.
+  final ({
+    List<Offset> points,
+    PdfEditTool tool,
+    Color color,
+    double strokeWidth,
+    bool dashed,
+  })? afterPath;
 
   final bool showHandles;
   final bool showRotateHandle;
@@ -2424,6 +2575,67 @@ class _EditingPreviewPainter extends CustomPainter {
     }
   }
 
+  void _paintPathPreview(Canvas canvas, List<Offset> points, PdfEditTool? tool,
+      Color color, double width, bool dashed) {
+    if (points.length < 2) return;
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = width
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    final path = Path()..moveTo(points.first.dx, points.first.dy);
+    for (final point in points.skip(1)) {
+      path.lineTo(point.dx, point.dy);
+    }
+    if (tool == PdfEditTool.polygon) path.close();
+    canvas.drawPath(dashed ? _dashPath(path, width) : path, paint);
+    if (tool == PdfEditTool.arrow) {
+      final tip = points.last;
+      final from = points[points.length - 2];
+      final arrow = _arrowHead(tip, from, width);
+      canvas.drawPath(
+          Path()
+            ..moveTo(tip.dx, tip.dy)
+            ..lineTo(arrow.$1.dx, arrow.$1.dy)
+            ..lineTo(arrow.$2.dx, arrow.$2.dy)
+            ..close(),
+          Paint()
+            ..color = color
+            ..style = PaintingStyle.fill);
+    }
+  }
+
+  Path _dashPath(Path path, double width) {
+    final out = Path();
+    final pattern = [math.max(2.0, width * 3), math.max(2.0, width * 2)];
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      var draw = true;
+      var index = 0;
+      while (distance < metric.length) {
+        final next = math.min(distance + pattern[index], metric.length);
+        if (draw) out.addPath(metric.extractPath(distance, next), Offset.zero);
+        distance = next;
+        draw = !draw;
+        index = (index + 1) % pattern.length;
+      }
+    }
+    return out;
+  }
+
+  (Offset, Offset) _arrowHead(Offset tip, Offset from, double width) {
+    final delta = from - tip;
+    final len = delta.distance;
+    if (len == 0) return (tip, tip);
+    final unit = delta / len;
+    final size = math.max(10.0, width * 5);
+    final half = size * 0.38;
+    final base = tip + unit * size;
+    final perp = Offset(-unit.dy, unit.dx);
+    return (base + perp * half, base - perp * half);
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     // the wash goes under every stroke preview: the eraser's sliced
@@ -2447,8 +2659,19 @@ class _EditingPreviewPainter extends CustomPainter {
           canvas, after.rect, after.tool, after.color, after.strokeWidth);
     }
 
-    final rect = dragRect;
-    if (rect != null) {
+    final afterPath = this.afterPath;
+    if (afterPath != null) {
+      _paintPathPreview(canvas, afterPath.points, afterPath.tool,
+          afterPath.color, afterPath.strokeWidth, afterPath.dashed);
+    }
+
+    final line = dragLine;
+    if (line != null) {
+      _paintPathPreview(
+          canvas, [line.$1, line.$2], tool, color, strokeWidth, dashed);
+    } else if (dragPath != null) {
+      _paintPathPreview(canvas, dragPath!, tool, color, strokeWidth, dashed);
+    } else if (dragRect case final rect?) {
       _paintShapePreview(canvas, rect, tool, color, strokeWidth);
     }
 

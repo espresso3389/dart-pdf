@@ -242,11 +242,18 @@ Run the checked-in corpora from their package directories so the relative
 - Ghent pure-Dart pass: `cd packages/pdf_graphics && fvm dart test test/ghent_corpus_test.dart`
 - Ghent render/baseline pass: `cd packages/dart_pdf_editor && fvm flutter test test/ghent_render_test.dart`
 - Accept intentional Ghent baseline changes: `cd packages/dart_pdf_editor && GHENT_UPDATE=1 fvm flutter test test/ghent_render_test.dart`
+- Ghent visual review gallery: `cd packages/dart_pdf_editor && GHENT_RENDER_OUT=../../test_corpora/ghent/_renders fvm flutter test test/ghent_render_test.dart`, then open `test_corpora/ghent/_renders/index.html`
 - PDF.js pure-Dart pass: `cd packages/pdf_graphics && fvm dart test test/pdfjs_corpus_test.dart`
 - PDF.js render smoke pass: `cd packages/dart_pdf_editor && fvm flutter test test/pdfjs_render_test.dart`
-- All checked-in corpus tests: run the four non-update commands above; they
-  are intentionally split because `pdf_graphics` is VM-only and
-  `dart_pdf_editor` needs Flutter rasterization.
+- PDF.js visual review gallery: `cd packages/dart_pdf_editor && PDFJS_RENDER_OUT=../../test_corpora/pdfjs/_renders fvm flutter test test/pdfjs_render_test.dart`, then open `test_corpora/pdfjs/_renders/index.html`
+- All checked-in corpus tests: run the four non-update test commands above
+  (excluding the visual galleries); they are intentionally split because
+  `pdf_graphics` is VM-only and `dart_pdf_editor` needs Flutter rasterization.
+
+The Ghent gallery writes the same 2x rasters used for baseline comparison.
+The PDF.js gallery writes the same pages as the smoke pass by default (up to
+five per file at 1x); override it with `PDFJS_RENDER_MAX_PAGES` and
+`PDFJS_RENDER_PIXEL_RATIO` when you need deeper or sharper review.
 
 If you have the private `corpus/` directory locally, use it for broader
 real-world coverage:

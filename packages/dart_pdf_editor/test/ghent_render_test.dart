@@ -12,6 +12,10 @@
 //   GHENT_UPDATE=1 fvm flutter test test/ghent_render_test.dart
 // On mismatch the actual render and a per-pixel diff map are written to
 // test_corpora/ghent/_failures (git-ignored) for inspection.
+//
+// For visual review, set GHENT_RENDER_OUT to write PNGs plus an index.html:
+//   GHENT_RENDER_OUT=../../test_corpora/ghent/_renders \
+//     fvm flutter test test/ghent_render_test.dart
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -20,6 +24,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 
+import 'render_gallery.dart';
 import 'render_smoke_test.dart' show loadSystemFonts;
 
 const _pixelRatio = 2.0;
@@ -37,6 +42,9 @@ void main() {
     return;
   }
   final update = Platform.environment['GHENT_UPDATE'] == '1';
+  final renderOut = Platform.environment['GHENT_RENDER_OUT'];
+  final gallery =
+      renderOut == null ? null : RenderGallery(Directory(renderOut));
 
   final files = root
       .listSync(recursive: true)
@@ -44,7 +52,8 @@ void main() {
       .where((f) =>
           f.path.toLowerCase().endsWith('.pdf') &&
           !f.path.contains('/_baselines/') &&
-          !f.path.contains('/_failures/'))
+          !f.path.contains('/_failures/') &&
+          !f.path.contains('/_renders/'))
       .toList()
     ..sort((a, b) => a.path.compareTo(b.path));
 
@@ -75,6 +84,9 @@ void main() {
               pixels: pixels,
               update: update,
             );
+            if (gallery != null) {
+              await gallery.add(pdfName: name, page: i, image: image);
+            }
           } finally {
             image.dispose();
           }

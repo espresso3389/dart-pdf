@@ -7,12 +7,17 @@
 // that nothing throws and nothing hangs; pixel regressions are the Ghent
 // suite's job. Expectations (passwords, unopenable fuzz files) mirror
 // packages/pdf_graphics/test/pdfjs_corpus_test.dart.
+//
+// For visual review, set PDFJS_RENDER_OUT to write PNGs plus an index.html:
+//   PDFJS_RENDER_OUT=../../test_corpora/pdfjs/_renders \
+//     fvm flutter test test/pdfjs_render_test.dart
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 
+import 'render_gallery.dart';
 import 'render_smoke_test.dart' show loadSystemFonts;
 
 const passwords = {
@@ -46,6 +51,11 @@ void main() {
     test('pdf.js suite', skip: 'test_corpora/pdfjs not found', () {});
     return;
   }
+  final renderOut = Platform.environment['PDFJS_RENDER_OUT'];
+  final gallery =
+      renderOut == null ? null : RenderGallery(Directory(renderOut));
+  final visualMaxPages = _envPositiveInt('PDFJS_RENDER_MAX_PAGES', maxPages);
+  final visualPixelRatio = _envPositiveDouble('PDFJS_RENDER_PIXEL_RATIO', 1.0);
 
   final files = root
       .listSync()
@@ -63,14 +73,29 @@ void main() {
         final doc = PdfDocument.open(file.readAsBytesSync(),
             password: passwords[name] ?? '');
         final pages = doc.pageCount;
-        for (var i = 0; i < pages && i < maxPages; i++) {
-          final image =
-              await PdfPageRenderer.renderImage(doc.page(i), pixelRatio: 1.0)
-                  .timeout(const Duration(seconds: 90));
+        final pageLimit = gallery == null ? maxPages : visualMaxPages;
+        for (var i = 0; i < pages && i < pageLimit; i++) {
+          final image = await PdfPageRenderer.renderImage(doc.page(i),
+                  pixelRatio: visualPixelRatio)
+              .timeout(const Duration(seconds: 90));
           expect(image.width, greaterThan(0));
+          expect(image.height, greaterThan(0));
+          if (gallery != null) {
+            await gallery.add(pdfName: name, page: i, image: image);
+          }
           image.dispose();
         }
       });
     }, timeout: const Timeout(Duration(minutes: 3)));
   }
+}
+
+int _envPositiveInt(String name, int fallback) {
+  final value = int.tryParse(Platform.environment[name] ?? '');
+  return value == null || value < 1 ? fallback : value;
+}
+
+double _envPositiveDouble(String name, double fallback) {
+  final value = double.tryParse(Platform.environment[name] ?? '');
+  return value == null || value <= 0 ? fallback : value;
 }

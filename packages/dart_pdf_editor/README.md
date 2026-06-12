@@ -36,6 +36,13 @@ PdfEditorView(
     flatten: false,
     tools: {PdfEditTool.select, PdfEditTool.ink, PdfEditTool.freeText},
   ),
+  toolbarTrailing: [
+    (context, editing, viewer) => IconButton(
+      icon: const Icon(Icons.cloud_upload_outlined),
+      tooltip: 'Publish',
+      onPressed: () => publish(editing.bytes),
+    ),
+  ],
 )
 ```
 

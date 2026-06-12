@@ -138,6 +138,8 @@ class PdfEditorView extends StatefulWidget {
     this.formImagePicker,
     this.textPrompt,
     this.palette = PdfEditingToolbar.defaultPalette,
+    this.toolbarLeading = const [],
+    this.toolbarTrailing = const [],
     this.initialFit = PdfViewerFit.page,
     this.backgroundColor,
     this.pageColor,
@@ -193,6 +195,16 @@ class PdfEditorView extends StatefulWidget {
 
   /// The toolbar's color palette.
   final List<Color> palette;
+
+  /// Custom widgets shown before the stock editing toolbar controls.
+  ///
+  /// Builders receive this editor view's edit session and viewer
+  /// controller, including the internally owned ones when [bytes] is
+  /// used.
+  final List<PdfEditingToolbarWidgetBuilder> toolbarLeading;
+
+  /// Custom widgets shown after the stock editing toolbar controls.
+  final List<PdfEditingToolbarWidgetBuilder> toolbarTrailing;
 
   /// See [PdfViewer.initialFit].
   final PdfViewerFit initialFit;
@@ -299,148 +311,154 @@ class _PdfEditorViewState extends State<PdfEditorView> {
   @override
   Widget build(BuildContext context) {
     final features = widget.features;
-    Widget body = ListenableBuilder(
-      // the session owns the document revisions: the viewer must
-      // rebuild with the current document whenever it notifies
-      listenable: Listenable.merge([_session, _prefs]),
-      builder: (context, _) {
-        final session = _session;
-        final prefs = _prefs;
-        final pageColor = widget.pageColor ?? prefs.pageColor;
-        return Column(children: [
-          if (features.headerBar)
-            PdfShellBar(
-              leading: [
-                if (features.search) ...[
-                  PdfSearchField(
-                    controller: _viewer,
-                    searchController: _searchField,
-                    focusNode: _searchFocus,
-                  ),
-                  if (features.searchResultsPanel)
-                    PdfShellToggleButton(
-                      key: const ValueKey('pdf-shell-search-results-toggle'),
-                      icon: Icons.manage_search,
-                      tooltip: 'Search results',
-                      selected: prefs.showSearchResultsPanel,
-                      onPressed: () => prefs.showSearchResultsPanel =
-                          !prefs.showSearchResultsPanel,
+    Widget body = LayoutBuilder(builder: (context, constraints) {
+      return ListenableBuilder(
+        // the session owns the document revisions: the viewer must
+        // rebuild with the current document whenever it notifies
+        listenable: Listenable.merge([_session, _prefs]),
+        builder: (context, _) {
+          final session = _session;
+          final prefs = _prefs;
+          final pageColor = widget.pageColor ?? prefs.pageColor;
+          final showThumbnails =
+              pdfShellShowThumbnailSidebar(prefs, constraints);
+          return Column(children: [
+            if (features.headerBar)
+              PdfShellBar(
+                leading: [
+                  if (features.search) ...[
+                    PdfSearchField(
+                      controller: _viewer,
+                      searchController: _searchField,
+                      focusNode: _searchFocus,
+                    ),
+                    if (features.searchResultsPanel)
+                      PdfShellToggleButton(
+                        key: const ValueKey('pdf-shell-search-results-toggle'),
+                        icon: Icons.manage_search,
+                        tooltip: 'Search results',
+                        selected: prefs.showSearchResultsPanel,
+                        onPressed: () => prefs.showSearchResultsPanel =
+                            !prefs.showSearchResultsPanel,
+                      ),
+                  ],
+                  if (features.pageNumber)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: PdfPageNumberField(controller: _viewer),
                     ),
                 ],
-                if (features.pageNumber)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: PdfPageNumberField(controller: _viewer),
-                  ),
-              ],
-              trailing: [
-                if (features.author)
-                  IconButton(
-                    key: const ValueKey('pdf-shell-author'),
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.person_outline),
-                    tooltip: 'Author name',
-                    onPressed: _promptAuthor,
-                  ),
-                if (features.viewOptions)
-                  PdfShellViewOptionsButton(preferences: prefs),
-                if (features.thumbnails)
-                  PdfShellToggleButton(
-                    key: const ValueKey('pdf-shell-thumbnails-toggle'),
-                    icon: Icons.grid_view,
-                    tooltip: 'Pages',
-                    selected: prefs.showThumbnailSidebar,
-                    onPressed: () => prefs.showThumbnailSidebar =
-                        !prefs.showThumbnailSidebar,
-                  ),
-                if (features.annotationSidebar)
-                  PdfShellToggleButton(
-                    key: const ValueKey('pdf-shell-annotations-toggle'),
-                    icon: Icons.list_alt,
-                    tooltip: 'Annotations',
-                    selected: prefs.showAnnotationSidebar,
-                    onPressed: () => prefs.showAnnotationSidebar =
-                        !prefs.showAnnotationSidebar,
-                  ),
-                if (features.propertiesPanel)
-                  PdfShellToggleButton(
-                    key: const ValueKey('pdf-shell-properties-toggle'),
-                    icon: Icons.tune,
-                    tooltip: 'Properties',
-                    selected: prefs.showPropertiesPanel,
-                    onPressed: () =>
-                        prefs.showPropertiesPanel = !prefs.showPropertiesPanel,
-                  ),
-              ],
-            ),
-          Expanded(
-            // keyed so a panel appearing never recreates the viewer
-            // element (which would reset the reading position)
-            child: Row(children: [
-              if (features.thumbnails && prefs.showThumbnailSidebar)
-                PdfThumbnailSidebar(
-                  key: const ValueKey('pdf-shell-thumbnails'),
-                  controller: session,
-                  viewerController: _viewer,
-                  pageColor: pageColor,
-                  showAnnotations: prefs.showAnnotations,
-                  allowPageEditing: features.pageEditing,
-                ),
-              if (features.search &&
-                  features.searchResultsPanel &&
-                  prefs.showSearchResultsPanel)
-                PdfSearchResultsPanel(
-                  key: const ValueKey('pdf-shell-search-panel'),
-                  controller: _viewer,
-                  preferences: prefs,
-                ),
-              Expanded(
-                key: const ValueKey('pdf-shell-viewer'),
-                child: PdfViewer(
-                  document: session.document,
-                  controller: _viewer,
-                  editing: session,
-                  onAction: widget.onAction,
-                  pageOverlayBuilder: widget.pageOverlayBuilder,
-                  annotationMenuBuilder: widget.annotationMenuBuilder,
-                  formImagePicker: widget.formImagePicker,
-                  editingTextPrompt: widget.textPrompt,
-                  initialFit: widget.initialFit,
-                  backgroundColor: widget.backgroundColor,
-                  pageColor: pageColor,
-                  showAnnotations: prefs.showAnnotations,
-                  highlightFormFields: prefs.highlightFormFields,
-                ),
+                trailing: [
+                  if (features.author)
+                    IconButton(
+                      key: const ValueKey('pdf-shell-author'),
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.person_outline),
+                      tooltip: 'Author name',
+                      onPressed: _promptAuthor,
+                    ),
+                  if (features.viewOptions)
+                    PdfShellViewOptionsButton(preferences: prefs),
+                  if (features.thumbnails)
+                    PdfShellToggleButton(
+                      key: const ValueKey('pdf-shell-thumbnails-toggle'),
+                      icon: Icons.grid_view,
+                      tooltip: 'Pages',
+                      selected: showThumbnails,
+                      onPressed: () =>
+                          prefs.showThumbnailSidebar = !showThumbnails,
+                    ),
+                  if (features.annotationSidebar)
+                    PdfShellToggleButton(
+                      key: const ValueKey('pdf-shell-annotations-toggle'),
+                      icon: Icons.list_alt,
+                      tooltip: 'Annotations',
+                      selected: prefs.showAnnotationSidebar,
+                      onPressed: () => prefs.showAnnotationSidebar =
+                          !prefs.showAnnotationSidebar,
+                    ),
+                  if (features.propertiesPanel)
+                    PdfShellToggleButton(
+                      key: const ValueKey('pdf-shell-properties-toggle'),
+                      icon: Icons.tune,
+                      tooltip: 'Properties',
+                      selected: prefs.showPropertiesPanel,
+                      onPressed: () => prefs.showPropertiesPanel =
+                          !prefs.showPropertiesPanel,
+                    ),
+                ],
               ),
-              if (features.annotationSidebar && prefs.showAnnotationSidebar)
-                PdfAnnotationSidebar(
-                  key: const ValueKey('pdf-shell-annotations'),
-                  controller: session,
-                  viewerController: _viewer,
+            Expanded(
+              // keyed so a panel appearing never recreates the viewer
+              // element (which would reset the reading position)
+              child: Row(children: [
+                if (features.thumbnails && showThumbnails)
+                  PdfThumbnailSidebar(
+                    key: const ValueKey('pdf-shell-thumbnails'),
+                    controller: session,
+                    viewerController: _viewer,
+                    pageColor: pageColor,
+                    showAnnotations: prefs.showAnnotations,
+                    allowPageEditing: features.pageEditing,
+                  ),
+                if (features.search &&
+                    features.searchResultsPanel &&
+                    prefs.showSearchResultsPanel)
+                  PdfSearchResultsPanel(
+                    key: const ValueKey('pdf-shell-search-panel'),
+                    controller: _viewer,
+                    preferences: prefs,
+                  ),
+                Expanded(
+                  key: const ValueKey('pdf-shell-viewer'),
+                  child: PdfViewer(
+                    document: session.document,
+                    controller: _viewer,
+                    editing: session,
+                    onAction: widget.onAction,
+                    pageOverlayBuilder: widget.pageOverlayBuilder,
+                    annotationMenuBuilder: widget.annotationMenuBuilder,
+                    formImagePicker: widget.formImagePicker,
+                    editingTextPrompt: widget.textPrompt,
+                    initialFit: widget.initialFit,
+                    backgroundColor: widget.backgroundColor,
+                    pageColor: pageColor,
+                    showAnnotations: prefs.showAnnotations,
+                    highlightFormFields: prefs.highlightFormFields,
+                  ),
                 ),
-              if (features.propertiesPanel && prefs.showPropertiesPanel)
-                PdfAnnotationPropertiesPanel(
-                  key: const ValueKey('pdf-shell-properties'),
-                  controller: session,
-                ),
-            ]),
-          ),
-          if (features.toolbar)
-            PdfEditingToolbar(
-              controller: session,
-              viewerController: _viewer,
-              onSave: widget.onSave,
-              textPrompt: widget.textPrompt ?? showPdfTextPrompt,
-              palette: widget.palette,
-              tools: features.tools,
-              showMarkup: features.markup,
-              showUndoRedo: features.undoRedo,
-              showStyle: features.styleControls,
-              showFlatten: features.flatten,
+                if (features.annotationSidebar && prefs.showAnnotationSidebar)
+                  PdfAnnotationSidebar(
+                    key: const ValueKey('pdf-shell-annotations'),
+                    controller: session,
+                    viewerController: _viewer,
+                  ),
+                if (features.propertiesPanel && prefs.showPropertiesPanel)
+                  PdfAnnotationPropertiesPanel(
+                    key: const ValueKey('pdf-shell-properties'),
+                    controller: session,
+                  ),
+              ]),
             ),
-        ]);
-      },
-    );
+            if (features.toolbar)
+              PdfEditingToolbar(
+                controller: session,
+                viewerController: _viewer,
+                onSave: widget.onSave,
+                textPrompt: widget.textPrompt ?? showPdfTextPrompt,
+                palette: widget.palette,
+                tools: features.tools,
+                showMarkup: features.markup,
+                showUndoRedo: features.undoRedo,
+                showStyle: features.styleControls,
+                showFlatten: features.flatten,
+                leading: widget.toolbarLeading,
+                trailing: widget.toolbarTrailing,
+              ),
+          ]);
+        },
+      );
+    });
     if (widget.viewerTheme != null) {
       body = PdfViewerTheme(data: widget.viewerTheme!, child: body);
     }

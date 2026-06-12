@@ -11,13 +11,21 @@ import 'editing_signature.dart';
 import 'editing_stamps.dart';
 import 'text_prompt.dart';
 
+/// Builds a custom widget inside [PdfEditingToolbar].
+typedef PdfEditingToolbarWidgetBuilder = Widget Function(
+  BuildContext context,
+  PdfEditingController controller,
+  PdfViewerController viewerController,
+);
+
 /// A ready-made Material toolbar for [PdfEditingController]: text-markup
 /// actions for the viewer's current selection, tool toggles, a color
 /// palette, undo/redo, selection actions, flatten, and save.
 ///
 /// Place it in a Scaffold's `bottomNavigationBar` (it builds a
 /// [BottomAppBar]). Apps wanting different chrome can skip this widget
-/// entirely and drive the controller from their own UI.
+/// entirely and drive the controller from their own UI, or add focused
+/// host actions with [leading] and [trailing].
 class PdfEditingToolbar extends StatelessWidget {
   const PdfEditingToolbar({
     super.key,
@@ -31,6 +39,8 @@ class PdfEditingToolbar extends StatelessWidget {
     this.showUndoRedo = true,
     this.showStyle = true,
     this.showFlatten = true,
+    this.leading = const [],
+    this.trailing = const [],
   });
 
   final PdfEditingController controller;
@@ -69,6 +79,17 @@ class PdfEditingToolbar extends StatelessWidget {
 
   /// Whether the flatten-annotations button is shown.
   final bool showFlatten;
+
+  /// Custom widgets shown before the stock toolbar controls. Builders
+  /// run inside the toolbar's listenable rebuild, so they can reflect
+  /// [controller] or [viewerController] state directly.
+  final List<PdfEditingToolbarWidgetBuilder> leading;
+
+  /// Custom widgets shown after the stock toolbar controls.
+  ///
+  /// Prefer compact controls such as [IconButton]s or popup buttons so
+  /// they fit naturally in the toolbar's horizontal scroll row.
+  final List<PdfEditingToolbarWidgetBuilder> trailing;
 
   static const defaultPalette = [
     Color(0xFFE53935), // red
@@ -192,6 +213,9 @@ class PdfEditingToolbar extends StatelessWidget {
             return SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(children: [
+                for (final builder in leading)
+                  builder(context, controller, viewerController),
+                if (leading.isNotEmpty) const VerticalDivider(width: 16),
                 if (showUndoRedo) ...[
                   IconButton(
                     icon: const Icon(Icons.undo),
@@ -412,6 +436,11 @@ class PdfEditingToolbar extends StatelessWidget {
                     tooltip: 'Save…',
                     onPressed: () => onSave!(controller.bytes),
                   ),
+                if (trailing.isNotEmpty) ...[
+                  const VerticalDivider(width: 16),
+                  for (final builder in trailing)
+                    builder(context, controller, viewerController),
+                ],
               ]),
             );
           },

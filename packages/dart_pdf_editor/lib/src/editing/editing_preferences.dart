@@ -51,6 +51,7 @@ class PdfEditingPreferences extends ChangeNotifier {
   double _opacity = 1;
   bool _fingerDrawsInk = true;
   bool _showThumbnailSidebar = true;
+  bool _hasShowThumbnailSidebarPreference = false;
   bool _showAnnotationSidebar = false;
   String? _author;
   PdfInkSignature? _signature;
@@ -93,8 +94,13 @@ class PdfEditingPreferences extends ChangeNotifier {
       _opacity = store.getDouble('${_prefix}opacity') ?? _opacity;
       _fingerDrawsInk =
           store.getBool('${_prefix}fingerDrawsInk') ?? _fingerDrawsInk;
-      _showThumbnailSidebar = store.getBool('${_prefix}showThumbnailSidebar') ??
-          _showThumbnailSidebar;
+      const thumbnailSidebarKey = '${_prefix}showThumbnailSidebar';
+      _hasShowThumbnailSidebarPreference =
+          store.containsKey(thumbnailSidebarKey);
+      if (_hasShowThumbnailSidebarPreference) {
+        _showThumbnailSidebar =
+            store.getBool(thumbnailSidebarKey) ?? _showThumbnailSidebar;
+      }
       _showAnnotationSidebar =
           store.getBool('${_prefix}showAnnotationSidebar') ??
               _showAnnotationSidebar;
@@ -236,11 +242,19 @@ class PdfEditingPreferences extends ChangeNotifier {
   bool get showThumbnailSidebar => _showThumbnailSidebar;
 
   set showThumbnailSidebar(bool value) {
-    if (value == _showThumbnailSidebar) return;
+    if (value == _showThumbnailSidebar && _hasShowThumbnailSidebarPreference) {
+      return;
+    }
     _showThumbnailSidebar = value;
+    _hasShowThumbnailSidebarPreference = true;
     _write((s) => s.setBool('${_prefix}showThumbnailSidebar', value));
     notifyListeners();
   }
+
+  /// Whether [showThumbnailSidebar] came from storage or a user change,
+  /// rather than the built-in desktop-oriented default.
+  bool get hasShowThumbnailSidebarPreference =>
+      _hasShowThumbnailSidebarPreference;
 
   /// The saved hand-drawn signature the signature tool stamps, or null
   /// when none has been drawn yet.

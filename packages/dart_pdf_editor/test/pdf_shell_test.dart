@@ -18,6 +18,12 @@ void main() {
     await tester.pump();
   }
 
+  void compactScreen(WidgetTester tester) {
+    tester.view.physicalSize = const Size(600, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+  }
+
   group('PdfReader', () {
     testWidgets('stock chrome: search, page number, view options, thumbnails',
         (tester) async {
@@ -61,6 +67,33 @@ void main() {
         ),
         findsNothing,
       );
+    });
+
+    testWidgets('compact first run starts with thumbnails closed',
+        (tester) async {
+      compactScreen(tester);
+      final prefs = PdfEditingPreferences();
+      await prefs.ready;
+      addTearDown(prefs.dispose);
+
+      await pump(
+          tester, PdfReader(bytes: buildMultiPagePdf(2), preferences: prefs));
+      expect(prefs.showThumbnailSidebar, isTrue);
+      expect(prefs.hasShowThumbnailSidebarPreference, isFalse);
+      expect(find.byType(PdfThumbnailSidebar), findsNothing);
+      final toggle = tester.widget<IconButton>(find.ancestor(
+        of: find.byIcon(Icons.grid_view),
+        matching: find.byType(IconButton),
+      ));
+      expect(toggle.isSelected, isFalse);
+
+      await tester.tap(
+          find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      expect(find.byType(PdfThumbnailSidebar), findsOneWidget);
+      expect(prefs.hasShowThumbnailSidebarPreference, isTrue);
+      expect(prefs.showThumbnailSidebar, isTrue);
     });
 
     testWidgets('header toggle hides and shows the thumbnail strip',
@@ -149,6 +182,26 @@ void main() {
       }
     });
 
+    testWidgets('compact layout honors an explicit thumbnail preference',
+        (tester) async {
+      compactScreen(tester);
+      SharedPreferences.setMockInitialValues(
+          {'dart_pdf_editor.editing.showThumbnailSidebar': true});
+      final prefs = PdfEditingPreferences();
+      await prefs.ready;
+      addTearDown(prefs.dispose);
+
+      await pump(tester,
+          PdfEditorView(bytes: buildMultiPagePdf(2), preferences: prefs));
+      expect(prefs.hasShowThumbnailSidebarPreference, isTrue);
+      expect(find.byType(PdfThumbnailSidebar), findsOneWidget);
+      final toggle = tester.widget<IconButton>(find.ancestor(
+        of: find.byIcon(Icons.grid_view),
+        matching: find.byType(IconButton),
+      ));
+      expect(toggle.isSelected, isTrue);
+    });
+
     testWidgets('panel toggles open the annotation and properties panels',
         (tester) async {
       await pump(tester, PdfEditorView(bytes: buildMultiPagePdf(1)));
@@ -220,6 +273,42 @@ void main() {
         matching: find.byType(IconButton),
       ));
       expect(button.isSelected, isTrue);
+    });
+
+    testWidgets('custom toolbar widgets can drive the owned session',
+        (tester) async {
+      var changed = 0;
+      await pump(
+        tester,
+        PdfEditorView(
+          bytes: buildMultiPagePdf(1),
+          features: const PdfEditorFeatures(
+            tools: {PdfEditTool.select},
+            markup: false,
+            undoRedo: false,
+            styleControls: false,
+            flatten: false,
+          ),
+          toolbarTrailing: [
+            (context, editing, viewer) => IconButton(
+                  key: const ValueKey('custom-toolbar-rectangle'),
+                  icon: const Icon(Icons.crop_square),
+                  tooltip: 'Add host rectangle',
+                  onPressed: () => editing.addRectangle(
+                    0,
+                    const PdfRect(100, 550, 180, 610),
+                  ),
+                ),
+          ],
+          onDocumentChanged: (_) => changed++,
+        ),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('custom-toolbar-rectangle')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pump();
+
+      expect(changed, 1);
     });
 
     testWidgets('external controller: edits flow through onDocumentChanged',

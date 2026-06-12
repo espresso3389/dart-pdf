@@ -6,6 +6,18 @@ import 'editing/editing_preferences.dart';
 /// Shared header chrome for the drop-in shells (PdfReader and
 /// PdfEditorView). Package-private: not exported from the library.
 
+const double pdfShellCompactWidth = 700;
+
+bool pdfShellShowThumbnailSidebar(
+  PdfEditingPreferences preferences,
+  BoxConstraints constraints,
+) {
+  final compact = constraints.maxWidth.isFinite &&
+      constraints.maxWidth < pdfShellCompactWidth;
+  return preferences.showThumbnailSidebar &&
+      (!compact || preferences.hasShowThumbnailSidebarPreference);
+}
+
 /// The shells' slim header bar: a leading group (search, page number)
 /// and a trailing group (panel toggles), pushed apart when there is
 /// room and scrolling horizontally when there isn't.

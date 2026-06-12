@@ -182,80 +182,84 @@ class _PdfReaderState extends State<PdfReader> {
   @override
   Widget build(BuildContext context) {
     final features = widget.features;
-    Widget body = ListenableBuilder(
-      listenable: _prefs,
-      builder: (context, _) {
-        final prefs = _prefs;
-        final pageColor = widget.pageColor ?? prefs.pageColor;
-        return Column(children: [
-          if (features.headerBar)
-            PdfShellBar(
-              leading: [
-                if (features.search && !prefs.showReflowView)
-                  PdfSearchField(
-                    controller: _viewer,
-                    searchController: _searchField,
-                    focusNode: _searchFocus,
-                  ),
-                if (features.pageNumber && !prefs.showReflowView)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: PdfPageNumberField(controller: _viewer),
-                  ),
-              ],
-              trailing: [
-                if (features.viewOptions)
-                  PdfShellViewOptionsButton(preferences: prefs, reflow: true),
-                if (features.thumbnails)
-                  PdfShellToggleButton(
-                    key: const ValueKey('pdf-shell-thumbnails-toggle'),
-                    icon: Icons.grid_view,
-                    tooltip: 'Pages',
-                    selected: prefs.showThumbnailSidebar,
-                    onPressed: () => prefs.showThumbnailSidebar =
-                        !prefs.showThumbnailSidebar,
-                  ),
-              ],
-            ),
-          Expanded(
-            // keyed so a panel appearing never recreates the viewer
-            // element (which would reset the reading position)
-            child: Row(children: [
-              if (features.thumbnails &&
-                  prefs.showThumbnailSidebar &&
-                  !prefs.showReflowView)
-                PdfThumbnailSidebar(
-                  key: const ValueKey('pdf-shell-thumbnails'),
-                  controller: _session,
-                  viewerController: _viewer,
-                  pageColor: pageColor,
-                  showAnnotations: prefs.showAnnotations,
-                  allowPageEditing: false,
-                ),
-              Expanded(
-                key: const ValueKey('pdf-shell-viewer'),
-                child: prefs.showReflowView
-                    ? PdfReflowView(
-                        document: _session.document,
-                        backgroundColor: widget.backgroundColor,
-                      )
-                    : PdfViewer(
-                        document: _session.document,
-                        controller: _viewer,
-                        onAction: widget.onAction,
-                        pageOverlayBuilder: widget.pageOverlayBuilder,
-                        initialFit: widget.initialFit,
-                        backgroundColor: widget.backgroundColor,
-                        pageColor: pageColor,
-                        showAnnotations: prefs.showAnnotations,
-                        highlightFormFields: prefs.highlightFormFields,
-                      ),
+    Widget body = LayoutBuilder(builder: (context, constraints) {
+      return ListenableBuilder(
+        listenable: _prefs,
+        builder: (context, _) {
+          final prefs = _prefs;
+          final pageColor = widget.pageColor ?? prefs.pageColor;
+          final showThumbnails =
+              pdfShellShowThumbnailSidebar(prefs, constraints);
+          return Column(children: [
+            if (features.headerBar)
+              PdfShellBar(
+                leading: [
+                  if (features.search && !prefs.showReflowView)
+                    PdfSearchField(
+                      controller: _viewer,
+                      searchController: _searchField,
+                      focusNode: _searchFocus,
+                    ),
+                  if (features.pageNumber && !prefs.showReflowView)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: PdfPageNumberField(controller: _viewer),
+                    ),
+                ],
+                trailing: [
+                  if (features.viewOptions)
+                    PdfShellViewOptionsButton(preferences: prefs, reflow: true),
+                  if (features.thumbnails)
+                    PdfShellToggleButton(
+                      key: const ValueKey('pdf-shell-thumbnails-toggle'),
+                      icon: Icons.grid_view,
+                      tooltip: 'Pages',
+                      selected: showThumbnails,
+                      onPressed: () =>
+                          prefs.showThumbnailSidebar = !showThumbnails,
+                    ),
+                ],
               ),
-            ]),
-          ),
-        ]);
-      },
-    );
+            Expanded(
+              // keyed so a panel appearing never recreates the viewer
+              // element (which would reset the reading position)
+              child: Row(children: [
+                if (features.thumbnails &&
+                    showThumbnails &&
+                    !prefs.showReflowView)
+                  PdfThumbnailSidebar(
+                    key: const ValueKey('pdf-shell-thumbnails'),
+                    controller: _session,
+                    viewerController: _viewer,
+                    pageColor: pageColor,
+                    showAnnotations: prefs.showAnnotations,
+                    allowPageEditing: false,
+                  ),
+                Expanded(
+                  key: const ValueKey('pdf-shell-viewer'),
+                  child: prefs.showReflowView
+                      ? PdfReflowView(
+                          document: _session.document,
+                          backgroundColor: widget.backgroundColor,
+                        )
+                      : PdfViewer(
+                          document: _session.document,
+                          controller: _viewer,
+                          onAction: widget.onAction,
+                          pageOverlayBuilder: widget.pageOverlayBuilder,
+                          initialFit: widget.initialFit,
+                          backgroundColor: widget.backgroundColor,
+                          pageColor: pageColor,
+                          showAnnotations: prefs.showAnnotations,
+                          highlightFormFields: prefs.highlightFormFields,
+                        ),
+                ),
+              ]),
+            ),
+          ]);
+        },
+      );
+    });
     if (widget.viewerTheme != null) {
       body = PdfViewerTheme(data: widget.viewerTheme!, child: body);
     }

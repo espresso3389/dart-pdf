@@ -1622,3 +1622,22 @@ mid-flight assertion is now "no FULL raster" (RawImage ≤200px =
 preview, the feature working as intended). Verified live on macOS
 against corpus AMT-SP-101.pdf (291 pages): mid-scrollbar-drag pages
 show soft content, settle renders crisp.
+Branding (Ben: logo/banner doubling as app icon): doc/logo.svg is the
+master mark — 1024 rounded square (rx 224), Dart-blue gradient
+#16BAFD→#0169B4, white dog-eared page, amber highlight bar, gradient
+ink swoosh. doc/banner.svg = mark + wordmark + tagline on #202124; its
+text is Helvetica Neue, so regenerate PNGs on macOS (rsvg-convert;
+doc/logo.png 512, doc/banner.png 2560, doc/icon-1024.png = full-bleed
+square via sed rx="224"→rx="0" — feed that to icon generators).
+Example-app icons all regenerated from the masters (rsvg-convert +
+magick): iOS full-bleed, macOS = rounded mark at 80.5% centered on a
+transparent canvas (Big Sur grid; rx 224/1024 ≈ Apple's 185/824),
+Android mipmaps / web Icon-* / favicon / Windows multi-res .ico =
+rounded mark, web MASKABLE icons = full-bleed (the page's corners sit
+at 39% radius — inside the 40% safe-zone circle). Banner heads the
+root README (relative path) and the pdf_editor README
+(raw.githubusercontent URL, same pattern as the screenshot); web demo
+manifest.json/index.html renamed to 'dart-pdf demo' (the template
+theme_color was already #0175C2). Verified: macOS debug build
+compiles the new appiconset into AppIcon.icns; example tests green.
+Linux has no icon in the flutter template — none added.

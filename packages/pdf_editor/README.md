@@ -1,3 +1,5 @@
+![dart-pdf — pure-Dart PDF renderer & editor for Flutter](https://raw.githubusercontent.com/ben-milanko/dart-pdf/main/doc/banner.png)
+
 # pdf_editor
 
 A Flutter PDF viewer and editor rendered natively in Dart, with no

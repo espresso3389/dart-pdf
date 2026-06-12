@@ -1,4 +1,4 @@
-# dart-pdf
+![dart-pdf — pure-Dart PDF renderer & editor for Flutter](doc/banner.png)
 
 A PDF renderer and editor written entirely in Dart, for use in Flutter
 apps. No PDFium, no platform channels.

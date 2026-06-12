@@ -1,0 +1,75 @@
+name: Feature request
+description: Suggest an API, renderer, editor, viewer, or tooling improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - COS parsing / writing
+        - document model / incremental save
+        - rendering / graphics
+        - viewer
+        - annotation editing
+        - forms
+        - signatures / encryption
+        - content editing
+        - example app
+        - tests / tooling
+        - documentation
+        - not sure
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user or developer problem would this solve?
+      placeholder: I need to...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior, API, UI, or compatibility target you want.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Mention workarounds, other libraries, or narrower versions of the feature.
+  - type: textarea
+    id: pdf_examples
+    attributes:
+      label: PDF examples or standards references
+      description: Link public sample PDFs, spec sections, or interoperability references if relevant.
+      placeholder: PDF 2.0 section..., Acrobat behavior..., public sample...
+  - type: dropdown
+    id: platforms
+    attributes:
+      label: Target platforms
+      multiple: true
+      options:
+        - Dart VM
+        - Flutter macOS
+        - Flutter iOS
+        - Flutter Android
+        - Flutter Web
+        - Flutter Windows
+        - Flutter Linux
+        - all platforms
+        - not platform-specific
+    validations:
+      required: true
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true

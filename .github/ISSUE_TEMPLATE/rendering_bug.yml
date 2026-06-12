@@ -1,0 +1,99 @@
+name: Rendering bug
+description: Report incorrect PDF rendering, raster output, text selection geometry, or visual regressions.
+title: "[Rendering]: "
+labels:
+  - bug
+  - rendering
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Rendering issues are easiest to fix with a minimal PDF plus a screenshot or reference image. Do not upload confidential files.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Rendering area
+      options:
+        - text / fonts
+        - images
+        - colors / ICC / color spaces
+        - transparency / soft masks / blend modes
+        - shadings / gradients / patterns
+        - annotations / appearance streams
+        - forms
+        - page geometry / rotation / crop boxes
+        - selection / search / hit testing
+        - performance / memory
+        - not sure
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected rendering
+      description: Describe or attach what the page should look like.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual rendering
+      description: Attach screenshots, diffs, or describe the visual problem.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the page number, zoom level, viewer settings, and commands or app steps.
+      placeholder: |
+        PDF page: 0
+        Viewer pageColor:
+        Command:
+          PDF_PATH=... PDF_PAGE=0 fvm flutter test test/render_smoke_test.dart
+    validations:
+      required: true
+  - type: textarea
+    id: comparison
+    attributes:
+      label: Comparison renderer
+      description: If available, mention Acrobat, Preview, Chrome, Poppler, Ghostscript, or another reference.
+      placeholder: Looks correct in Acrobat 2026, incorrect in dart_pdf_editor.
+  - type: textarea
+    id: pdf_details
+    attributes:
+      label: PDF characteristics
+      description: Mention features that may matter.
+      placeholder: Encrypted, signed, scanned, overprint, DeviceN, JPX, JBIG2, ICC, Type3 fonts, annotations, forms...
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.x.y, main at abc1234, or my branch
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Flutter macOS
+        - Flutter iOS
+        - Flutter Android
+        - Flutter Web
+        - Flutter Windows
+        - Flutter Linux
+        - headless test
+        - not platform-specific
+    validations:
+      required: true
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I attached a minimal non-confidential PDF or described how to generate one.
+          required: true

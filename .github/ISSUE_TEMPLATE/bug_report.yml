@@ -1,0 +1,111 @@
+name: Bug report
+description: Report a reproducible parser, document, graphics, viewer, or editing bug.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. If the issue involves a PDF file, attach the smallest non-confidential file that reproduces it, or describe how to generate one programmatically.
+  - type: dropdown
+    id: package
+    attributes:
+      label: Affected package
+      description: Pick the package closest to where the problem appears.
+      options:
+        - pdf_cos
+        - pdf_document
+        - pdf_graphics
+        - dart_pdf_editor
+        - pdf_test_fixtures
+        - example app
+        - not sure
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the behavior you saw and what you expected instead.
+      placeholder: Opening this PDF throws..., but it should...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include code, commands, a fixture builder, or steps in the example app.
+      placeholder: |
+        1. Run ...
+        2. Open ...
+        3. Tap ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output or stack trace
+      description: Paste the full exception, analyzer output, or relevant log.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: pub.dev version, git commit, or branch name.
+      placeholder: v0.x.y, main at abc1234, or my branch
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Select every platform where you reproduced the issue.
+      multiple: true
+      options:
+        - Dart VM
+        - Flutter macOS
+        - Flutter iOS
+        - Flutter Android
+        - Flutter Web
+        - Flutter Windows
+        - Flutter Linux
+        - CI
+        - not platform-specific
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment details
+      description: Include Dart/Flutter versions and any relevant package versions.
+      placeholder: |
+        dart --version
+        flutter --version
+        fvm flutter --version
+      render: text
+  - type: textarea
+    id: pdf_details
+    attributes:
+      label: PDF details
+      description: If this is file-specific, describe the document without sharing private content.
+      placeholder: Encrypted? Signed? Scanned? Forms? Annotations? Fonts/images involved? Page count?
+  - type: textarea
+    id: validation
+    attributes:
+      label: Checks already run
+      description: List any commands you ran.
+      placeholder: |
+        fvm flutter pub get
+        fvm dart analyze
+        cd packages/pdf_document && fvm dart test
+      render: shell
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I can provide a non-confidential reproducer or enough detail to create one.
+          required: true

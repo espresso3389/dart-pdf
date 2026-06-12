@@ -384,8 +384,7 @@ void main() {
         ['Text', 'Circle', 'Square']);
   });
 
-  test('sendAnnotationsToBack moves entries to the start, keeping order',
-      () {
+  test('sendAnnotationsToBack moves entries to the start, keeping order', () {
     final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
       ..addSquare(0, const PdfRect(100, 100, 200, 150))
       ..addNote(0, 300, 700, 'middle')
@@ -511,12 +510,14 @@ void main() {
     expect(content, contains('102 102 296 246 re'));
     expect(content, contains('B')); // fill + stroke
     // the opacity round-trips through the regenerated GS0
-    final resources = reopened.cos
-        .resolve(square.normalAppearance!.dictionary['Resources']) as CosDictionary;
+    final resources =
+        reopened.cos.resolve(square.normalAppearance!.dictionary['Resources'])
+            as CosDictionary;
     final gstates =
         reopened.cos.resolve(resources['ExtGState']) as CosDictionary;
     final gs0 = reopened.cos.resolve(gstates['GS0']) as CosDictionary;
-    expect((reopened.cos.resolve(gs0['ca']) as CosReal).value, closeTo(0.5, 1e-9));
+    expect(
+        (reopened.cos.resolve(gs0['ca']) as CosReal).value, closeTo(0.5, 1e-9));
     // no stretch matrix: the regenerated form maps 1:1
     expect(square.normalAppearance!.dictionary['Matrix'], isNull);
   });
@@ -532,7 +533,8 @@ void main() {
           0, doc.page(0).annotations.single, const PdfRect(50, 50, 350, 250));
     final reopened = PdfDocument.open(editor.save());
 
-    final content = appearanceText(reopened, reopened.page(0).annotations.single);
+    final content =
+        appearanceText(reopened, reopened.page(0).annotations.single);
     expect(content, contains('c')); // the ellipse Béziers
     expect(content.trimRight(), endsWith('f')); // filled, not stroked
     // the new ellipse spans the new rect: center (200,150), rx 150
@@ -559,6 +561,105 @@ void main() {
     // the appearance still paints the ORIGINAL geometry — the viewer's
     // BBox→Rect fit stretches it, dashes and all
     expect(appearanceText(reopened, resized), contains('101 101 98 48 re'));
+  });
+
+  test('line and arrow annotations carry endpoints and line endings', () {
+    final doc = roundTrip((e) {
+      e.addLine(0, (100, 100), (200, 140),
+          strokeColor: 0x2040A0,
+          strokeWidth: 3,
+          dashed: true,
+          endEnding: PdfLineEnding.closedArrow,
+          author: 'Ben');
+    });
+
+    final line = doc.page(0).annotations.single;
+    expect(line.subtype, 'Line');
+    expect(line.line, ((100.0, 100.0), (200.0, 140.0)));
+    expect(line.borderWidth, 3);
+    expect(line.borderDash, isNotNull);
+    final le = doc.cos.resolve(line.dict['LE']) as CosArray;
+    expect((doc.cos.resolve(le[0]) as CosName).value, 'None');
+    expect((doc.cos.resolve(le[1]) as CosName).value, 'ClosedArrow');
+    final content = appearanceText(doc, line);
+    expect(content, contains('[9 6] 0 d'));
+    expect(content, contains('100 100 m'));
+    expect(content, contains('200 140 l'));
+    expect(content, contains('f'));
+    expect((doc.cos.resolve(line.dict['T']) as CosString).text, 'Ben');
+  });
+
+  test('polyline and polygon annotations carry vertices', () {
+    final doc = roundTrip((e) {
+      e.addPolyLine(0, [(100, 100), (140, 130), (180, 110)]);
+      e.addPolygon(0, [(220, 100), (260, 140), (300, 100)],
+          fillColor: 0xFFE0E0, dashed: true);
+    });
+
+    final annots = doc.page(0).annotations;
+    expect(annots[0].subtype, 'PolyLine');
+    expect(
+        annots[0].vertices, [(100.0, 100.0), (140.0, 130.0), (180.0, 110.0)]);
+    expect(appearanceText(doc, annots[0]), isNot(contains('h')));
+
+    expect(annots[1].subtype, 'Polygon');
+    expect(
+        annots[1].vertices, [(220.0, 100.0), (260.0, 140.0), (300.0, 100.0)]);
+    expect(annots[1].interiorColor, 0xFFE0E0);
+    final content = appearanceText(doc, annots[1]);
+    expect(content, contains('h'));
+    expect(content, contains('B'));
+    expect(content, contains('[6 4] 0 d'));
+  });
+
+  test('resizing a dashed arrow regenerates with scaled endpoints', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addLine(0, (100, 100), (200, 140),
+          strokeWidth: 3, dashed: true, endEnding: PdfLineEnding.closedArrow);
+    final doc = PdfDocument.open(first.save());
+
+    final editor = PdfEditor(doc)
+      ..resizeAnnotation(
+          0, doc.page(0).annotations.single, const PdfRect(50, 50, 350, 250));
+    final reopened = PdfDocument.open(editor.save());
+
+    final line = reopened.page(0).annotations.single;
+    expect(line.line!.$1.$1, closeTo(61.111111, 1e-6));
+    expect(line.line!.$1.$2, closeTo(66.666667, 1e-6));
+    expect(line.line!.$2.$1, closeTo(338.888889, 1e-6));
+    expect(line.line!.$2.$2, closeTo(233.333333, 1e-6));
+    final content = appearanceText(reopened, line);
+    expect(content, contains('[9 6] 0 d'));
+    expect(content, contains('61.111 66.667 m'));
+    expect(content, contains('338.889 233.333 l'));
+    expect(line.normalAppearance!.dictionary['Matrix'], isNull);
+  });
+
+  test('reshaping line annotations rewrites vertices and appearance', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addLine(0, (100, 100), (200, 140),
+          strokeWidth: 3, dashed: true, endEnding: PdfLineEnding.closedArrow)
+      ..addPolyLine(0, [(100, 220), (140, 250), (180, 230)]);
+    final doc = PdfDocument.open(first.save());
+
+    final editor = PdfEditor(doc)
+      ..reshapeLineAnnotation(
+          0, doc.page(0).annotations[0], [(90, 95), (240, 160)])
+      ..reshapeLineAnnotation(
+          0, doc.page(0).annotations[1], [(100, 220), (160, 280), (180, 230)]);
+    final reopened = PdfDocument.open(editor.save());
+
+    final line = reopened.page(0).annotations[0];
+    expect(line.line, ((90.0, 95.0), (240.0, 160.0)));
+    expect(line.borderDash, isNotNull);
+    final lineContent = appearanceText(reopened, line);
+    expect(lineContent, contains('90 95 m'));
+    expect(lineContent, contains('240 160 l'));
+    expect(lineContent, contains('f'), reason: 'closed arrowhead preserved');
+
+    final poly = reopened.page(0).annotations[1];
+    expect(poly.vertices, [(100.0, 220.0), (160.0, 280.0), (180.0, 230.0)]);
+    expect(appearanceText(reopened, poly), contains('160 280 l'));
   });
 
   test('resizing free text re-wraps at the same font size', () {
@@ -745,8 +846,7 @@ void main() {
 
     expect(dist(quad[0], quad[1]), closeTo(150, 1e-6));
     expect(dist(quad[0], quad[3]), closeTo(80, 1e-6));
-    final angle =
-        math.atan2(quad[1].$2 - quad[0].$2, quad[1].$1 - quad[0].$1);
+    final angle = math.atan2(quad[1].$2 - quad[0].$2, quad[1].$1 - quad[0].$1);
     expect(angle, closeTo(math.pi / 4, 1e-6));
     // centered where the local box put it
     expect((square.rect.left + square.rect.right) / 2, closeTo(175, 1e-6));
@@ -790,8 +890,7 @@ void main() {
     expect(at(3), closeTo(225, 1e-6));
     // and the quad still reads 90° with the doubled local width
     final quad = ink.appearanceQuad!;
-    final angle =
-        math.atan2(quad[1].$2 - quad[0].$2, quad[1].$1 - quad[0].$1);
+    final angle = math.atan2(quad[1].$2 - quad[0].$2, quad[1].$1 - quad[0].$1);
     expect(angle.abs(), closeTo(math.pi / 2, 1e-6));
   });
 

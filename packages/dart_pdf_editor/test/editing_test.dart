@@ -6,11 +6,23 @@ import 'package:flutter/gestures.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 
 void main() {
+  dynamic editingOverlayPainter(WidgetTester tester) {
+    for (final paint
+        in tester.widgetList<CustomPaint>(find.byType(CustomPaint))) {
+      final painter = paint.painter;
+      if (painter.runtimeType.toString() == '_EditingPreviewPainter') {
+        return painter;
+      }
+    }
+    fail('No editing overlay painter found');
+  }
+
   group('PdfEditingController', () {
     test('apply commits a revision; undo and redo walk the prefix stack', () {
       final editing = PdfEditingController(buildMultiPagePdf(2));
@@ -165,6 +177,30 @@ void main() {
       expect(editing.document.page(0).annotations, isEmpty);
 
       expect(editing.selectAnnotationAt(0, 150, 125), isFalse);
+    });
+
+    test('line-family annotations show resize and rotate controls', () {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..addLine(0, (100, 100), (220, 160), arrow: true)
+        ..addPolyLine(0, [(100, 220), (150, 260), (220, 230)])
+        ..addPolygon(0, [(260, 220), (320, 280), (380, 220)])
+        ..tool = PdfEditTool.select;
+
+      for (var slot = 0; slot < 3; slot++) {
+        editing.selectAnnotation(0, slot);
+        expect(editing.canResizeSelected, isTrue);
+        expect(editing.canRotateSelected, isTrue);
+      }
+
+      editing.selectAnnotation(0, 0);
+      final before = editing.selectedAnnotation!.rect;
+      editing.resizeSelected(const PdfRect(80, 80, 260, 200));
+      expect(editing.selectedAnnotation!.rect, const PdfRect(80, 80, 260, 200));
+      expect(editing.selectedAnnotation!.line, isNotNull);
+
+      editing.rotateSelected(15);
+      expect(editing.selectedAnnotation!.rect, isNot(before));
+      expect(editing.canRotateSelected, isTrue);
     });
 
     test('links and widgets are not selectable', () {
@@ -378,6 +414,118 @@ void main() {
       expect(annotation.rect.height, greaterThan(50));
       expect(editing.document.page(1).annotations, isEmpty);
       await settle(tester);
+    });
+
+    testWidgets('dragging with the arrow tool adds a dashed Line',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing
+        ..tool = PdfEditTool.arrow
+        ..dashedStroke = true;
+      await tester.pump();
+
+      await drag(tester, view(100, 700), view(250, 620));
+
+      final annotation = editing.document.page(0).annotations.single;
+      expect(annotation.subtype, 'Line');
+      expect(annotation.line, isNotNull);
+      expect(annotation.borderDash, isNotNull);
+      final le =
+          editing.document.cos.resolve(annotation.dict['LE']) as CosArray;
+      expect((editing.document.cos.resolve(le[1]) as CosName).value,
+          'ClosedArrow');
+      editing
+        ..tool = PdfEditTool.select
+        ..selectAnnotation(0, 0);
+      expect(editing.canResizeSelected, isTrue);
+      expect(editing.canRotateSelected, isTrue);
+      await settle(tester);
+    });
+
+    testWidgets('line-family selection drags vertex handles', (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing
+        ..tool = PdfEditTool.arrow
+        ..dashedStroke = true;
+      await tester.pump();
+      await drag(tester, view(100, 700), view(250, 620));
+
+      editing
+        ..tool = PdfEditTool.select
+        ..selectAnnotation(0, 0);
+      await tester.pump();
+
+      final gesture = await tester.startGesture(view(250, 620),
+          kind: PointerDeviceKind.mouse);
+      await gesture.moveTo(view(300, 610));
+      await tester.pump();
+
+      final live = editingOverlayPainter(tester).livePath;
+      expect(live, isNotNull);
+      expect(live.tool, PdfEditTool.arrow);
+      expect(live.dashed, isTrue);
+      expect((live.points as List).cast<Offset>(),
+          [view(100, 700), view(300, 610)]);
+      await gesture.up();
+      await tester.pump();
+
+      final annotation = editing.document.page(0).annotations.single;
+      expect(annotation.subtype, 'Line');
+      expect(annotation.line!.$1.$1, closeTo(100, 1));
+      expect(annotation.line!.$1.$2, closeTo(700, 1));
+      expect(annotation.line!.$2.$1, closeTo(300, 1));
+      expect(annotation.line!.$2.$2, closeTo(610, 1));
+      await settle(tester);
+    });
+
+    testWidgets('polyline tool taps points and double-taps to finish',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing.tool = PdfEditTool.polyline;
+      await tester.pump();
+
+      await tester.tapAt(view(100, 700));
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tapAt(view(150, 660));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(editing.document.page(0).annotations, isEmpty);
+
+      await tester.tapAt(view(220, 680));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tapAt(view(220, 680));
+      await tester.pumpAndSettle(const Duration(milliseconds: 400));
+
+      final annotation = editing.document.page(0).annotations.single;
+      expect(annotation.subtype, 'PolyLine');
+      expect(annotation.vertices, hasLength(3));
+      expect(annotation.vertices!.first.$1, closeTo(100, 1));
+    });
+
+    testWidgets('polyline point preview anchors on pointer down',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing.tool = PdfEditTool.polyline;
+      await tester.pump();
+
+      final down = view(100, 700);
+      final moved = view(180, 680);
+      final gesture =
+          await tester.startGesture(down, kind: PointerDeviceKind.mouse);
+      await tester.pump();
+
+      var path =
+          (editingOverlayPainter(tester).dragPath as List).cast<Offset>();
+      expect(path, [down]);
+
+      await gesture.moveTo(moved);
+      await tester.pump();
+      path = (editingOverlayPainter(tester).dragPath as List).cast<Offset>();
+      expect(path, [down],
+          reason: 'the just-clicked vertex must not chase pointer movement');
+
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(editing.document.page(0).annotations, isEmpty);
     });
 
     testWidgets('the ink tool buffers strokes drawn on the page',

@@ -38,11 +38,22 @@ class ContentWriter {
   void fillColor(int rgb) => op('rg', rgbComponents(rgb));
   void strokeColor(int rgb) => op('RG', rgbComponents(rgb));
   void lineWidth(double width) => op('w', [width]);
+  void lineCap(int cap) => op('J', [cap.toDouble()]);
+  void lineJoin(int join) => op('j', [join.toDouble()]);
+
+  void dash(List<double> pattern, [double phase = 0]) {
+    _buffer.write('[');
+    for (var i = 0; i < pattern.length; i++) {
+      if (i > 0) _buffer.write(' ');
+      _buffer.write(fmt(pattern[i]));
+    }
+    _buffer.write('] ${fmt(phase)} d\n');
+  }
 
   /// Round caps and joins — the right look for freehand ink strokes.
   void roundLines() {
-    op('J', [1]);
-    op('j', [1]);
+    lineCap(1);
+    lineJoin(1);
   }
 
   void moveTo(double x, double y) => op('m', [x, y]);

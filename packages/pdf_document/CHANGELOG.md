@@ -6,7 +6,7 @@ Initial release.
 
 - `PdfDocument`: page tree with inherited attributes, metadata, outlines,
   text-page lookup.
-- `PdfEditor`: incremental-save editing — annotation authoring (highlight,
+- `PdfEditor`: incremental-save editing. Annotation authoring (highlight,
   ink with pressure, shapes, free text, notes, stamps), flattening,
   page manipulation (reorder, remove, append across documents, extract),
   content stamping/deletion/text replacement.

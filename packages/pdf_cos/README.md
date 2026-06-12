@@ -1,31 +1,31 @@
 # pdf_cos
 
-The COS (Carousel Object System) layer of the [dart-pdf
-suite](https://github.com/ben-milanko/dart-pdf): everything a PDF file is
-*made of*, before any notion of pages or rendering.
+The COS (Carousel Object System) layer of the
+[dart-pdf suite](https://github.com/ben-milanko/dart-pdf): everything a
+PDF file is made of, before any notion of pages or rendering.
 
-Pure Dart — no `dart:io`, no Flutter — so it runs on the VM, in CLIs and
-servers, and on the web.
+Pure Dart with no `dart:io` or Flutter dependency, so it runs on the VM,
+in CLIs and servers, and on the web.
 
-## What's in the box
+## Features
 
-- **Object model** — dictionaries, arrays, names, strings, numbers,
-  streams, and indirect references, with lazy object loading through the
+- Object model: dictionaries, arrays, names, strings, numbers, streams,
+  and indirect references, with lazy object loading through the
   cross-reference machinery.
-- **Lenient parsing** — real-world PDFs are broken (wrong `/Length`,
-  missing `endobj`, junk before the header). The parser tolerates them on
-  input and stays strict on output, including full xref recovery by
-  scanning for object headers when the chain is broken.
-- **Filters** — Flate, LZW, RunLength, ASCIIHex, ASCII85, CCITT G3/G4,
-  JBIG2 (embedded profile), JPEG 2000, plus predictors. The image codecs
-  are validated against reference implementations (libtiff, jbig2dec,
+- Lenient parsing. Real-world PDFs are broken (wrong `/Length`, missing
+  `endobj`, junk before the header); the parser tolerates them on input
+  and stays strict on output, including full xref recovery by scanning
+  for object headers when the chain is broken.
+- Filters: Flate, LZW, RunLength, ASCIIHex, ASCII85, CCITT G3/G4, JBIG2
+  (embedded profile), JPEG 2000, plus predictors. The image codecs are
+  validated against reference implementations (libtiff, jbig2dec,
   OpenJPEG).
-- **Encryption** — RC4, AES-128, and AES-256 decryption, and
-  encrypt-on-write for incremental saves.
-- **Crypto primitives** — ASN.1, RSA, ECDSA, CMS, and X.509 chain
-  verification, used by the document layer for digital signatures.
-- **Writing** — incremental updates that append to the original bytes,
-  and a from-scratch document builder.
+- Encryption: RC4, AES-128, and AES-256 decryption, and encrypt-on-write
+  for incremental saves.
+- Crypto primitives (ASN.1, RSA, ECDSA, CMS, X.509 chain verification)
+  used by the document layer for digital signatures.
+- Writing: incremental updates that append to the original bytes, and a
+  from-scratch document builder.
 
 ## Usage
 

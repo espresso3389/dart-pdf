@@ -15,7 +15,7 @@ Initial release.
   field administration and flattening.
 - Panels: thumbnail sidebar with drag reorder, annotation sidebar with
   search and multi-select, properties panel, search results panel.
-- Multi-user guard rails: per-annotation read-only (`/F` flags +
+- Permissions: per-annotation read-only (`/F` flags +
   `canEditAnnotation` predicate) and a hide-all-annotations toggle.
 - Sync surface: `annotationChanges` feed + `applyRemoteChange` for
   collaborative annotation stores.

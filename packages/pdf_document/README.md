@@ -1,40 +1,38 @@
 # pdf_document
 
-Document-level PDF semantics for the [dart-pdf
-suite](https://github.com/ben-milanko/dart-pdf): pages, annotations,
-forms, signatures, and a full incremental-save editor.
+Document-level PDF semantics for the
+[dart-pdf suite](https://github.com/ben-milanko/dart-pdf): pages,
+annotations, forms, signatures, and a full incremental-save editor.
 
-Pure Dart — no `dart:io`, no Flutter — so it runs on the VM, in CLIs and
-servers, and on the web.
+Pure Dart with no `dart:io` or Flutter dependency, so it runs on the VM,
+in CLIs and servers, and on the web.
 
-## What's in the box
+## Features
 
-- **Reading** — `PdfDocument.open` (with password support), the page
-  tree with inherited attributes, metadata, outlines, and parsed
-  annotations.
-- **Editing** — `PdfEditor` saves incrementally, so every revision is a
-  byte prefix of the next:
+- Reading: `PdfDocument.open` (with password support), the page tree
+  with inherited attributes, metadata, outlines, and parsed annotations.
+- Editing: `PdfEditor` saves incrementally, so every revision is a byte
+  prefix of the next.
   - Annotations: highlights, ink (with stylus pressure and spline
-    smoothing), shapes, free text, notes, stamps, signatures — with
-    generated appearance streams; move/resize/rotate/restyle, a slicing
-    eraser, clipboard snapshots, and flattening.
+    smoothing), shapes, free text, notes, stamps, and signatures, all
+    with generated appearance streams; move/resize/rotate/restyle, a
+    slicing eraser, clipboard snapshots, and flattening.
   - Pages: reorder, remove, append from other documents, extract to a
     new file.
   - Content: stamp text/shapes/images, enumerate and delete page
     elements, replace text.
-- **Forms** — the AcroForm field model, filling with regenerated
-  appearances (text, checkbox, radio, choice, auto-size, quadding),
-  and field administration: add, rename, remove, change type, button
-  images, flatten.
-- **Signatures** — read and validate (`PdfSignature.validate`, optional
+- Forms: the AcroForm field model, filling with regenerated appearances
+  (text, checkbox, radio, choice, auto-size, quadding), and field
+  administration (add, rename, remove, change type, button images,
+  flatten).
+- Signatures: read and validate (`PdfSignature.validate`, optional
   trust-store chain validation) and sign (`PdfEditor.saveSigned`,
   `adbe.pkcs7.detached`).
-- **Sync** — `/NM`-keyed annotation snapshots, JSON serialization,
+- Sync: `/NM`-keyed annotation snapshots, JSON serialization,
   `pdfDiffAnnotations`, and upsert/remove-by-name replay, built for
   collaborative annotation stores.
-- **Images** — embed JPEG (passthrough) and baseline PNG (all bit
-  depths and color types, transparency, interlacing) with alpha soft
-  masks.
+- Images: embed JPEG (passthrough) and baseline PNG (all bit depths and
+  color types, transparency, interlacing) with alpha soft masks.
 
 ## Usage
 

@@ -13,7 +13,7 @@ Test layers:
 - `packages/pdf_graphics/test/pdfjs_corpus_test.dart` — pure Dart:
   per-file pinned expectations (opens / controlled failure / password /
   may-be-blank); every page must interpret without throwing.
-- `packages/pdf_flutter/test/pdfjs_render_test.dart` — rasterizes every
+- `packages/pdf_editor/test/pdfjs_render_test.dart` — rasterizes every
   page (no baselines): the decode pipeline must not throw.
 
 ## Structure & lenient parsing

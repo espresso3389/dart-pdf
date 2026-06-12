@@ -7,7 +7,7 @@ Initial release.
 - Content-stream interpreter covering the full operator set: paths,
   clipping, transparency groups, soft masks, blend modes, optional
   content, type 0–4 functions.
-- Device interface — implement one class to render PDF pages anywhere.
+- Device interface: implement one class to render PDF pages anywhere.
 - Font engine: Type 1, TrueType, CFF, Type 0/CID, Type 3; embedded and
   standard-14 metrics.
 - Shadings 1–7 including mesh parsing; tiling and shading patterns.

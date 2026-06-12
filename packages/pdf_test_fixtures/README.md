@@ -5,7 +5,7 @@ the [dart-pdf suite](https://github.com/ben-milanko/dart-pdf)'s test
 suites and useful for testing any PDF tooling.
 
 Because fixtures are built in code, byte offsets, xref entries, and
-stream lengths are always correct — no hand-edited files to drift.
+stream lengths are always correct, with no hand-edited files to drift.
 
 ## Builders
 

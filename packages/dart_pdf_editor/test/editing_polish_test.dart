@@ -295,6 +295,10 @@ void main() {
       final data = await capture(tester, boundary);
       expect(patchHas(data, 800, 600, edge.dx, edge.dy, 4, strongRed), isTrue,
           reason: 'the moved annotation should stay painted post-commit');
+      final oldEdge = view(100, 700) - const Offset(0, 33);
+      expect(patchHas(data, 800, 600, oldEdge.dx, oldEdge.dy, 4, strongRed),
+          isFalse,
+          reason: 'the source position should be washed while rerendering');
       // let the double-tap recognizer's timer expire
       await tester.pump(const Duration(milliseconds: 400));
     });

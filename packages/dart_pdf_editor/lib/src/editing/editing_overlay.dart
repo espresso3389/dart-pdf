@@ -251,6 +251,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   ui.Picture? _afterGhost;
   Rect? _afterGhostFrom;
   Rect? _afterGhostTo;
+  Rect? _afterGhostSourceRect;
   double _afterGhostRotation = 0;
   double _afterGhostLocalAngle = 0;
   ({Rect rect, PdfEditTool tool, Color color, double strokeWidth})? _afterShape;
@@ -636,6 +637,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterGhost = null;
     _afterGhostFrom = null;
     _afterGhostTo = null;
+    _afterGhostSourceRect = null;
     _afterGhostRotation = 0;
     _afterGhostLocalAngle = 0;
     _afterShape = null;
@@ -658,6 +660,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   void _commitWithGhost(VoidCallback commit,
       {Rect? to, double rotation = 0, double localAngle = 0}) {
     final from = localAngle == 0 ? _selectedViewRect : _selectionChrome?.$1;
+    final source = _selectedViewRect;
     final ghost = _ghost;
     final before = _controller.document;
     commit();
@@ -669,6 +672,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterGhost = ghost;
     _afterGhostFrom = from;
     _afterGhostTo = to;
+    _afterGhostSourceRect = source;
     _afterGhostRotation = rotation;
     _afterGhostLocalAngle = localAngle;
     _afterDocument = _controller.document;
@@ -1994,6 +1998,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                             picture: _afterGhost!,
                             from: _afterGhostFrom!,
                             to: _afterGhostTo!,
+                            source: _afterGhostSourceRect,
                             rotation: _afterGhostRotation,
                             localAngle: _afterGhostLocalAngle,
                           )
@@ -2288,11 +2293,14 @@ class _EditingPreviewPainter extends CustomPainter {
   final double eraserRadius;
 
   /// A just-committed move/resize/rotate, kept painted at full strength
-  /// until the new revision's raster lands.
+  /// until the new revision's raster lands. [source] is the old
+  /// on-raster position, washed out first so a slow page rerender
+  /// doesn't leave a visible duplicate behind the afterimage.
   final ({
     ui.Picture picture,
     Rect from,
     Rect to,
+    Rect? source,
     double rotation,
     double localAngle,
   })? afterGhost;
@@ -2468,6 +2476,13 @@ class _EditingPreviewPainter extends CustomPainter {
 
     final committed = afterGhost;
     if (committed != null) {
+      final source = committed.source;
+      if (source != null) {
+        canvas.drawRect(
+          source.inflate(2),
+          Paint()..color = fadeColor.withValues(alpha: 0.92),
+        );
+      }
       // full strength: this *is* the committed result, standing in for
       // the raster that hasn't landed yet
       paintAnnotationDragPreview(canvas,

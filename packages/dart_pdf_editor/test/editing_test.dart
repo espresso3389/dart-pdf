@@ -12,6 +12,17 @@ import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 
 void main() {
+  dynamic editingOverlayPainter(WidgetTester tester) {
+    for (final paint
+        in tester.widgetList<CustomPaint>(find.byType(CustomPaint))) {
+      final painter = paint.painter;
+      if (painter.runtimeType.toString() == '_EditingPreviewPainter') {
+        return painter;
+      }
+    }
+    fail('No editing overlay painter found');
+  }
+
   group('PdfEditingController', () {
     test('apply commits a revision; undo and redo walk the prefix stack', () {
       final editing = PdfEditingController(buildMultiPagePdf(2));
@@ -474,6 +485,33 @@ void main() {
       expect(annotation.subtype, 'PolyLine');
       expect(annotation.vertices, hasLength(3));
       expect(annotation.vertices!.first.$1, closeTo(100, 1));
+    });
+
+    testWidgets('polyline point preview anchors on pointer down',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing.tool = PdfEditTool.polyline;
+      await tester.pump();
+
+      final down = view(100, 700);
+      final moved = view(180, 680);
+      final gesture =
+          await tester.startGesture(down, kind: PointerDeviceKind.mouse);
+      await tester.pump();
+
+      var path =
+          (editingOverlayPainter(tester).dragPath as List).cast<Offset>();
+      expect(path, [down]);
+
+      await gesture.moveTo(moved);
+      await tester.pump();
+      path = (editingOverlayPainter(tester).dragPath as List).cast<Offset>();
+      expect(path, [down],
+          reason: 'the just-clicked vertex must not chase pointer movement');
+
+      await gesture.up();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(editing.document.page(0).annotations, isEmpty);
     });
 
     testWidgets('the ink tool buffers strokes drawn on the page',

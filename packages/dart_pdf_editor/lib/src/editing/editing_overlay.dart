@@ -387,6 +387,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       return;
     }
     if (_gestureBailed) return;
+    if (_polyTool) {
+      _addPolyPoint(event.localPosition);
+      return;
+    }
     if (_drawTool &&
         _controller.fingerDrawsInk &&
         (event.kind == PointerDeviceKind.stylus ||
@@ -1748,7 +1752,6 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       return;
     }
     if (_polyTool) {
-      _addPolyPoint(details.localPosition);
       return;
     }
     final (x, y) = _geometry.toPagePoint(details.localPosition);

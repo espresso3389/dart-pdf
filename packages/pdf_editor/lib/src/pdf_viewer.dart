@@ -1276,6 +1276,9 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     _lastPointerKind = event.kind;
     _panFlinger.stop();
     _touchFlinger.stop();
+    if (event.kind == PointerDeviceKind.touch) {
+      widget.editing?.noteTouchInput();
+    }
     // a raw listener fires regardless of who wins the gesture arena, so
     // clicking anywhere — including editing overlays — focuses the viewer
     // and its keyboard shortcuts. Not while an in-place text editor is

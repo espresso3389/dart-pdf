@@ -586,6 +586,33 @@ class PdfEditingController extends ChangeNotifier {
 
   set fingerDrawsInk(bool value) => preferences.fingerDrawsInk = value;
 
+  /// Whether touch input is in play this session: always true on
+  /// touch-first platforms (iOS/Android/Fuchsia), and flipped on by the
+  /// first touch pointer the viewer or toolbar sees elsewhere (a
+  /// touchscreen laptop, say). The stock toolbar hides the finger-draws
+  /// toggle until this is true — on a mouse-only desktop the control
+  /// has nothing to control.
+  bool get hasTouchInput =>
+      _touchSeen ||
+      switch (defaultTargetPlatform) {
+        TargetPlatform.iOS ||
+        TargetPlatform.android ||
+        TargetPlatform.fuchsia =>
+          true,
+        _ => false,
+      };
+  bool _touchSeen = false;
+
+  /// Records that a touch pointer was seen, revealing touch-only chrome
+  /// ([hasTouchInput]). The viewer and toolbar call this from their raw
+  /// pointer-down listeners; not persisted — a session without touch
+  /// starts clean.
+  void noteTouchInput() {
+    if (_touchSeen) return;
+    _touchSeen = true;
+    notifyListeners();
+  }
+
   /// Drawn-but-uncommitted ink strokes on [pageIndex], in page space.
   List<List<(double, double)>> strokesOn(int pageIndex) =>
       List.unmodifiable(_ink[pageIndex] ?? const []);

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:pdf_document/pdf_document.dart' show PdfStandardFont;
 
@@ -125,241 +126,256 @@ class PdfEditingToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BottomAppBar(
-      height: 56,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: ListenableBuilder(
-        listenable: Listenable.merge([controller, viewerController]),
-        builder: (context, _) {
-          final hasTextSelection = viewerController.hasSelection;
-          final selected = controller.selectedAnnotation;
+    return Listener(
+      // a touch here (arming a tool is usually the first touch) reveals
+      // the touch-only controls before the page is ever touched
+      onPointerDown: (event) {
+        if (event.kind == PointerDeviceKind.touch) {
+          controller.noteTouchInput();
+        }
+      },
+      child: BottomAppBar(
+        height: 56,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: ListenableBuilder(
+          listenable: Listenable.merge([controller, viewerController]),
+          builder: (context, _) {
+            final hasTextSelection = viewerController.hasSelection;
+            final selected = controller.selectedAnnotation;
 
-          Widget toolButton(PdfEditTool value, IconData icon, String tip) =>
-              IconButton(
-                icon: Icon(icon),
-                tooltip: tip,
-                isSelected: controller.tool == value,
-                onPressed: () => _toggleTool(value),
-              );
-
-          Widget markupButton(PdfMarkupKind kind, IconData icon, String tip) =>
-              IconButton(
-                icon: Icon(icon),
-                tooltip: tip,
-                onPressed: hasTextSelection ? () => _markup(kind) : null,
-              );
-
-          return SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(children: [
-              IconButton(
-                icon: const Icon(Icons.undo),
-                tooltip: 'Undo (⌘Z)',
-                onPressed: controller.canUndo ? controller.undo : null,
-              ),
-              IconButton(
-                icon: const Icon(Icons.redo),
-                tooltip: 'Redo (⇧⌘Z)',
-                onPressed: controller.canRedo ? controller.redo : null,
-              ),
-              const VerticalDivider(width: 16),
-              markupButton(PdfMarkupKind.highlight, Icons.border_color,
-                  'Highlight selection'),
-              markupButton(PdfMarkupKind.underline, Icons.format_underlined,
-                  'Underline selection'),
-              markupButton(PdfMarkupKind.strikeOut, Icons.format_strikethrough,
-                  'Strike out selection'),
-              markupButton(PdfMarkupKind.squiggly, Icons.gesture,
-                  'Squiggly-underline selection'),
-              const VerticalDivider(width: 16),
-              toolButton(PdfEditTool.select, Icons.near_me, 'Select'),
-              if (selected != null) ...[
+            Widget toolButton(PdfEditTool value, IconData icon, String tip) =>
                 IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  tooltip: switch (controller.selectedAnnotationSlots.length) {
-                    1 => 'Delete annotation',
-                    final n => 'Delete $n annotations',
-                  },
-                  onPressed: controller.deleteSelected,
+                  icon: Icon(icon),
+                  tooltip: tip,
+                  isSelected: controller.tool == value,
+                  onPressed: () => _toggleTool(value),
+                );
+
+            Widget markupButton(
+                    PdfMarkupKind kind, IconData icon, String tip) =>
+                IconButton(
+                  icon: Icon(icon),
+                  tooltip: tip,
+                  onPressed: hasTextSelection ? () => _markup(kind) : null,
+                );
+
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(children: [
+                IconButton(
+                  icon: const Icon(Icons.undo),
+                  tooltip: 'Undo (⌘Z)',
+                  onPressed: controller.canUndo ? controller.undo : null,
                 ),
-                if (controller.canEditSelectedText)
+                IconButton(
+                  icon: const Icon(Icons.redo),
+                  tooltip: 'Redo (⇧⌘Z)',
+                  onPressed: controller.canRedo ? controller.redo : null,
+                ),
+                const VerticalDivider(width: 16),
+                markupButton(PdfMarkupKind.highlight, Icons.border_color,
+                    'Highlight selection'),
+                markupButton(PdfMarkupKind.underline, Icons.format_underlined,
+                    'Underline selection'),
+                markupButton(PdfMarkupKind.strikeOut,
+                    Icons.format_strikethrough, 'Strike out selection'),
+                markupButton(PdfMarkupKind.squiggly, Icons.gesture,
+                    'Squiggly-underline selection'),
+                const VerticalDivider(width: 16),
+                toolButton(PdfEditTool.select, Icons.near_me, 'Select'),
+                if (selected != null) ...[
                   IconButton(
-                    icon: const Icon(Icons.edit),
-                    tooltip: 'Edit annotation text',
-                    onPressed: () => _editSelectedText(context),
+                    icon: const Icon(Icons.delete_outline),
+                    tooltip: switch (
+                        controller.selectedAnnotationSlots.length) {
+                      1 => 'Delete annotation',
+                      final n => 'Delete $n annotations',
+                    },
+                    onPressed: controller.deleteSelected,
                   ),
-              ],
-              toolButton(PdfEditTool.ink, Icons.draw, 'Draw'),
-              if (controller.tool == PdfEditTool.ink ||
-                  controller.tool == PdfEditTool.eraser)
-                IconButton(
-                  icon: const Icon(Icons.touch_app),
-                  tooltip: controller.fingerDrawsInk
-                      ? 'Finger draws — tap so it scrolls instead'
-                      : 'Finger scrolls (pen draws) — tap so it draws',
-                  isSelected: controller.fingerDrawsInk,
-                  onPressed: () =>
-                      controller.fingerDrawsInk = !controller.fingerDrawsInk,
-                ),
-              // with auto-commit (the default) strokes land on their own
-              // and undo covers regret — confirm buttons are manual-mode
-              if (controller.hasPendingInk && !controller.inkAutoCommits) ...[
-                IconButton(
-                  icon: const Icon(Icons.check),
-                  tooltip: 'Add ink annotation',
-                  onPressed: controller.finishInk,
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  tooltip: 'Discard drawing',
-                  onPressed: controller.discardInk,
-                ),
-              ],
-              // the Material icon font ships no true eraser glyph; the
-              // magic-wand outline is the closest stand-in
-              toolButton(PdfEditTool.eraser, Icons.auto_fix_normal,
-                  'Erase ink strokes'),
-              toolButton(
-                  PdfEditTool.rectangle, Icons.rectangle_outlined, 'Rectangle'),
-              toolButton(PdfEditTool.ellipse, Icons.circle_outlined, 'Ellipse'),
-              toolButton(PdfEditTool.freeText, Icons.text_fields, 'Text box'),
-              toolButton(
-                  PdfEditTool.note, Icons.sticky_note_2_outlined, 'Note'),
-              toolButton(PdfEditTool.stamp, Icons.approval, 'Stamp'),
-              if (controller.tool == PdfEditTool.stamp)
-                IconButton(
-                  icon: const Icon(Icons.style),
-                  tooltip: 'Custom stamps…',
-                  isSelected: controller.activeStamp != null,
-                  onPressed: () =>
-                      showPdfStampPicker(context, controller: controller),
-                ),
-              IconButton(
-                icon: const Icon(Icons.history_edu),
-                tooltip: 'Signature — tap a page to place it',
-                isSelected: controller.tool == PdfEditTool.signature,
-                onPressed: () => _toggleSignatureTool(context),
-              ),
-              if (controller.tool == PdfEditTool.signature)
-                IconButton(
-                  icon: const Icon(Icons.restart_alt),
-                  tooltip: 'Draw a new signature…',
-                  onPressed: () => _drawSignature(context),
-                ),
-              toolButton(PdfEditTool.content, Icons.format_shapes,
-                  'Edit page content'),
-              toolButton(PdfEditTool.form, Icons.ballot_outlined,
-                  'Form fields — tap to fill, drag to add'),
-              if (controller.tool == PdfEditTool.form) ...[
-                PopupMenuButton<PdfFormFieldKind>(
-                  key: const ValueKey('pdf-form-field-type'),
-                  tooltip: 'New field type — drag on a page to add one',
-                  icon: Icon(switch (controller.newFormFieldKind) {
-                    PdfFormFieldKind.text => Icons.text_fields,
-                    PdfFormFieldKind.checkBox => Icons.check_box_outlined,
-                    PdfFormFieldKind.pushButton => Icons.smart_button,
-                  }),
-                  initialValue: controller.newFormFieldKind,
-                  onSelected: (kind) => controller.newFormFieldKind = kind,
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(
-                      key: ValueKey('pdf-form-type-text'),
-                      value: PdfFormFieldKind.text,
-                      child: Text('Text field'),
+                  if (controller.canEditSelectedText)
+                    IconButton(
+                      icon: const Icon(Icons.edit),
+                      tooltip: 'Edit annotation text',
+                      onPressed: () => _editSelectedText(context),
                     ),
-                    PopupMenuItem(
-                      key: ValueKey('pdf-form-type-checkbox'),
-                      value: PdfFormFieldKind.checkBox,
-                      child: Text('Check box'),
-                    ),
-                    PopupMenuItem(
-                      key: ValueKey('pdf-form-type-button'),
-                      value: PdfFormFieldKind.pushButton,
-                      child: Text('Image button'),
-                    ),
-                  ],
-                ),
-                IconButton(
-                  icon: const Icon(Icons.layers_clear_outlined),
-                  tooltip: 'Flatten form — bake values into the pages',
-                  onPressed: controller.acroForm == null
-                      ? null
-                      : controller.flattenFormFields,
-                ),
-              ],
-              if (controller.selectedElement != null) ...[
-                IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  tooltip: 'Delete element',
-                  onPressed: controller.deleteSelectedElement,
-                ),
-                if (controller.canEditSelectedElementText)
+                ],
+                toolButton(PdfEditTool.ink, Icons.draw, 'Draw'),
+                // pointless without a touchscreen: it only governs what
+                // touch pointers do
+                if ((controller.tool == PdfEditTool.ink ||
+                        controller.tool == PdfEditTool.eraser) &&
+                    controller.hasTouchInput)
                   IconButton(
-                    icon: const Icon(Icons.edit),
-                    tooltip: 'Replace text',
-                    onPressed: () => _editElementText(context),
+                    icon: const Icon(Icons.touch_app),
+                    tooltip: controller.fingerDrawsInk
+                        ? 'Finger draws — tap so it scrolls instead'
+                        : 'Finger scrolls (pen draws) — tap so it draws',
+                    isSelected: controller.fingerDrawsInk,
+                    onPressed: () =>
+                        controller.fingerDrawsInk = !controller.fingerDrawsInk,
                   ),
-              ],
-              const VerticalDivider(width: 16),
-              for (final color in palette)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
-                  child: InkWell(
-                    onTap: () => _applyColor(color),
-                    customBorder: const CircleBorder(),
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          // theme outline: visible on light and dark chrome
-                          color: controller.color == color
-                              ? Theme.of(context).colorScheme.primary
-                              : Theme.of(context).colorScheme.outline,
-                          width: controller.color == color ? 3 : 1,
+                // with auto-commit (the default) strokes land on their own
+                // and undo covers regret — confirm buttons are manual-mode
+                if (controller.hasPendingInk && !controller.inkAutoCommits) ...[
+                  IconButton(
+                    icon: const Icon(Icons.check),
+                    tooltip: 'Add ink annotation',
+                    onPressed: controller.finishInk,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    tooltip: 'Discard drawing',
+                    onPressed: controller.discardInk,
+                  ),
+                ],
+                // the Material icon font ships no true eraser glyph; the
+                // magic-wand outline is the closest stand-in
+                toolButton(PdfEditTool.eraser, Icons.auto_fix_normal,
+                    'Erase ink strokes'),
+                toolButton(PdfEditTool.rectangle, Icons.rectangle_outlined,
+                    'Rectangle'),
+                toolButton(
+                    PdfEditTool.ellipse, Icons.circle_outlined, 'Ellipse'),
+                toolButton(PdfEditTool.freeText, Icons.text_fields, 'Text box'),
+                toolButton(
+                    PdfEditTool.note, Icons.sticky_note_2_outlined, 'Note'),
+                toolButton(PdfEditTool.stamp, Icons.approval, 'Stamp'),
+                if (controller.tool == PdfEditTool.stamp)
+                  IconButton(
+                    icon: const Icon(Icons.style),
+                    tooltip: 'Custom stamps…',
+                    isSelected: controller.activeStamp != null,
+                    onPressed: () =>
+                        showPdfStampPicker(context, controller: controller),
+                  ),
+                IconButton(
+                  icon: const Icon(Icons.history_edu),
+                  tooltip: 'Signature — tap a page to place it',
+                  isSelected: controller.tool == PdfEditTool.signature,
+                  onPressed: () => _toggleSignatureTool(context),
+                ),
+                if (controller.tool == PdfEditTool.signature)
+                  IconButton(
+                    icon: const Icon(Icons.restart_alt),
+                    tooltip: 'Draw a new signature…',
+                    onPressed: () => _drawSignature(context),
+                  ),
+                toolButton(PdfEditTool.content, Icons.format_shapes,
+                    'Edit page content'),
+                toolButton(PdfEditTool.form, Icons.ballot_outlined,
+                    'Form fields — tap to fill, drag to add'),
+                if (controller.tool == PdfEditTool.form) ...[
+                  PopupMenuButton<PdfFormFieldKind>(
+                    key: const ValueKey('pdf-form-field-type'),
+                    tooltip: 'New field type — drag on a page to add one',
+                    icon: Icon(switch (controller.newFormFieldKind) {
+                      PdfFormFieldKind.text => Icons.text_fields,
+                      PdfFormFieldKind.checkBox => Icons.check_box_outlined,
+                      PdfFormFieldKind.pushButton => Icons.smart_button,
+                    }),
+                    initialValue: controller.newFormFieldKind,
+                    onSelected: (kind) => controller.newFormFieldKind = kind,
+                    itemBuilder: (context) => const [
+                      PopupMenuItem(
+                        key: ValueKey('pdf-form-type-text'),
+                        value: PdfFormFieldKind.text,
+                        child: Text('Text field'),
+                      ),
+                      PopupMenuItem(
+                        key: ValueKey('pdf-form-type-checkbox'),
+                        value: PdfFormFieldKind.checkBox,
+                        child: Text('Check box'),
+                      ),
+                      PopupMenuItem(
+                        key: ValueKey('pdf-form-type-button'),
+                        value: PdfFormFieldKind.pushButton,
+                        child: Text('Image button'),
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.layers_clear_outlined),
+                    tooltip: 'Flatten form — bake values into the pages',
+                    onPressed: controller.acroForm == null
+                        ? null
+                        : controller.flattenFormFields,
+                  ),
+                ],
+                if (controller.selectedElement != null) ...[
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    tooltip: 'Delete element',
+                    onPressed: controller.deleteSelectedElement,
+                  ),
+                  if (controller.canEditSelectedElementText)
+                    IconButton(
+                      icon: const Icon(Icons.edit),
+                      tooltip: 'Replace text',
+                      onPressed: () => _editElementText(context),
+                    ),
+                ],
+                const VerticalDivider(width: 16),
+                for (final color in palette)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: InkWell(
+                      onTap: () => _applyColor(color),
+                      customBorder: const CircleBorder(),
+                      child: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            // theme outline: visible on light and dark chrome
+                            color: controller.color == color
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.outline,
+                            width: controller.color == color ? 3 : 1,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              IconButton(
-                icon: Icon(Icons.palette, color: controller.color),
-                tooltip: 'More colors…',
-                onPressed: () async {
-                  final picked = await showPdfColorPicker(context,
-                      initial: controller.color,
-                      initialFormat: controller.preferences.colorPickerFormat,
-                      onFormatChanged: (format) =>
-                          controller.preferences.colorPickerFormat = format);
-                  if (picked != null) _applyColor(picked);
-                },
-              ),
-              IconButton(
-                icon: const Icon(Icons.colorize),
-                tooltip: 'Pick a color from the page',
-                isSelected: controller.isPickingColor,
-                onPressed: () => controller.isPickingColor
-                    ? controller.cancelColorPick()
-                    : controller.startColorPick(),
-              ),
-              _StyleMenu(controller: controller, palette: palette),
-              const VerticalDivider(width: 16),
-              IconButton(
-                icon: const Icon(Icons.layers),
-                tooltip: 'Flatten annotations into the pages',
-                onPressed: controller.flattenAllAnnotations,
-              ),
-              if (onSave != null)
                 IconButton(
-                  icon: const Icon(Icons.save_alt),
-                  tooltip: 'Save…',
-                  onPressed: () => onSave!(controller.bytes),
+                  icon: Icon(Icons.palette, color: controller.color),
+                  tooltip: 'More colors…',
+                  onPressed: () async {
+                    final picked = await showPdfColorPicker(context,
+                        initial: controller.color,
+                        initialFormat: controller.preferences.colorPickerFormat,
+                        onFormatChanged: (format) =>
+                            controller.preferences.colorPickerFormat = format);
+                    if (picked != null) _applyColor(picked);
+                  },
                 ),
-            ]),
-          );
-        },
+                IconButton(
+                  icon: const Icon(Icons.colorize),
+                  tooltip: 'Pick a color from the page',
+                  isSelected: controller.isPickingColor,
+                  onPressed: () => controller.isPickingColor
+                      ? controller.cancelColorPick()
+                      : controller.startColorPick(),
+                ),
+                _StyleMenu(controller: controller, palette: palette),
+                const VerticalDivider(width: 16),
+                IconButton(
+                  icon: const Icon(Icons.layers),
+                  tooltip: 'Flatten annotations into the pages',
+                  onPressed: controller.flattenAllAnnotations,
+                ),
+                if (onSave != null)
+                  IconButton(
+                    icon: const Icon(Icons.save_alt),
+                    tooltip: 'Save…',
+                    onPressed: () => onSave!(controller.bytes),
+                  ),
+              ]),
+            );
+          },
+        ),
       ),
     );
   }

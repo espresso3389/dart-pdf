@@ -1534,3 +1534,17 @@ still expected false — suites had been red since. Tests:
 editing_fling_test (3), editing_longpress_menu_test (6, incl. the
 claim-gate regression "long-press on page text still selects the
 word"), form_field_highlight_test (5).
+Finger-toggle visibility (Ben: "still shown on non-touch displays"):
+`controller.hasTouchInput` — true on iOS/Android/Fuchsia
+(defaultTargetPlatform), elsewhere flips on the first TOUCH
+pointer-down seen by the viewer's raw listener or a Listener wrapping
+the toolbar (arming a tool is usually a session's first touch);
+transient, not persisted (`noteTouchInput()`, idempotent notify). The
+toolbar's touch_app button now also requires it. Test gotchas
+(editing_touch_toggle_test.dart): resetting
+debugDefaultTargetPlatformOverride in addTearDown is TOO LATE — the
+binding's invariant check runs first; use `variant:
+TargetPlatformVariant.only(...)`. A touch tap with ink armed draws a
+DOT whose 800ms auto-commit timer outlives the test (!timersPending)
+— touch in reader mode, then arm ink. flutter_test's default platform
+is android, so existing touch_app-dependent tests pass unchanged.

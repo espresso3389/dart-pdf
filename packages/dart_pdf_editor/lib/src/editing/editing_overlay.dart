@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
 
 import '../page_geometry.dart';
@@ -225,6 +226,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   Rect? _resizeFrom;
   Rect? _resizeRect;
   double _resizeAngle = 0;
+  int? _vertexHandle;
+  List<Offset>? _vertexPoints;
 
   // rubber-band selection (mouse drags on empty page area)
   Offset? _marqueeStart;
@@ -603,6 +606,50 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     return [for (final (x, y) in quad) _geometry.toViewOffset(x, y)];
   }
 
+  bool get _selectedLineFamily {
+    final subtype = _controller.selectedAnnotation?.subtype;
+    return subtype == 'Line' || subtype == 'PolyLine' || subtype == 'Polygon';
+  }
+
+  PdfEditTool? get _selectedLineTool {
+    final annotation = _controller.selectedAnnotation;
+    switch (annotation?.subtype) {
+      case 'Line':
+        final cos = annotation!.document.cos;
+        final le = cos.resolve(annotation.dict['LE']);
+        if (le is CosArray && le.length >= 2) {
+          final end = cos.resolve(le[1]);
+          if (end is CosName && end.value == 'ClosedArrow') {
+            return PdfEditTool.arrow;
+          }
+        }
+        return PdfEditTool.line;
+      case 'PolyLine':
+        return PdfEditTool.polyline;
+      case 'Polygon':
+        return PdfEditTool.polygon;
+      default:
+        return null;
+    }
+  }
+
+  /// The selected line-family annotation's defining points in view space:
+  /// /L endpoints for Line, /Vertices for PolyLine and Polygon.
+  List<Offset>? get _selectedVertexPoints {
+    if (_controller.selectedPage != widget.pageIndex) return null;
+    final annotation = _controller.selectedAnnotation;
+    if (annotation == null) return null;
+    if (annotation.line case final line?) {
+      return [
+        _geometry.toViewOffset(line.$1.$1, line.$1.$2),
+        _geometry.toViewOffset(line.$2.$1, line.$2.$2),
+      ];
+    }
+    final vertices = annotation.vertices;
+    if (vertices == null) return null;
+    return [for (final (x, y) in vertices) _geometry.toViewOffset(x, y)];
+  }
+
   /// The view-space rotation of [quad]'s bottom edge — the angle the
   /// selection chrome spins by (canvas.rotate convention: clockwise
   /// positive). Numeric noise within ~0.3° reads as unrotated.
@@ -785,6 +832,16 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       if ((position - _handleCenter(rect, handle)).distance <=
           _handleHitRadius * _chromeScale) {
         return handle;
+      }
+    }
+    return null;
+  }
+
+  int? _vertexHandleAt(List<Offset> points, Offset position) {
+    if (!_controller.canResizeSelected) return null;
+    for (var i = points.length - 1; i >= 0; i--) {
+      if ((position - points[i]).distance <= _handleHitRadius * _chromeScale) {
+        return i;
       }
     }
     return null;
@@ -1099,13 +1156,25 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     final chrome = _selectionChrome;
     final resting = chrome?.$2 ?? 0;
     if (selected != null) {
+      final vertexPoints = _selectedVertexPoints;
+      final vertex =
+          vertexPoints == null ? null : _vertexHandleAt(vertexPoints, position);
+      if (vertex != null) {
+        setState(() {
+          _vertexHandle = vertex;
+          _vertexPoints = List<Offset>.of(vertexPoints!);
+        });
+        return;
+      }
       // a rotated selection resizes in its local frame: hit-test the
       // handles where they're drawn (on the spun chrome box) by
       // unrotating the pointer about the chrome center
-      final handle = resting == 0 || chrome == null
-          ? _handleAt(selected, position)
-          : _handleAt(
-              chrome.$1, _rotatePoint(position, chrome.$1.center, -resting));
+      final handle = _selectedLineFamily
+          ? null
+          : resting == 0 || chrome == null
+              ? _handleAt(selected, position)
+              : _handleAt(chrome.$1,
+                  _rotatePoint(position, chrome.$1.center, -resting));
       if (handle != null) {
         setState(() {
           _resizeHandle = handle;
@@ -1226,6 +1295,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       final selected = _selectedViewRect;
       if (selected == null) return;
       setState(() => _rotateDelta = _rotationDelta(selected, position));
+    } else if (_vertexHandle != null) {
+      setState(() {
+        final points = List<Offset>.of(_vertexPoints!);
+        points[_vertexHandle!] = position;
+        _vertexPoints = points;
+      });
     } else if (_resizeHandle != null) {
       setState(() {
         _moveCurrent = position;
@@ -1267,6 +1342,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     final moveCurrent = _moveCurrent;
     final resizeRect = _resizeHandle != null ? _resizeRect : null;
     final resizeAngle = _resizeAngle;
+    final vertexPoints = _vertexHandle != null ? _vertexPoints : null;
     final rotating = _rotateStartAngle != null;
     final rotateDelta = _rotateDelta;
     final marquee = _marqueeStart != null && _marqueeCurrent != null
@@ -1286,6 +1362,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       _resizeFrom = null;
       _resizeRect = null;
       _resizeAngle = 0;
+      _vertexHandle = null;
+      _vertexPoints = null;
       _rotateStartAngle = null;
       _rotateDelta = 0;
       _marqueeStart = null;
@@ -1319,6 +1397,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           () => _controller.rotateSelected(-rotateDelta * 180 / math.pi),
           to: _selectedViewRect,
           rotation: rotateDelta);
+    } else if (vertexPoints != null) {
+      _commitVertexDrag(vertexPoints);
     } else if (resizeRect != null) {
       final wrapStyle = _textResizeStyle;
       void commit() => resizeAngle == 0
@@ -1413,6 +1493,28 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           .withValues(alpha: _controller.opacity.clamp(0.0, 1.0)),
       strokeWidth: _controller.strokeWidth * _geometry.scale,
       dashed: _controller.dashedStroke,
+    );
+    _afterDocument = _controller.document;
+  }
+
+  void _commitVertexDrag(List<Offset> points) {
+    final tool = _selectedLineTool;
+    if (tool == null) return;
+    final before = _controller.document;
+    _controller.reshapeSelectedLine(
+        [for (final point in points) _geometry.toPagePoint(point)]);
+    if (identical(before, _controller.document)) return;
+    _clearAfterimage();
+    _afterPath = (
+      points: points,
+      tool: tool,
+      color: _controller.selectedAnnotationStyle?.color.withValues(
+              alpha: _controller.selectedAnnotationStyle?.opacity ?? 1) ??
+          _controller.color,
+      strokeWidth: (_controller.selectedAnnotationStyle?.strokeWidth ??
+              _controller.strokeWidth) *
+          _geometry.scale,
+      dashed: _controller.selectedAnnotation?.borderDash != null,
     );
     _afterDocument = _controller.document;
   }
@@ -1709,7 +1811,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       final selected = _selectedViewRect;
       final chrome = _selectionChrome;
       final resting = chrome?.$2 ?? 0;
-      final handle = selected == null
+      final vertexPoints = _selectedVertexPoints;
+      final vertex = vertexPoints == null
+          ? null
+          : _vertexHandleAt(vertexPoints, event.localPosition);
+      final handle = selected == null || _selectedLineFamily
           ? null
           : resting == 0 || chrome == null
               ? _handleAt(selected, event.localPosition)
@@ -1717,7 +1823,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                   chrome.$1,
                   _rotatePoint(
                       event.localPosition, chrome.$1.center, -resting));
-      if (handle != null) {
+      if (vertex != null) {
+        cursor = SystemMouseCursors.move;
+      } else if (handle != null) {
         cursor = switch ((handle.dx, handle.dy)) {
           (0, _) => SystemMouseCursors.resizeUpDown,
           (_, 0) => SystemMouseCursors.resizeLeftRight,
@@ -1997,6 +2105,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                 (_polyHover! - _polyPoints!.last).distance >= 2)
               _polyHover!,
           ];
+    final vertexHandles = _vertexPoints ?? _selectedVertexPoints;
     // touch and stylus get the hover/right-click affordances as a
     // floating action chip beside the selection
     final showChip = (_lastPointerKind == PointerDeviceKind.touch ||
@@ -2141,10 +2250,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                     afterPath: _afterPath,
                     showHandles: selected != null &&
                         _controller.canResizeSelected &&
+                        !_selectedLineFamily &&
                         _moveStart == null,
                     showRotateHandle: selected != null &&
                         _controller.canRotateSelected &&
                         _moveStart == null,
+                    vertexHandles:
+                        _moveStart == null ? vertexHandles : const <Offset>[],
                     elementRect: _selectedElementViewRect,
                     flashRect:
                         _flashController.isAnimating && _flashRect != null
@@ -2367,6 +2479,7 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.afterPath,
     required this.showHandles,
     required this.showRotateHandle,
+    required this.vertexHandles,
     required this.elementRect,
     this.flashRect,
     this.flashProgress = 0,
@@ -2466,6 +2579,7 @@ class _EditingPreviewPainter extends CustomPainter {
 
   final bool showHandles;
   final bool showRotateHandle;
+  final List<Offset>? vertexHandles;
 
   /// The selected content element's box — orange, to read as "page
   /// content", distinct from the blue annotation chrome.
@@ -2774,6 +2888,19 @@ class _EditingPreviewPainter extends CustomPainter {
             rotateKnob, (_handleSize / 2 + 1) * chromeScale, stroke);
       }
       canvas.restore();
+    }
+    if (vertexHandles case final handles?) {
+      final fill = Paint()..color = const Color(0xFFFFFFFF);
+      final stroke = Paint()
+        ..color = _chrome
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5 * chromeScale;
+      for (final center in handles) {
+        final knob = Rect.fromCircle(
+            center: center, radius: _handleSize / 2 * chromeScale);
+        canvas.drawRect(knob, fill);
+        canvas.drawRect(knob, stroke);
+      }
     }
 
     final element = elementRect;

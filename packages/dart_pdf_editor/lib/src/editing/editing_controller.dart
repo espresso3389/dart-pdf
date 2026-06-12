@@ -1692,6 +1692,20 @@ class PdfEditingController extends ChangeNotifier {
         pages: [_selected.last.$1]);
   }
 
+  /// Replaces the defining vertices of the selected Line, PolyLine, or
+  /// Polygon annotation. The selection keeps its /Annots slot.
+  void reshapeSelectedLine(List<(double, double)> points) {
+    final annotation = selectedAnnotation;
+    if (annotation == null ||
+        annotation.subtype != 'Line' &&
+            annotation.subtype != 'PolyLine' &&
+            annotation.subtype != 'Polygon') {
+      return;
+    }
+    apply((e) => e.reshapeLineAnnotation(_selected.last.$1, annotation, points),
+        pages: [_selected.last.$1]);
+  }
+
   /// Rotates the selected annotation by [degrees] counterclockwise (page
   /// space) about its center. The selection keeps its /Annots slot.
   void rotateSelected(double degrees) {

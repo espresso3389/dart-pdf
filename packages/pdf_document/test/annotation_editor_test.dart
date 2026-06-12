@@ -635,6 +635,33 @@ void main() {
     expect(line.normalAppearance!.dictionary['Matrix'], isNull);
   });
 
+  test('reshaping line annotations rewrites vertices and appearance', () {
+    final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
+      ..addLine(0, (100, 100), (200, 140),
+          strokeWidth: 3, dashed: true, endEnding: PdfLineEnding.closedArrow)
+      ..addPolyLine(0, [(100, 220), (140, 250), (180, 230)]);
+    final doc = PdfDocument.open(first.save());
+
+    final editor = PdfEditor(doc)
+      ..reshapeLineAnnotation(
+          0, doc.page(0).annotations[0], [(90, 95), (240, 160)])
+      ..reshapeLineAnnotation(
+          0, doc.page(0).annotations[1], [(100, 220), (160, 280), (180, 230)]);
+    final reopened = PdfDocument.open(editor.save());
+
+    final line = reopened.page(0).annotations[0];
+    expect(line.line, ((90.0, 95.0), (240.0, 160.0)));
+    expect(line.borderDash, isNotNull);
+    final lineContent = appearanceText(reopened, line);
+    expect(lineContent, contains('90 95 m'));
+    expect(lineContent, contains('240 160 l'));
+    expect(lineContent, contains('f'), reason: 'closed arrowhead preserved');
+
+    final poly = reopened.page(0).annotations[1];
+    expect(poly.vertices, [(100.0, 220.0), (160.0, 280.0), (180.0, 230.0)]);
+    expect(appearanceText(reopened, poly), contains('160 280 l'));
+  });
+
   test('resizing free text re-wraps at the same font size', () {
     const text = 'several words that wrap differently at different widths';
     final first = PdfEditor(PdfDocument.open(buildClassicPdf()))

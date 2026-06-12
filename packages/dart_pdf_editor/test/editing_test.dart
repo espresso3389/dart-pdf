@@ -431,6 +431,28 @@ void main() {
       await settle(tester);
     });
 
+    testWidgets('line-family selection drags vertex handles', (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing.tool = PdfEditTool.arrow;
+      await tester.pump();
+      await drag(tester, view(100, 700), view(250, 620));
+
+      editing
+        ..tool = PdfEditTool.select
+        ..selectAnnotation(0, 0);
+      await tester.pump();
+
+      await drag(tester, view(250, 620), view(300, 610));
+
+      final annotation = editing.document.page(0).annotations.single;
+      expect(annotation.subtype, 'Line');
+      expect(annotation.line!.$1.$1, closeTo(100, 1));
+      expect(annotation.line!.$1.$2, closeTo(700, 1));
+      expect(annotation.line!.$2.$1, closeTo(300, 1));
+      expect(annotation.line!.$2.$2, closeTo(610, 1));
+      await settle(tester);
+    });
+
     testWidgets('polyline tool taps points and double-taps to finish',
         (tester) async {
       final (editing, _) = await pumpEditor(tester);

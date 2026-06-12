@@ -1200,6 +1200,75 @@ extension PdfAnnotationEditing on PdfEditor {
     _markAnnotationChanged(pageIndex, dict);
   }
 
+  /// Replaces a Line, PolyLine, or Polygon annotation's defining points
+  /// and regenerates its appearance. Existing color, width, dash, fill,
+  /// opacity, and line-ending style are preserved.
+  void reshapeLineAnnotation(
+      int pageIndex, PdfAnnotation annotation, List<(double, double)> points) {
+    final subtype = annotation.subtype;
+    if (subtype == 'Line' && points.length != 2) {
+      throw ArgumentError.value(points, 'points', 'Line needs 2 points');
+    }
+    if (subtype == 'PolyLine' && points.length < 2) {
+      throw ArgumentError.value(points, 'points', 'PolyLine needs 2+ points');
+    }
+    if (subtype == 'Polygon' && points.length < 3) {
+      throw ArgumentError.value(points, 'points', 'Polygon needs 3+ points');
+    }
+    if (subtype != 'Line' && subtype != 'PolyLine' && subtype != 'Polygon') {
+      throw ArgumentError.value(subtype, 'subtype', 'not a line annotation');
+    }
+    final stroke = annotation.color;
+    final width = annotation.borderWidth ?? 1;
+    if (stroke == null || width <= 0) return;
+    final dashed = annotation.borderDash != null;
+    final fill = subtype == 'Polygon' ? annotation.interiorColor : null;
+    final endings = _lineEndings(annotation);
+    final arrowPoints = subtype == 'Line'
+        ? <(double, double)>[
+            if (endings.$1 == PdfLineEnding.closedArrow)
+              ..._arrowHead(points[0], points[1], width),
+            if (endings.$2 == PdfLineEnding.closedArrow)
+              ..._arrowHead(points[1], points[0], width),
+          ]
+        : const <(double, double)>[];
+    final rect =
+        _pointBounds([...points, ...arrowPoints], width + (dashed ? width : 0));
+    final form = annotation.normalAppearance;
+    final gs = _alphaState(form == null ? 1 : _appearanceOpacity(form));
+    final w = _lineContent(points,
+        strokeColor: stroke,
+        strokeWidth: width,
+        dashed: dashed,
+        closed: subtype == 'Polygon',
+        fillColor: fill,
+        startEnding: endings.$1,
+        endEnding: endings.$2,
+        hasAlpha: gs != null);
+    final dict = annotation.dict;
+    dict['Rect'] = _rectArray(rect);
+    if (subtype == 'Line') {
+      dict['L'] = CosArray([
+        CosReal(points[0].$1),
+        CosReal(points[0].$2),
+        CosReal(points[1].$1),
+        CosReal(points[1].$2),
+      ]);
+    } else {
+      dict['Vertices'] = _pointArray(points);
+    }
+    if (form != null) {
+      _replaceAppearance(dict, form, rect, w,
+          resources: _resources(extGState: gs));
+    } else {
+      dict['AP'] = CosDictionary({
+        'N': _updater
+            .addObject(_form(rect, w, resources: _resources(extGState: gs))),
+      });
+    }
+    _markAnnotationChanged(pageIndex, dict);
+  }
+
   /// Sets [annotation]'s /Contents text in place.
   ///
   /// Metadata only: the appearance is untouched, so for subtypes whose

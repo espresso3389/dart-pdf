@@ -40,6 +40,7 @@ to validate changes:
 
 - Parse check: `cd packages/pdf_document && fvm dart tool/inspect.dart ../../corpus/*.pdf`
 - Render check: `cd packages/dart_pdf_editor && PDF_PATH=../../corpus/<file>.pdf PDF_PAGE=0 fvm flutter test test/render_smoke_test.dart` (writes /tmp/dart_pdf_render.png)
+- Full render sweep: `cd packages/dart_pdf_editor && CORPUS_DIR=../../corpus RENDER_OUT=../../corpus/renders fvm flutter test test/corpus_render_test.dart`
 
 `test_corpora/ghent/` (checked in) is the Ghent PDF Output Suite V5.0 —
 54 print-conformance PDFs (overprint, DeviceN, spot, ICC v2/v4, 16-bit,
@@ -58,6 +59,18 @@ JBIG2/JPX) incl. 3 composite test pages. Two test layers:
   current behavior, not GWG conformance — many patches print their own
   pass criterion on the page (overprint simulation isn't implemented;
   GWG173's faint "X" is a known JBIG2 deviation).
+
+Run the checked-in corpora from their package directories so the relative
+`../../test_corpora/...` paths line up:
+
+- Ghent pure-Dart pass: `cd packages/pdf_graphics && fvm dart test test/ghent_corpus_test.dart`
+- Ghent render/baseline pass: `cd packages/dart_pdf_editor && fvm flutter test test/ghent_render_test.dart`
+- Accept intentional Ghent baseline changes: `cd packages/dart_pdf_editor && GHENT_UPDATE=1 fvm flutter test test/ghent_render_test.dart`
+- PDF.js pure-Dart pass: `cd packages/pdf_graphics && fvm dart test test/pdfjs_corpus_test.dart`
+- PDF.js render smoke pass: `cd packages/dart_pdf_editor && fvm flutter test test/pdfjs_render_test.dart`
+- All checked-in corpus tests: run the four non-update commands above; they
+  are intentionally split because `pdf_graphics` is VM-only and
+  `dart_pdf_editor` needs Flutter rasterization.
 
 ## Roadmap context
 

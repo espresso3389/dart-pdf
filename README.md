@@ -235,3 +235,22 @@ corpus directory for provenance and per-file notes). Two layers again:
 `pdf_graphics/test/pdfjs_corpus_test.dart` (pure-Dart open + interpret)
 and `dart_pdf_editor/test/pdfjs_render_test.dart` (rasterization smoke over
 the real decode pipeline, no baselines).
+
+Run the checked-in corpora from their package directories so the relative
+`../../test_corpora/...` paths line up:
+
+- Ghent pure-Dart pass: `cd packages/pdf_graphics && fvm dart test test/ghent_corpus_test.dart`
+- Ghent render/baseline pass: `cd packages/dart_pdf_editor && fvm flutter test test/ghent_render_test.dart`
+- Accept intentional Ghent baseline changes: `cd packages/dart_pdf_editor && GHENT_UPDATE=1 fvm flutter test test/ghent_render_test.dart`
+- PDF.js pure-Dart pass: `cd packages/pdf_graphics && fvm dart test test/pdfjs_corpus_test.dart`
+- PDF.js render smoke pass: `cd packages/dart_pdf_editor && fvm flutter test test/pdfjs_render_test.dart`
+- All checked-in corpus tests: run the four non-update commands above; they
+  are intentionally split because `pdf_graphics` is VM-only and
+  `dart_pdf_editor` needs Flutter rasterization.
+
+If you have the private `corpus/` directory locally, use it for broader
+real-world coverage:
+
+- Parse check: `cd packages/pdf_document && fvm dart tool/inspect.dart ../../corpus/*.pdf`
+- Single render check: `cd packages/dart_pdf_editor && PDF_PATH=../../corpus/<file>.pdf PDF_PAGE=0 fvm flutter test test/render_smoke_test.dart`
+- Full render sweep: `cd packages/dart_pdf_editor && CORPUS_DIR=../../corpus RENDER_OUT=../../corpus/renders fvm flutter test test/corpus_render_test.dart`

@@ -247,7 +247,7 @@ Run the checked-in corpora from their package directories so the relative
 - PDF.js render smoke pass: `cd packages/dart_pdf_editor && fvm flutter test test/pdfjs_render_test.dart`
 - PDF.js visual review gallery: `cd packages/dart_pdf_editor && PDFJS_RENDER_OUT=../../test_corpora/pdfjs/_renders fvm flutter test test/pdfjs_render_test.dart`, then open `test_corpora/pdfjs/_renders/index.html`
 - Generate PDF.js reference baselines: `cd packages/dart_pdf_editor/tool/pdfjs_baseline && npm install && npm run render`
-- PDF.js pixel compare + side-by-side gallery: `cd packages/dart_pdf_editor && PDFJS_BASELINE_DIR=../../test_corpora/pdfjs/_baselines PDFJS_RENDER_OUT=../../test_corpora/pdfjs/_renders fvm flutter test test/pdfjs_render_test.dart`
+- PDF.js pixel compare + side-by-side results: `cd packages/dart_pdf_editor && PDFJS_BASELINE_DIR=../../test_corpora/pdfjs/_baselines fvm flutter test test/pdfjs_render_test.dart`, then open `test_corpora/pdfjs/_renders/index.html`
 - All checked-in corpus tests: run the four non-update test commands above
   (excluding the visual galleries); they are intentionally split because
   `pdf_graphics` is VM-only and `dart_pdf_editor` needs Flutter rasterization.
@@ -258,8 +258,10 @@ five per file at 1x); override it with `PDFJS_RENDER_MAX_PAGES` and
 `PDFJS_RENDER_PIXEL_RATIO` when you need deeper or sharper review. When
 `PDFJS_BASELINE_DIR` is set, the Flutter test compares Dart rasters against
 the PDF.js baselines using `PDFJS_COMPARE_CHANNEL_TOLERANCE` (default 8) and
-`PDFJS_COMPARE_MAX_DIFF_FRACTION` (default 0.0005). The side-by-side gallery
-shows the PDF.js baseline, Dart render, and diff image for each rendered page.
+`PDFJS_COMPARE_MAX_DIFF_FRACTION` (default 0.0005), and writes
+`test_corpora/pdfjs/_renders/index.html` unless `PDFJS_RENDER_OUT` overrides
+the output directory. The results page shows each page as one row with the
+PDF.js baseline, Dart render, and diff side by side.
 
 If you have the private `corpus/` directory locally, use it for broader
 real-world coverage:

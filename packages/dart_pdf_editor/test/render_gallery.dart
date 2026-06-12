@@ -4,10 +4,13 @@ import 'dart:ui' as ui;
 class RenderGallery {
   RenderGallery(this.outDir) {
     outDir.createSync(recursive: true);
+    _writeIndex();
   }
 
   final Directory outDir;
   final _renders = <_Render>[];
+
+  File get indexFile => File('${outDir.path}/index.html');
 
   Future<void> add({
     required String pdfName,
@@ -59,38 +62,37 @@ class RenderGallery {
       ..writeln(
           'body{font:14px system-ui,sans-serif;margin:24px;background:#f6f7f8;color:#202124}')
       ..writeln('h1{font-size:20px;margin:0 0 16px}')
+      ..writeln('.results{display:flex;flex-direction:column;gap:16px}')
       ..writeln(
-          '.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px}')
+          '.result{margin:0;padding:12px;background:white;border:1px solid #dadce0;border-radius:6px}')
+      ..writeln('.meta{margin:0 0 10px;overflow-wrap:anywhere;color:#3c4043}')
       ..writeln(
-          'figure{margin:0;padding:12px;background:white;border:1px solid #dadce0;border-radius:6px}')
-      ..writeln(
-          '.shots{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;align-items:start}')
-      ..writeln('.shot-label{font-size:12px;color:#5f6368;margin:0 0 4px}')
+          '.shots{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:start}')
+      ..writeln('.shot-label{font-size:12px;color:#5f6368;margin:0 0 6px}')
       ..writeln(
           'img{display:block;max-width:100%;height:auto;background:white;border:1px solid #eee}')
       ..writeln(
           '.missing{border:1px dashed #dadce0;color:#80868b;padding:32px 8px;text-align:center;background:#fafafa}')
-      ..writeln(
-          'figcaption{margin-top:8px;overflow-wrap:anywhere;color:#3c4043}')
+      ..writeln('@media (max-width: 900px){.shots{grid-template-columns:1fr}}')
       ..writeln('</style>')
       ..writeln('<h1>PDF corpus renders</h1>')
-      ..writeln('<div class="grid">');
+      ..writeln('<div class="results">');
     for (final render in _renders) {
       html
-        ..writeln('<figure>')
+        ..writeln('<figure class="result">')
+        ..writeln(
+            '<figcaption class="meta">${_htmlText(render.pdfName)} page ${render.page + 1}<br>${render.width}x${render.height}${_difference(render.differenceFraction)}</figcaption>')
         ..writeln('<div class="shots">')
         ..writeln(_shot('PDF.js baseline', render.baselineName))
         ..writeln(_shot('Dart render', render.actualName))
         ..writeln(_shot('Diff', render.diffName))
         ..writeln('</div>')
-        ..writeln(
-            '<figcaption>${_htmlText(render.pdfName)} page ${render.page + 1}<br>${render.width}x${render.height}${_difference(render.differenceFraction)}</figcaption>')
         ..writeln('</figure>');
     }
     html
       ..writeln('</div>')
       ..writeln();
-    File('${outDir.path}/index.html').writeAsStringSync(html.toString());
+    indexFile.writeAsStringSync(html.toString());
   }
 }
 

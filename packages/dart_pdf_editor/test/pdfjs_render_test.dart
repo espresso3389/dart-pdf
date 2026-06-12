@@ -12,7 +12,8 @@
 //   PDFJS_RENDER_OUT=../../test_corpora/pdfjs/_renders \
 //     fvm flutter test test/pdfjs_render_test.dart
 // For PDF.js reference comparison, first generate baselines with
-// tool/pdfjs_baseline, then set PDFJS_BASELINE_DIR.
+// tool/pdfjs_baseline, then set PDFJS_BASELINE_DIR. If PDFJS_RENDER_OUT is
+// omitted during comparison, test_corpora/pdfjs/_renders is used.
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -65,11 +66,17 @@ void main() {
     return;
   }
   final renderOut = Platform.environment['PDFJS_RENDER_OUT'];
+  final baselineEnv = Platform.environment['PDFJS_BASELINE_DIR'];
+  final galleryOut = renderOut ??
+      (baselineEnv == null ? null : '../../test_corpora/pdfjs/_renders');
   final gallery =
-      renderOut == null ? null : RenderGallery(Directory(renderOut));
+      galleryOut == null ? null : RenderGallery(Directory(galleryOut));
+  if (gallery != null) {
+    // ignore: avoid_print
+    print('PDF.js render results: ${gallery.indexFile.absolute.uri}');
+  }
   final visualMaxPages = _envPositiveInt('PDFJS_RENDER_MAX_PAGES', maxPages);
   final visualPixelRatio = _envPositiveDouble('PDFJS_RENDER_PIXEL_RATIO', 1.0);
-  final baselineEnv = Platform.environment['PDFJS_BASELINE_DIR'];
   final defaultBaselineDir = Directory('../../test_corpora/pdfjs/_baselines');
   final baselineDir = baselineEnv == null
       ? gallery != null && defaultBaselineDir.existsSync()
@@ -99,6 +106,7 @@ void main() {
             password: passwords[name] ?? '');
         final pages = doc.pageCount;
         final pageLimit = gallery == null ? maxPages : visualMaxPages;
+        final failures = <String>[];
         for (var i = 0; i < pages && i < pageLimit; i++) {
           final image = await PdfPageRenderer.renderImage(doc.page(i),
                   pixelRatio: visualPixelRatio)
@@ -114,7 +122,7 @@ void main() {
             if (baseline != null) {
               if (!baseline.existsSync()) {
                 if (compareBaselines && !baselineUnavailable.contains(name)) {
-                  fail('missing PDF.js baseline for $name page $i: '
+                  failures.add('page $i: missing PDF.js baseline '
                       '${baseline.path}');
                 }
               } else {
@@ -139,20 +147,21 @@ void main() {
 
             if (compareBaselines && comparison != null) {
               if (comparison.sizeMismatch != null) {
-                fail('${comparison.sizeMismatch} for $name page $i');
+                failures.add('page $i: ${comparison.sizeMismatch}');
+              } else if (comparison.differenceFraction > maxDifferingFraction) {
+                failures.add(
+                    'page $i: ${(comparison.differenceFraction * 100).toStringAsFixed(3)}% '
+                    'differing pixels');
               }
-              expect(
-                comparison.differenceFraction,
-                lessThanOrEqualTo(maxDifferingFraction),
-                reason: '$name page $i differs from the PDF.js baseline in '
-                    '${(comparison.differenceFraction * 100).toStringAsFixed(3)}% '
-                    'of pixels',
-              );
             }
           } finally {
             comparison?.diff?.dispose();
             image.dispose();
           }
+        }
+        if (failures.isNotEmpty) {
+          fail('$name differs from the PDF.js baseline:\n'
+              '${failures.join('\n')}');
         }
       });
     }, timeout: const Timeout(Duration(minutes: 3)));

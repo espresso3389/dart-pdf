@@ -163,6 +163,46 @@ class PdfEditingToolbar extends StatelessWidget {
     controller.replaceSelectedElementText(text);
   }
 
+  /// Bakes every annotation into its page and reports the result — the
+  /// flattened content looks identical to the live annotations, so
+  /// without this toast the button appears to do nothing.
+  void _flatten(BuildContext context) {
+    final flattened = controller.flattenAllAnnotations();
+    _flattenToast(
+      context,
+      flattened
+          ? 'Annotations flattened into the pages'
+          : 'No annotations to flatten',
+      undoable: flattened,
+    );
+  }
+
+  void _flattenForm(BuildContext context) {
+    final flattened = controller.flattenFormFields();
+    _flattenToast(
+      context,
+      flattened
+          ? 'Form fields flattened into the pages'
+          : 'No form fields to flatten',
+      undoable: flattened,
+    );
+  }
+
+  void _flattenToast(BuildContext context, String message,
+      {required bool undoable}) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        action: undoable && controller.canUndo
+            ? SnackBarAction(label: 'Undo', onPressed: controller.undo)
+            : null,
+      ));
+  }
+
   Future<void> _editSelectedText(BuildContext context) async {
     final annotation = controller.selectedAnnotation;
     if (annotation == null) return;
@@ -372,7 +412,7 @@ class PdfEditingToolbar extends StatelessWidget {
                     tooltip: 'Flatten form — bake values into the pages',
                     onPressed: controller.acroForm == null
                         ? null
-                        : controller.flattenFormFields,
+                        : () => _flattenForm(context),
                   ),
                 ],
                 if (controller.selectedElement != null) ...[
@@ -448,7 +488,7 @@ class PdfEditingToolbar extends StatelessWidget {
                   IconButton(
                     icon: const Icon(Icons.layers),
                     tooltip: 'Flatten annotations into the pages',
-                    onPressed: controller.flattenAllAnnotations,
+                    onPressed: () => _flatten(context),
                   ),
                 if (onSave != null)
                   IconButton(

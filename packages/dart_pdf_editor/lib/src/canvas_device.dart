@@ -477,25 +477,34 @@ class CanvasPdfDevice implements PdfDevice {
   }
 
   static const _cjkFontFallbacks = [
-    // Apple platforms.
+    // Apple platforms. Hiragino leads: it resolves where PingFang sometimes
+    // does not, and covers both Japanese and (via Sans GB) Chinese.
+    'Hiragino Sans', // Japanese kana/kanji
+    'Hiragino Mincho ProN',
     'PingFang SC',
     'Songti SC',
     'Heiti SC',
     'Hiragino Sans GB',
     // Android/Linux distributions.
     'Noto Sans CJK SC',
+    'Noto Sans CJK JP',
+    'Noto Serif CJK JP',
     'Noto Serif CJK SC',
     'Source Han Sans SC',
     'Source Han Serif SC',
     // Windows.
     'Microsoft YaHei',
+    'Yu Gothic',
+    'MS Gothic',
     'SimSun',
     'SimHei',
   ];
 
   static const _defaultFontFallbacks = [
+    'Hiragino Sans',
     'PingFang SC',
     'Noto Sans CJK SC',
+    'Noto Sans CJK JP',
     'Source Han Sans SC',
     'Microsoft YaHei',
   ];
@@ -514,6 +523,22 @@ class CanvasPdfDevice implements PdfDevice {
         name.contains('·ÂËÎ') ||
         name.contains('Ð¡±êËÎ')) {
       return 'STSong'; // 宋体 / 仿宋 / 小标宋
+    }
+    // Japanese CID fonts (Adobe-Japan1): pick a matching system face so the
+    // weight/serif roughly tracks the document's. Tokens are specific enough
+    // to avoid Latin look-alikes (we never match a bare "Gothic").
+    if (name.contains('Mincho') ||
+        name.contains('HeiseiMin') ||
+        name.contains('Ryumin') ||
+        name.contains('KozMin')) {
+      return 'Hiragino Mincho ProN';
+    }
+    if (name.contains('HeiseiKakuGo') ||
+        name.contains('GothicBBB') ||
+        name.contains('KozGo') ||
+        name.contains('Kaku') ||
+        name.contains('MS-Gothic')) {
+      return 'Hiragino Sans';
     }
     return null;
   }

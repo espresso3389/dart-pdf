@@ -418,20 +418,26 @@ class CanvasPdfDevice implements PdfDevice {
   TextStyle _styleFor(PdfTextRun run, {Paint? foreground}) {
     final name = run.fontName ?? '';
     final cjk = _cjkPrimaryFontFor(name);
+    final symbol = name.contains('ZapfDingbats') || name.contains('Symbol');
     return TextStyle(
       color: foreground == null ? _toColor(run.color, 1) : null,
       foreground: foreground,
       fontSize: 100,
       fontFamily: cjk ??
           switch (name) {
+            _ when name.contains('ZapfDingbats') => 'Zapf Dingbats',
+            _ when name.contains('Symbol') => 'Symbol',
             _ when name.contains('Courier') || name.contains('Mono') =>
               'Courier',
             _ when name.contains('Times') || name.contains('Serif') =>
               'Times New Roman',
             _ => 'Helvetica',
           },
-      fontFamilyFallback:
-          cjk == null ? _defaultFontFallbacks : _cjkFontFallbacks,
+      fontFamilyFallback: cjk != null
+          ? _cjkFontFallbacks
+          : symbol
+              ? _symbolFontFallbacks
+              : _defaultFontFallbacks,
       fontWeight: name.contains('Bold') ? FontWeight.bold : FontWeight.normal,
       fontStyle: name.contains('Italic') || name.contains('Oblique')
           ? FontStyle.italic
@@ -464,6 +470,14 @@ class CanvasPdfDevice implements PdfDevice {
     'Noto Sans CJK SC',
     'Source Han Sans SC',
     'Microsoft YaHei',
+  ];
+
+  static const _symbolFontFallbacks = [
+    'Noto Sans Symbols',
+    'Noto Sans Symbols 2',
+    'DejaVu Sans',
+    'Apple Symbols',
+    'Segoe UI Symbol',
   ];
 
   static String? _cjkPrimaryFontFor(String name) {

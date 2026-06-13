@@ -24,6 +24,7 @@ class PdfFontInfo {
     Uint8List? cidToGid,
     bool symbolic = false,
     bool legacyGbk = false,
+    Map<int, String> encodingNames = const {},
     Map<int, int>? cffCodeToGid,
     Map<int, CosStream> type3Procs = const {},
     this.type3Resources,
@@ -36,6 +37,7 @@ class PdfFontInfo {
         _cidToGid = cidToGid,
         _symbolic = symbolic,
         _legacyGbk = legacyGbk,
+        _encodingNames = encodingNames,
         _cffCodeToGid = cffCodeToGid,
         _type3Procs = type3Procs,
         _type3Matrix = type3Matrix;
@@ -55,6 +57,7 @@ class PdfFontInfo {
   final Uint8List? _cidToGid;
   final bool _symbolic;
   final bool _legacyGbk;
+  final Map<int, String> _encodingNames;
 
   /// PDF /Encoding (base + Differences) resolved against the CFF charset;
   /// overrides the font's built-in encoding when present.
@@ -89,10 +92,12 @@ class PdfFontInfo {
     // Widths are in thousandths of an em — except for Type3 fonts, whose
     // glyph space is defined by /FontMatrix (§9.6.5).
     var widthScale = 0.001;
+    var defaultWidth = 0.5;
     List<double>? type3Matrix;
     var type3Procs = const <int, CosStream>{};
     CosDictionary? type3Resources;
     if (subtypeName == 'Type3') {
+      defaultWidth = 0;
       type3Matrix = const [0.001, 0, 0, 0.001, 0, 0];
       final matrix = cos.resolve(font['FontMatrix']);
       if (matrix is CosArray && matrix.length >= 6) {
@@ -107,12 +112,12 @@ class PdfFontInfo {
     }
 
     final widths = <int, double>{};
-    var defaultWidth = 0.5;
     final toUnicode = _parseToUnicode(cos, font['ToUnicode']);
     TrueTypeFont? trueType;
     CffFont? cff;
     Uint8List? cidToGid;
     var symbolic = false;
+    var encodingNames = const <int, String>{};
 
     if (isCid) {
       final descendants = cos.resolve(font['DescendantFonts']);
@@ -143,6 +148,7 @@ class PdfFontInfo {
         }
       }
     } else {
+      encodingNames = _simpleEncoding(cos, font['Encoding'], baseFont);
       final firstCharObj = cos.resolve(font['FirstChar']);
       final firstChar = firstCharObj is CosInteger ? firstCharObj.value : 0;
       final w = cos.resolve(font['Widths']);
@@ -187,6 +193,7 @@ class PdfFontInfo {
       cidToGid: cidToGid,
       symbolic: symbolic,
       legacyGbk: !isCid && toUnicode.isEmpty && _isLegacyGbkFont(baseFont),
+      encodingNames: encodingNames,
       cffCodeToGid: cffCodeToGid,
       type3Procs: type3Procs,
       type3Resources: type3Resources,
@@ -221,6 +228,59 @@ class PdfFontInfo {
     for (var i = 0; i < table.length && i < 95; i++) {
       widths[32 + i] = table[i] / 1000;
     }
+  }
+
+  static Map<int, String> _simpleEncoding(
+      CosDocument cos, CosObject? encodingObject, String? baseFont) {
+    final encoding = cos.resolve(encodingObject);
+    final result = <int, String>{};
+
+    void fillWinAnsi() {
+      for (var code = 0; code <= 255; code++) {
+        final name = winAnsiGlyphName(code);
+        if (name != null) result[code] = name;
+      }
+    }
+
+    void fillStandard() {
+      for (var code = 0; code <= 255; code++) {
+        final name = standardGlyphName(code);
+        if (name != null) result[code] = name;
+      }
+    }
+
+    if (encoding is CosName) {
+      if (encoding.value == 'WinAnsiEncoding') {
+        fillWinAnsi();
+      } else if (encoding.value == 'StandardEncoding' ||
+          encoding.value == 'MacRomanEncoding') {
+        fillStandard();
+      }
+    } else if (encoding is CosDictionary) {
+      final base = cos.resolve(encoding['BaseEncoding']);
+      if (base is CosName && base.value == 'WinAnsiEncoding') {
+        fillWinAnsi();
+      } else {
+        fillStandard();
+      }
+    } else if (_isStandardFont(baseFont)) {
+      fillStandard();
+    }
+
+    _parseDifferences(cos, encodingObject).forEach((code, name) {
+      result[code] = name;
+    });
+    return result;
+  }
+
+  static bool _isStandardFont(String? baseFont) {
+    if (baseFont == null) return false;
+    final plus = baseFont.indexOf('+');
+    final name =
+        (plus >= 0 ? baseFont.substring(plus + 1) : baseFont).toLowerCase();
+    return name.startsWith('helvetica') ||
+        name.startsWith('times') ||
+        name.startsWith('courier');
   }
 
   /// Maps character codes to /CharProcs streams via /Encoding /Differences.
@@ -406,10 +466,29 @@ class PdfFontInfo {
       final mapped = _legacyGbkUnicode[code];
       if (mapped != null) return String.fromCharCode(mapped);
     }
+    if (!isCid && _isZapfDingbats(baseFont)) {
+      final mapped = zapfDingbatsUnicode(code);
+      if (mapped != null) return String.fromCharCode(mapped);
+    }
+    if (!isCid) {
+      final name = _encodingNames[code];
+      if (name != null) {
+        final mapped = glyphNameUnicode(name);
+        if (mapped != null) return String.fromCharCode(mapped);
+      }
+    }
     if (!isCid && code >= 0x20 && code <= 0xFF) {
       return String.fromCharCode(code); // Latin-1 ≈ Standard/WinAnsi enough
     }
     return '';
+  }
+
+  static bool _isZapfDingbats(String? baseFont) {
+    if (baseFont == null) return false;
+    final plus = baseFont.indexOf('+');
+    final name =
+        (plus >= 0 ? baseFont.substring(plus + 1) : baseFont).toLowerCase();
+    return name == 'zapfdingbats';
   }
 
   static double _toNum(CosObject? value) {

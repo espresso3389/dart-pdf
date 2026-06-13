@@ -189,8 +189,11 @@ class PdfInterpreter {
       if (annotation.isHidden || annotation.isNoView) continue;
       if (annotation.subtype == 'Popup') continue;
       final form = annotation.normalAppearance;
-      if (form == null) continue;
-      _drawAppearance(form, annotation.rect);
+      if (form == null) {
+        _drawFallbackAnnotation(annotation);
+      } else {
+        _drawAppearance(form, annotation.rect);
+      }
     }
   }
 
@@ -200,8 +203,239 @@ class PdfInterpreter {
   void drawAnnotation(PdfPage page, PdfAnnotation annotation) {
     _pageBox = page.mediaBox;
     final form = annotation.normalAppearance;
-    if (form == null) return;
-    _drawAppearance(form, annotation.rect);
+    if (form == null) {
+      _drawFallbackAnnotation(annotation);
+    } else {
+      _drawAppearance(form, annotation.rect);
+    }
+  }
+
+  void _drawFallbackAnnotation(PdfAnnotation annotation) {
+    switch (annotation.subtype) {
+      case 'Square':
+        _drawFallbackSquare(annotation);
+      case 'Circle':
+        _drawFallbackCircle(annotation);
+      case 'Line':
+        _drawFallbackLine(annotation);
+      case 'Ink':
+        _drawFallbackInk(annotation);
+      case 'Highlight' || 'Underline' || 'StrikeOut' || 'Squiggly':
+        _drawFallbackTextMarkup(annotation);
+    }
+  }
+
+  void _drawFallbackSquare(PdfAnnotation annotation) {
+    final stroke = _annotationStroke(annotation);
+    final rect = _insetRect(annotation.rect, stroke.width / 2);
+    final path = _rectPath(rect);
+    final fill = annotation.interiorColor;
+    if (fill != null) {
+      device.fillPath(path, _pdfColor(fill), PdfFillRule.nonzero,
+          _annotationFillAlpha(annotation));
+    }
+    if (annotation.color != null || fill == null) {
+      device.strokePath(path, _pdfColor(annotation.color ?? 0x000000), stroke,
+          _annotationStrokeAlpha(annotation));
+    }
+  }
+
+  void _drawFallbackCircle(PdfAnnotation annotation) {
+    final stroke = _annotationStroke(annotation);
+    final rect = _insetRect(annotation.rect, stroke.width / 2);
+    final path = _ellipsePath(rect);
+    final fill = annotation.interiorColor;
+    if (fill != null) {
+      device.fillPath(path, _pdfColor(fill), PdfFillRule.nonzero,
+          _annotationFillAlpha(annotation));
+    }
+    if (annotation.color != null || fill == null) {
+      device.strokePath(path, _pdfColor(annotation.color ?? 0x000000), stroke,
+          _annotationStrokeAlpha(annotation));
+    }
+  }
+
+  void _drawFallbackLine(PdfAnnotation annotation) {
+    final line = annotation.line;
+    if (line == null) return;
+    device.strokePath(
+      PdfPath([
+        PdfMoveTo(line.$1.$1, line.$1.$2),
+        PdfLineTo(line.$2.$1, line.$2.$2),
+      ]),
+      _pdfColor(annotation.color ?? 0x000000),
+      _annotationStroke(annotation),
+      _annotationStrokeAlpha(annotation),
+    );
+  }
+
+  void _drawFallbackInk(PdfAnnotation annotation) {
+    final strokes = annotation.inkList;
+    if (strokes == null) return;
+    final stroke = _annotationStroke(annotation).copyWith(
+      cap: 1,
+      join: 1,
+    );
+    for (final points in strokes) {
+      if (points.isEmpty) continue;
+      final segments = <PdfPathSegment>[
+        PdfMoveTo(points.first.$1, points.first.$2)
+      ];
+      for (final point in points.skip(1)) {
+        segments.add(PdfLineTo(point.$1, point.$2));
+      }
+      device.strokePath(
+          PdfPath(segments),
+          _pdfColor(annotation.color ?? 0x000000),
+          stroke,
+          _annotationStrokeAlpha(annotation));
+    }
+  }
+
+  void _drawFallbackTextMarkup(PdfAnnotation annotation) {
+    final quads = _quadRects(annotation);
+    if (quads.isEmpty) return;
+    final color = _pdfColor(annotation.color ?? 0xFFFF00);
+    switch (annotation.subtype) {
+      case 'Highlight':
+        for (final rect in quads) {
+          device.fillPath(_rectPath(rect), color, PdfFillRule.nonzero,
+              _annotationFillAlpha(annotation, fallback: 0.35));
+        }
+      case 'Underline' || 'StrikeOut':
+        final atHeight = annotation.subtype == 'Underline' ? 0.08 : 0.45;
+        for (final rect in quads) {
+          final y = rect.bottom + rect.height * atHeight;
+          device.strokePath(
+            PdfPath([PdfMoveTo(rect.left, y), PdfLineTo(rect.right, y)]),
+            color,
+            _annotationStroke(annotation)
+                .copyWith(width: math.max(1, rect.height * 0.06)),
+            _annotationStrokeAlpha(annotation),
+          );
+        }
+      case 'Squiggly':
+        for (final rect in quads) {
+          device.strokePath(
+              _squigglyPath(rect),
+              color,
+              _annotationStroke(annotation)
+                  .copyWith(width: math.max(1, rect.height * 0.06)),
+              _annotationStrokeAlpha(annotation));
+        }
+    }
+  }
+
+  PdfStroke _annotationStroke(PdfAnnotation annotation) => PdfStroke(
+        width:
+            annotation.borderWidth ?? _annotationBorderWidth(annotation) ?? 1,
+        dashArray: annotation.borderDash ?? const [],
+      );
+
+  double? _annotationBorderWidth(PdfAnnotation annotation) {
+    final border = cos.resolve(annotation.dict['Border']);
+    if (border is! CosArray || border.length < 3) return null;
+    final width = cos.resolve(border[2]);
+    return switch (width) {
+      CosInteger(:final value) => value.toDouble(),
+      CosReal(:final value) => value,
+      _ => null,
+    };
+  }
+
+  double _annotationStrokeAlpha(PdfAnnotation annotation) =>
+      _annotationNumber(annotation, 'CA') ??
+      _annotationNumber(annotation, 'CA') ??
+      1;
+
+  double _annotationFillAlpha(PdfAnnotation annotation,
+          {double fallback = 1}) =>
+      _annotationNumber(annotation, 'ca') ??
+      _annotationNumber(annotation, 'CA') ??
+      fallback;
+
+  double? _annotationNumber(PdfAnnotation annotation, String key) {
+    final value = cos.resolve(annotation.dict[key]);
+    return switch (value) {
+      CosInteger(:final value) => value.toDouble().clamp(0.0, 1.0),
+      CosReal(:final value) => value.clamp(0.0, 1.0),
+      _ => null,
+    };
+  }
+
+  PdfColor _pdfColor(int rgb) => PdfColor(
+        ((rgb >> 16) & 0xFF) / 255,
+        ((rgb >> 8) & 0xFF) / 255,
+        (rgb & 0xFF) / 255,
+      );
+
+  PdfPath _rectPath(PdfRect rect) => PdfPath([
+        PdfMoveTo(rect.left, rect.bottom),
+        PdfLineTo(rect.right, rect.bottom),
+        PdfLineTo(rect.right, rect.top),
+        PdfLineTo(rect.left, rect.top),
+        const PdfClosePath(),
+      ]);
+
+  PdfRect _insetRect(PdfRect rect, double inset) {
+    final dx = math.min(inset, rect.width / 2);
+    final dy = math.min(inset, rect.height / 2);
+    return PdfRect(
+        rect.left + dx, rect.bottom + dy, rect.right - dx, rect.top - dy);
+  }
+
+  PdfPath _ellipsePath(PdfRect rect) {
+    const k = 0.5522847498307936;
+    final cx = (rect.left + rect.right) / 2;
+    final cy = (rect.bottom + rect.top) / 2;
+    final rx = rect.width / 2;
+    final ry = rect.height / 2;
+    return PdfPath([
+      PdfMoveTo(cx + rx, cy),
+      PdfCubicTo(cx + rx, cy + ry * k, cx + rx * k, cy + ry, cx, cy + ry),
+      PdfCubicTo(cx - rx * k, cy + ry, cx - rx, cy + ry * k, cx - rx, cy),
+      PdfCubicTo(cx - rx, cy - ry * k, cx - rx * k, cy - ry, cx, cy - ry),
+      PdfCubicTo(cx + rx * k, cy - ry, cx + rx, cy - ry * k, cx + rx, cy),
+      const PdfClosePath(),
+    ]);
+  }
+
+  List<PdfRect> _quadRects(PdfAnnotation annotation) {
+    final raw = cos.resolve(annotation.dict['QuadPoints']);
+    if (raw is! CosArray) return const [];
+    final rects = <PdfRect>[];
+    for (var i = 0; i + 7 < raw.length; i += 8) {
+      final xs = <double>[];
+      final ys = <double>[];
+      for (var j = 0; j < 8; j += 2) {
+        final x = _numOf(cos.resolve(raw[i + j]));
+        final y = _numOf(cos.resolve(raw[i + j + 1]));
+        xs.add(x);
+        ys.add(y);
+      }
+      rects.add(PdfRect(
+        xs.reduce(math.min),
+        ys.reduce(math.min),
+        xs.reduce(math.max),
+        ys.reduce(math.max),
+      ));
+    }
+    return rects;
+  }
+
+  PdfPath _squigglyPath(PdfRect rect) {
+    final y = rect.bottom + rect.height * 0.12;
+    final amp = math.max(1.0, rect.height * 0.06);
+    final step = amp * 2;
+    final segments = <PdfPathSegment>[PdfMoveTo(rect.left, y)];
+    var x = rect.left;
+    var up = true;
+    while (x < rect.right) {
+      x = math.min(rect.right, x + step);
+      segments.add(PdfLineTo(x, y + (up ? amp : -amp)));
+      up = !up;
+    }
+    return PdfPath(segments);
   }
 
   /// Renders one appearance form: the /BBox corners go through /Matrix,

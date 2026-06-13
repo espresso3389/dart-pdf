@@ -47,6 +47,35 @@ void main() {
     expect(PdfFontInfo.load(cos, font).widthOf(65), closeTo(0.5, 1e-9));
   });
 
+  test('Type3 missing glyphs do not advance before word spacing', () {
+    final font = CosDictionary({
+      'Subtype': const CosName('Type3'),
+      'FirstChar': const CosInteger(97),
+      'LastChar': const CosInteger(98),
+      'Widths': CosArray([const CosInteger(1000), const CosInteger(1000)]),
+    });
+    final info = PdfFontInfo.load(cos, font);
+    expect(info.widthOf(0x20), 0);
+  });
+
+  test('standard fonts decode high-byte StandardEncoding glyph names', () {
+    final font = CosDictionary({
+      'Subtype': const CosName('Type1'),
+      'BaseFont': const CosName('Helvetica'),
+    });
+    final info = PdfFontInfo.load(cos, font);
+    expect(info.charFor(0xD0), String.fromCharCode(0x2014));
+  });
+
+  test('ZapfDingbats decodes built-in symbol codes to Unicode', () {
+    final font = CosDictionary({
+      'Subtype': const CosName('Type1'),
+      'BaseFont': const CosName('ZapfDingbats'),
+    });
+    final info = PdfFontInfo.load(cos, font);
+    expect(info.charFor(0x21), String.fromCharCode(0x2701));
+  });
+
   test('malformed GBK simple Chinese fonts decode byte pairs', () {
     final font = CosDictionary({
       'Subtype': const CosName('TrueType'),

@@ -417,6 +417,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
         (final Uint8List data, _) => _readOnly
             ? PdfReader(
                 bytes: data,
+                // a stable id per document so reopening it restores the
+                // scroll position and zoom (persisted in _prefs)
+                documentId: _title,
                 controller: _controller,
                 preferences: _prefs,
                 onAction: _onAction,
@@ -424,6 +427,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
               )
             : PdfEditorView(
                 bytes: data,
+                documentId: _title,
                 viewerController: _controller,
                 preferences: _prefs,
                 onSave: (saved) => unawaited(_saveAs(saved)),

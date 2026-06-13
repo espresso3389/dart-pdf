@@ -2095,12 +2095,17 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       _polyPoints = null;
       _polyHover = null;
     });
+    final opacity = _controller.opacity.clamp(0.0, 1.0);
+    final fill = _controller.shapeFillColor;
     _afterPath = (
       points: simplified,
       tool: _tool!,
-      color: _controller.color
-          .withValues(alpha: _controller.opacity.clamp(0.0, 1.0)),
-      fillColor: null,
+      color: _controller.color.withValues(alpha: opacity),
+      // a polygon's interior fill (so the commit afterimage matches the
+      // filled appearance, not just its outline)
+      fillColor: _tool == PdfEditTool.polygon && fill != null
+          ? fill.withValues(alpha: opacity)
+          : null,
       strokeWidth: _controller.strokeWidth * _geometry.scale,
       dashed: _controller.dashedStroke,
     );
@@ -2559,11 +2564,59 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     }
   }
 
+  /// Tools whose drag shows a stroke-width / opacity readout.
+  static const _strokeTools = {
+    PdfEditTool.rectangle,
+    PdfEditTool.ellipse,
+    PdfEditTool.line,
+    PdfEditTool.arrow,
+    PdfEditTool.polyline,
+    PdfEditTool.polygon,
+  };
+
+  /// A `"{width} pt · {opacity}%"` readout while a shape/line is being
+  /// drawn (the creation pen width and opacity) or a stroked selection is
+  /// being resized (its own values) — so they're visible mid-gesture.
+  /// Null for measurement tools (their own readout shows) and when nothing
+  /// stroke-bearing is mid-drag.
+  (String text, Offset anchor)? _styleReadout() {
+    if (_measureKind != null) return null;
+    double width;
+    double opacity;
+    Offset anchor;
+    if (_resizeHandle != null && _resizeRect != null) {
+      final style = _controller.selectedAnnotationStyle;
+      if (style?.strokeWidth == null) return null;
+      width = style!.strokeWidth!;
+      opacity = style.opacity;
+      anchor = _resizeRect!.bottomRight;
+    } else if (_tool != null && _strokeTools.contains(_tool)) {
+      if (_dragStart != null &&
+          _dragCurrent != null &&
+          (_dragCurrent! - _dragStart!).distance >= 2) {
+        anchor = _dragCurrent!;
+      } else if (_polyPoints != null && _polyPoints!.isNotEmpty) {
+        anchor = _polyHover ?? _polyPoints!.last;
+      } else {
+        return null;
+      }
+      width = _controller.strokeWidth;
+      opacity = _controller.opacity;
+    } else {
+      return null;
+    }
+    final w = width == width.roundToDouble()
+        ? width.toStringAsFixed(0)
+        : width.toStringAsFixed(1);
+    return ('$w pt · ${(opacity * 100).round()}%', anchor);
+  }
+
   /// The floating measurement readout chip. Mouse: rides just off the
   /// cursor. Touch/stylus: floats well above the finger so the contact
   /// point isn't occluded (the [_buildSelectionChip]/eyedropper pattern,
   /// keyed on [_lastPointerKind]).
-  Widget _buildMeasureReadoutChip(String text, Offset anchor) {
+  Widget _buildReadoutChip(String text, Offset anchor,
+      {String keyValue = 'pdf-measure-readout'}) {
     final touch = _lastPointerKind == PointerDeviceKind.touch ||
         _lastPointerKind == PointerDeviceKind.stylus;
     final offset = touch ? const Offset(0, -64) : const Offset(16, -36);
@@ -2574,7 +2627,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         translation: touch ? const Offset(-0.5, 0) : Offset.zero,
         child: IgnorePointer(
           child: Material(
-            key: const ValueKey('pdf-measure-readout'),
+            key: ValueKey(keyValue),
             color: const Color(0xE6202124),
             elevation: 3,
             borderRadius: BorderRadius.circular(6),
@@ -2850,6 +2903,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                         ? (_dragStart!, _dragCurrent!)
                         : null,
                     dragPath: polyPreview,
+                    dragPathFill: _tool == PdfEditTool.polygon &&
+                            _controller.shapeFillColor != null
+                        ? _controller.shapeFillColor!.withValues(
+                            alpha: _controller.opacity.clamp(0.0, 1.0))
+                        : null,
                     dashed: _controller.dashedStroke,
                     livePath: vertexPreview,
                     selectionRect: _resizeHandle != null
@@ -3064,7 +3122,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                 ),
               if (showChip) _buildSelectionChip(chrome?.$1 ?? selected),
               if (_measureReadout() case (final text, final anchor))
-                _buildMeasureReadoutChip(text, anchor),
+                _buildReadoutChip(text, anchor),
+              if (_styleReadout() case (final text, final anchor))
+                _buildReadoutChip(text, anchor, keyValue: 'pdf-style-readout'),
             ]),
           ),
         ),
@@ -3263,6 +3323,7 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.dragRect,
     required this.dragLine,
     required this.dragPath,
+    this.dragPathFill,
     required this.dashed,
     required this.livePath,
     required this.selectionRect,
@@ -3320,6 +3381,10 @@ class _EditingPreviewPainter extends CustomPainter {
   final Rect? dragRect;
   final (Offset, Offset)? dragLine;
   final List<Offset>? dragPath;
+
+  /// The interior fill for an in-progress polygon [dragPath], so drawing a
+  /// filled polygon previews the fill. Null leaves the path outline-only.
+  final Color? dragPathFill;
   final bool dashed;
   final ({
     List<Offset> points,
@@ -3706,7 +3771,7 @@ class _EditingPreviewPainter extends CustomPainter {
           canvas, [line.$1, line.$2], tool, color, null, strokeWidth, dashed);
     } else if (dragPath != null) {
       _paintPathPreview(
-          canvas, dragPath!, tool, color, null, strokeWidth, dashed);
+          canvas, dragPath!, tool, color, dragPathFill, strokeWidth, dashed);
     } else if (dragRect case final rect?) {
       _paintShapePreview(canvas, rect, tool, color, strokeWidth);
     }
@@ -3970,6 +4035,7 @@ class _EditingPreviewPainter extends CustomPainter {
       oldDelegate.strokeWidth != strokeWidth ||
       !listEquals(oldDelegate.redactionRects, redactionRects) ||
       oldDelegate.dragRect != dragRect ||
+      oldDelegate.dragPathFill != dragPathFill ||
       oldDelegate.selectionRect != selectionRect ||
       !listEquals(oldDelegate.extraSelectionRects, extraSelectionRects) ||
       oldDelegate.marqueeRect != marqueeRect ||

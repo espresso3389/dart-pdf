@@ -918,6 +918,7 @@ class PdfEditingController extends ChangeNotifier {
       (e) => e.addPolygon(pageIndex, points,
           strokeColor: _colorValue,
           strokeWidth: preferences.strokeWidth,
+          fillColor: _rgbOf(preferences.shapeFillColor),
           opacity: preferences.opacity,
           dashPattern: _lineDashPattern,
           author: author),

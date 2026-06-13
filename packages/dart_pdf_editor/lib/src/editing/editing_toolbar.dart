@@ -9,6 +9,7 @@ import '../pdf_viewer.dart';
 import 'editing_color_picker.dart';
 import 'editing_controller.dart';
 import 'editing_measure.dart';
+import 'line_style.dart';
 import 'editing_signature.dart';
 import 'editing_stamps.dart';
 import 'text_prompt.dart';
@@ -1175,10 +1176,11 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
         return _StyleFields(
           stroke: true,
           opacity: true,
-          dashed: true,
+          lineType: true,
           lineEndings: tool == PdfEditTool.line || tool == PdfEditTool.polyline,
-          shapeFill:
-              tool == PdfEditTool.rectangle || tool == PdfEditTool.ellipse,
+          shapeFill: tool == PdfEditTool.rectangle ||
+              tool == PdfEditTool.ellipse ||
+              tool == PdfEditTool.polygon,
         );
       case 'insert':
         return const _StyleFields(opacity: true, font: true, boxColors: true);
@@ -1203,18 +1205,20 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
         return _StyleFields(opacity: true, font: text, boxColors: text);
       case 'Square':
       case 'Circle':
+      case 'Polygon':
         return _StyleFields(
             stroke: canStroke,
             opacity: true,
+            lineType: controller.canSetLineStyleSelected,
             shapeFill: controller.canFillSelected);
       case 'Line':
       case 'PolyLine':
         return _StyleFields(
             stroke: canStroke,
             opacity: true,
+            lineType: controller.canSetLineStyleSelected,
             lineEndings: controller.canSetLineEndings);
       case 'Ink':
-      case 'Polygon':
         return _StyleFields(stroke: canStroke, opacity: true);
       default:
         // markup, stamps, notes: opacity is the only shared restyle
@@ -1780,7 +1784,7 @@ class _StyleFields {
   const _StyleFields({
     this.stroke = false,
     this.opacity = false,
-    this.dashed = false,
+    this.lineType = false,
     this.lineEndings = false,
     this.font = false,
     this.boxColors = false,
@@ -1790,7 +1794,10 @@ class _StyleFields {
 
   final bool stroke;
   final bool opacity;
-  final bool dashed;
+
+  /// The line-type dropdown (solid / dashed / dotted / dash-dot) — shapes
+  /// and the line family.
+  final bool lineType;
   final bool lineEndings;
 
   /// Font size + family (free text).
@@ -1808,7 +1815,7 @@ class _StyleFields {
   bool get isEmpty =>
       !stroke &&
       !opacity &&
-      !dashed &&
+      !lineType &&
       !lineEndings &&
       !font &&
       !boxColors &&
@@ -2147,14 +2154,39 @@ class _StyleMenuState extends State<_StyleMenu> {
                         setState(() => _draggingOpacity = null);
                       },
                     ),
-                  if (fields.dashed && !restylingAnnotation)
-                    SwitchListTile(
-                      key: const ValueKey('pdf-dashed-stroke'),
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Dashed line'),
-                      value: controller.dashedStroke,
-                      onChanged: (value) => controller.dashedStroke = value,
+                  if (fields.lineType)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          const Expanded(child: Text('Line type')),
+                          DropdownButton<PdfLineStyle>(
+                            key: const ValueKey('pdf-line-type'),
+                            isDense: true,
+                            value: restylingAnnotation
+                                ? (controller.selectedLineStyle ??
+                                    controller.lineStyle)
+                                : controller.lineStyle,
+                            underline: const SizedBox.shrink(),
+                            items: [
+                              for (final style in PdfLineStyle.values)
+                                DropdownMenuItem(
+                                  value: style,
+                                  key: ValueKey('pdf-line-type-${style.name}'),
+                                  child: Text(style.label),
+                                ),
+                            ],
+                            onChanged: (value) {
+                              if (value == null) return;
+                              controller.lineStyle = value;
+                              if (restylingAnnotation &&
+                                  controller.canSetLineStyleSelected) {
+                                controller.restyleSelected(lineStyle: value);
+                              }
+                            },
+                          ),
+                        ],
+                      ),
                     ),
                   if (fields.lineEndings) ...[
                     _lineEndingRow(

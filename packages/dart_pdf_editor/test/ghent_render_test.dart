@@ -13,6 +13,13 @@
 // On mismatch the actual render and a per-pixel diff map are written to
 // test_corpora/ghent/_failures (git-ignored) for inspection.
 //
+// The pixel diff is a LOCAL golden check: baselines are rendered on macOS, and
+// CI (Linux) rasterizes text with different fonts/antialiasing, so the diff can
+// never match there. Under CI the comparison is skipped — every page is still
+// rasterized and asserted non-blank (catching crashes and blank-render
+// regressions), matching how pdfjs_render_test only diffs when opted in. Force
+// the comparison anywhere with GHENT_COMPARE=1.
+//
 // For visual review, set GHENT_RENDER_OUT to write PNGs plus an index.html:
 //   GHENT_RENDER_OUT=../../test_corpora/ghent/_renders \
 //     fvm flutter test test/ghent_render_test.dart
@@ -42,6 +49,11 @@ void main() {
     return;
   }
   final update = Platform.environment['GHENT_UPDATE'] == '1';
+  // Pixel-diff against the (macOS) baselines locally; in CI just render every
+  // page. GHENT_COMPARE=1 forces the diff; GHENT_UPDATE implies it.
+  final compare = update ||
+      Platform.environment['GHENT_COMPARE'] == '1' ||
+      Platform.environment['CI'] != 'true';
   final renderOut = Platform.environment['GHENT_RENDER_OUT'];
   final gallery =
       renderOut == null ? null : RenderGallery(Directory(renderOut));
@@ -77,14 +89,16 @@ void main() {
             expect(_inkFraction(pixels), greaterThan(0.0005),
                 reason: '$name page $i rendered (nearly) blank');
 
-            await _checkBaseline(
-              root: root,
-              name: name,
-              page: i,
-              image: image,
-              pixels: pixels,
-              update: update,
-            );
+            if (compare) {
+              await _checkBaseline(
+                root: root,
+                name: name,
+                page: i,
+                image: image,
+                pixels: pixels,
+                update: update,
+              );
+            }
             if (gallery != null) {
               await gallery.add(
                 pdfName: name,

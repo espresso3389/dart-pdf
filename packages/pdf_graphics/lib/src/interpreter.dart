@@ -177,6 +177,10 @@ class PdfInterpreter {
   Set<CosReference>? _optionalContentOff;
   String? _optionalContentBaseState;
   int _currentFormDepth = 0;
+
+  // Tiling-pattern streams currently being painted, by identity — a pattern
+  // whose cell re-enters itself (through a form) is a reference cycle.
+  final Set<CosStream> _activeTilingPatterns = Set.identity();
   PdfRect? _pageBox;
 
   // current path, built in page space
@@ -1525,6 +1529,16 @@ class PdfInterpreter {
 
     final savedState = _state;
     final savedStackDepth = _stateStack.length;
+    // A CharProc is its own content stream and usually opens its own BT..ET
+    // (this font draws each glyph with a nested text object). Save the outer
+    // text-object state so the inner BT/Tm/ET can't clobber the caller's text
+    // matrix — otherwise every glyph after the first lands at the wrong
+    // position (§9.6.5: the glyph description executes in glyph space and must
+    // not disturb the text object that invoked it).
+    final savedTextMatrix = _textMatrix;
+    final savedLineMatrix = _lineMatrix;
+    final savedClipPending = _textClipPending;
+    final savedClipSegments = List.of(_textClipSegments);
     device.save();
     try {
       _state = _GraphicsState.from(savedState)
@@ -1537,6 +1551,12 @@ class PdfInterpreter {
         _stateStack.removeLast();
       }
       _state = savedState;
+      _textMatrix = savedTextMatrix;
+      _lineMatrix = savedLineMatrix;
+      _textClipPending = savedClipPending;
+      _textClipSegments
+        ..clear()
+        ..addAll(savedClipSegments);
       device.restore();
     }
   }
@@ -1618,6 +1638,19 @@ class PdfInterpreter {
   /// area, clipped to the fill path (§8.7.3).
   void _fillWithTilingPattern(
       PdfPath path, PdfFillRule rule, CosStream pattern) {
+    if (_activeTilingPatterns.contains(pattern)) {
+      // A reference cycle: this pattern's cell content (via a form) fills with
+      // the same pattern. Rather than recurse to the form-depth limit and
+      // paint nothing, break the cycle by solid-filling the clipped area —
+      // matching pdf.js, which detects the operator-list cycle and renders the
+      // box. Uncolored (PaintType 2) patterns carry an explicit colour;
+      // colored ones default to black like the initial fill colour.
+      final fallback = _state.fillPatternComponents.isNotEmpty
+          ? colorFromComponents(_state.fillPatternComponents)
+          : PdfColor.black;
+      device.fillPath(path, fallback, rule, _state.fillAlpha);
+      return;
+    }
     if (_currentFormDepth >= _maxFormDepth) return;
     final dict = pattern.dictionary;
     final matrix = _patternMatrix(dict);
@@ -1674,6 +1707,7 @@ class PdfInterpreter {
     final savedStackDepth = _stateStack.length;
     final patternColor =
         uncolored ? colorFromComponents(_state.fillPatternComponents) : null;
+    _activeTilingPatterns.add(pattern);
     try {
       for (var j = j0; j <= j1; j++) {
         for (var i = i0; i <= i1; i++) {
@@ -1685,6 +1719,11 @@ class PdfInterpreter {
           }
           device.save();
           try {
+            // §8.7.3.1: the cell content is clipped to the pattern BBox before
+            // tiling — content drawn outside the cell (this pattern's red rect
+            // overruns the BBox by 50 units) must not paint, leaving the white
+            // border the baseline shows.
+            _clipToBox(bbox);
             _run(ops, patternResources, _currentFormDepth + 1);
           } finally {
             final mask = _state.softMask;
@@ -1694,6 +1733,7 @@ class PdfInterpreter {
         }
       }
     } finally {
+      _activeTilingPatterns.remove(pattern);
       while (_stateStack.length > savedStackDepth) {
         _stateStack.removeLast();
       }

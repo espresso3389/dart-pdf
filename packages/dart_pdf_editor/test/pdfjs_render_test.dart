@@ -225,9 +225,11 @@ Future<_Comparison> _compareBaseline({
       }
       final differs = maxDiff > channelTolerance;
       if (differs) differing++;
-      diffMap[i] = differs ? 255 : actualPixels[i];
-      diffMap[i + 1] = differs ? 0 : actualPixels[i + 1];
-      diffMap[i + 2] = differs ? 0 : actualPixels[i + 2];
+      // Render only the red diff over a blank white field — no base image,
+      // so the changed pixels are easy to spot.
+      diffMap[i] = 255;
+      diffMap[i + 1] = differs ? 0 : 255;
+      diffMap[i + 2] = differs ? 0 : 255;
       diffMap[i + 3] = 255;
     }
 

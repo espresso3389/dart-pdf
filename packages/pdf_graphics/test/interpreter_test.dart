@@ -729,5 +729,71 @@ void main() {
       expect(device.clips, hasLength(3));
       expect(boundsOf(device.clips.first.$1), (100, 100, 200, 150));
     });
+
+    test('fallback highlights use multiply so text remains visible', () {
+      final doc = PdfDocument.open(buildClassicPdf());
+      final annotation = PdfAnnotation.fromDict(
+        doc,
+        CosDictionary({
+          'Subtype': const CosName('Highlight'),
+          'Rect': CosArray([
+            const CosInteger(10),
+            const CosInteger(20),
+            const CosInteger(110),
+            const CosInteger(40),
+          ]),
+          'QuadPoints': CosArray([
+            const CosInteger(10),
+            const CosInteger(40),
+            const CosInteger(110),
+            const CosInteger(40),
+            const CosInteger(10),
+            const CosInteger(20),
+            const CosInteger(110),
+            const CosInteger(20),
+          ]),
+          'C': CosArray([
+            const CosInteger(1),
+            const CosInteger(1),
+            const CosInteger(0),
+          ]),
+        }),
+      );
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc.cos, device: device)
+          .drawAnnotation(doc.page(0), annotation);
+
+      expect(device.blendModes, [PdfBlendMode.multiply, PdfBlendMode.normal]);
+      expect(device.fills.single.$2, const PdfColor(1, 1, 0));
+    });
+
+    test('fallback text widgets draw their field value', () {
+      final doc = PdfDocument.open(buildClassicPdf());
+      final annotation = PdfAnnotation.fromDict(
+        doc,
+        CosDictionary({
+          'Subtype': const CosName('Widget'),
+          'FT': const CosName('Tx'),
+          'Rect': CosArray([
+            const CosInteger(20),
+            const CosInteger(100),
+            const CosInteger(170),
+            const CosInteger(122),
+          ]),
+          'DA': CosString.fromText('/Helv 12 Tf 0 g'),
+          'V': CosString.fromText('tx annotation'),
+        }),
+      );
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc.cos, device: device)
+          .drawAnnotation(doc.page(0), annotation);
+
+      expect(device.texts.single.text, 'tx annotation');
+      expect(device.texts.single.fontName, 'Helvetica');
+      expect(device.texts.single.fontSize, 12);
+      expect(device.texts.single.transform.e, 22);
+      expect(device.texts.single.transform.f, closeTo(106.692, 1e-3));
+      expect(device.clips, hasLength(1));
+    });
   });
 }

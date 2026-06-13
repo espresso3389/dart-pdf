@@ -231,6 +231,10 @@ class PdfInterpreter {
         _drawFallbackInk(annotation);
       case 'Highlight' || 'Underline' || 'StrikeOut' || 'Squiggly':
         _drawFallbackTextMarkup(annotation);
+      case 'Widget':
+        if (annotation is PdfWidgetAnnotation) {
+          _drawFallbackWidget(annotation);
+        }
     }
   }
 
@@ -307,10 +311,12 @@ class PdfInterpreter {
     final color = _pdfColor(annotation.color ?? 0xFFFF00);
     switch (annotation.subtype) {
       case 'Highlight':
+        device.setBlendMode(PdfBlendMode.multiply);
         for (final rect in quads) {
           device.fillPath(_rectPath(rect), color, PdfFillRule.nonzero,
               _annotationFillAlpha(annotation, fallback: 0.35));
         }
+        device.setBlendMode(PdfBlendMode.normal);
       case 'Underline' || 'StrikeOut':
         final atHeight = annotation.subtype == 'Underline' ? 0.08 : 0.45;
         for (final rect in quads) {
@@ -333,6 +339,96 @@ class PdfInterpreter {
               _annotationStrokeAlpha(annotation));
         }
     }
+  }
+
+  void _drawFallbackWidget(PdfWidgetAnnotation annotation) {
+    if (annotation.fieldType != 'Tx') return;
+    final value = annotation.fieldValue;
+    if (value == null || value.isEmpty) return;
+    final rect = annotation.rect;
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    final style = _parseWidgetDefaultAppearance(annotation);
+    const pad = 2.0;
+    var size = style.size;
+    final text = value.replaceAll('\n', ' ');
+    final width = measureHelvetica(text, size) / size;
+    final ascent = size * 0.718;
+    final y =
+        ((rect.height - ascent) / 2 < pad ? pad : (rect.height - ascent) / 2) +
+            rect.bottom;
+
+    device.save();
+    try {
+      device.clipPath(
+        _rectPath(PdfRect(
+            rect.left + 1, rect.bottom + 1, rect.right - 1, rect.top - 1)),
+        PdfFillRule.nonzero,
+      );
+      device.drawText(PdfTextRun(
+        text: text,
+        transform: PdfMatrix(size, 0, 0, size, rect.left + pad, y),
+        color: style.color,
+        width: width,
+        fontName: style.fontName,
+        fontSize: size,
+      ));
+    } finally {
+      device.restore();
+    }
+  }
+
+  ({String fontName, double size, PdfColor color})
+      _parseWidgetDefaultAppearance(PdfWidgetAnnotation annotation) {
+    final da = _widgetDefaultAppearance(annotation) ?? '';
+    final tf = RegExp(r'/(\S+)\s+([\d.]+)\s+Tf').firstMatch(da);
+    final rawName = tf?.group(1) ?? 'Helv';
+    final fontName = switch (rawName) {
+      'Helv' => 'Helvetica',
+      'ZaDb' => 'ZapfDingbats',
+      _ => rawName,
+    };
+    final parsedSize = double.tryParse(tf?.group(2) ?? '') ?? 12;
+    final size = parsedSize <= 0 ? 12.0 : parsedSize;
+
+    PdfColor color = PdfColor.black;
+    for (final match
+        in RegExp(r'([\d.]+)(?:\s+([\d.]+)\s+([\d.]+))?\s+(g|rg)\b')
+            .allMatches(da)) {
+      final op = match.group(4);
+      if (op == 'g') {
+        final gray = double.tryParse(match.group(1)!) ?? 0;
+        color = PdfColor.gray(gray.clamp(0.0, 1.0));
+      } else {
+        final r = double.tryParse(match.group(1)!) ?? 0;
+        final g = double.tryParse(match.group(2) ?? '') ?? 0;
+        final b = double.tryParse(match.group(3) ?? '') ?? 0;
+        color = PdfColor(
+          r.clamp(0.0, 1.0),
+          g.clamp(0.0, 1.0),
+          b.clamp(0.0, 1.0),
+        );
+      }
+    }
+    return (fontName: fontName, size: size, color: color);
+  }
+
+  String? _widgetDefaultAppearance(PdfWidgetAnnotation annotation) {
+    final cos = annotation.document.cos;
+    CosDictionary? node = annotation.dict;
+    final visited = <CosDictionary>{};
+    while (node != null && visited.add(node)) {
+      final da = cos.resolve(node['DA']);
+      if (da is CosString) return da.text;
+      final parent = cos.resolve(node['Parent']);
+      node = parent is CosDictionary ? parent : null;
+    }
+    final acroForm = cos.resolve(annotation.document.catalog['AcroForm']);
+    if (acroForm is CosDictionary) {
+      final da = cos.resolve(acroForm['DA']);
+      if (da is CosString) return da.text;
+    }
+    return null;
   }
 
   PdfStroke _annotationStroke(PdfAnnotation annotation) => PdfStroke(

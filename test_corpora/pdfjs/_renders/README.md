@@ -40,7 +40,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | asciihexdecode.pdf | 1 | 795x842 | 0.253% |
 | bad-PageLabels.pdf | 1 | 200x50 | 8.490% |
 | bigboundingbox.pdf | 1 | 612x792 | 1.315% |
-| bitmap-halftone.pdf | 1 | 399x400 | 6.861% |
+| bitmap-halftone.pdf | 1 | 399x400 | 0.000% |
 | bitmap-mmr.pdf | 1 | 399x400 | 0.000% |
 | bitmap-refine.pdf | 1 | 399x400 | 6.861% |
 | bitmap-symbol-symhuff-texthuff.pdf | 1 | 399x400 | 6.861% |
@@ -456,7 +456,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### bitmap-halftone.pdf page 1
 
-399x400; diff: 6.861%
+399x400; diff: 0.000%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

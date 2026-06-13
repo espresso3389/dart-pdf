@@ -7,10 +7,11 @@ import 'mq.dart';
 ///
 /// Coverage: arithmetic-coded generic regions (templates 0–3, TPGDON)
 /// and MMR-coded ones (via the CCITT engine), symbol dictionaries and
-/// text regions (arithmetic coding), with /JBIG2Globals support — which
+/// text regions (arithmetic coding), pattern dictionaries, and
+/// arithmetic-coded halftone regions, with /JBIG2Globals support — which
 /// spans what real-world PDF encoders (jbig2enc, Acrobat) emit. Huffman
-/// coding, refinement/aggregation, and halftone regions are not
-/// supported; such files decode to null and the image is skipped.
+/// coding and refinement/aggregation are not supported; such files decode
+/// to null and the image is skipped.
 ///
 /// Output is 1 bit per pixel with PDF polarity: black pixels are 0 bits
 /// (matching CCITTFaxDecode's default), rows padded to byte boundaries.
@@ -21,6 +22,7 @@ class Jbig2Decoder {
   final int height;
 
   final Map<int, List<_Bitmap>> _symbolDicts = {};
+  final Map<int, List<_Bitmap>> _patternDicts = {};
   _Bitmap? _page;
   int _pageDefault = 0;
 
@@ -95,6 +97,10 @@ class Jbig2Decoder {
       switch (type) {
         case 0: // symbol dictionary
           _symbolDicts[number] = _readSymbolDictionary(payload, referred);
+        case 16: // pattern dictionary
+          _patternDicts[number] = _readPatternDictionary(payload);
+        case 20 || 22 || 23: // halftone region
+          _readHalftoneRegion(payload, referred);
         case 4 || 6 || 7: // text region (intermediate/immediate/lossless)
           _readTextRegion(payload, referred);
         case 36 || 38 || 39: // generic region
@@ -167,6 +173,163 @@ class Jbig2Decoder {
     _ensurePage().compose(region, x, y, op);
   }
 
+  // ---------- pattern dictionaries and halftone regions (§6.6, §6.7) ----------
+
+  List<_Bitmap> _readPatternDictionary(Uint8List data) {
+    if (data.length < 7) throw const FormatException('short pattern dict');
+    final view = ByteData.sublistView(data);
+    final flags = data[0];
+    final mmr = flags & 1;
+    final template = (flags >> 1) & 3;
+    final patternWidth = data[1];
+    final patternHeight = data[2];
+    final patternCount = view.getUint32(3) + 1;
+    if (patternWidth <= 0 ||
+        patternHeight <= 0 ||
+        patternCount <= 0 ||
+        patternCount > 1 << 16) {
+      throw const FormatException('invalid pattern dictionary');
+    }
+
+    final collectiveWidth = patternWidth * patternCount;
+    final payload = Uint8List.sublistView(data, 7);
+    final _Bitmap collective;
+    if (mmr == 1) {
+      collective = _decodeMmr(payload, collectiveWidth, patternHeight);
+    } else {
+      final decoder = MqDecoder(payload);
+      final contexts = Int8List(1 << 16);
+      final indexes = Uint8List(1 << 16);
+      final at = template == 0
+          ? [
+              (-patternWidth, 0),
+              (-3, -1),
+              (2, -2),
+              (-2, -2),
+            ]
+          : [(-patternWidth, 0)];
+      collective = _decodeGeneric(decoder, contexts, indexes, collectiveWidth,
+          patternHeight, template, at, false);
+    }
+
+    return [
+      for (var i = 0; i < patternCount; i++)
+        _copyBitmap(
+            collective, i * patternWidth, 0, patternWidth, patternHeight),
+    ];
+  }
+
+  void _readHalftoneRegion(Uint8List data, List<int> referred) {
+    if (data.length < 38) throw const FormatException('short halftone');
+    final view = ByteData.sublistView(data);
+    final (w, h, x, y, op) = _regionInfo(view);
+    var p = 17;
+    final flags = data[p++];
+    final mmr = flags & 1;
+    final template = (flags >> 1) & 3;
+    final enableSkip = (flags >> 3) & 1;
+    final combOp = (flags >> 4) & 7;
+    final defaultPixel = (flags >> 7) & 1;
+    final gridWidth = view.getUint32(p);
+    final gridHeight = view.getUint32(p + 4);
+    final gridX = view.getInt32(p + 8);
+    final gridY = view.getInt32(p + 12);
+    p += 16;
+    final stepX = view.getInt16(p);
+    final stepY = view.getInt16(p + 2);
+    p += 4;
+    if (mmr == 1 || enableSkip == 1) {
+      throw const FormatException('unsupported halftone coding');
+    }
+    if (gridWidth <= 0 || gridHeight <= 0) return;
+
+    final patterns = <_Bitmap>[
+      for (final segment in referred) ...?_patternDicts[segment],
+    ];
+    if (patterns.isEmpty) {
+      throw const FormatException('halftone has no pattern dictionary');
+    }
+
+    var bitsPerPixel = 0;
+    while (patterns.length > (1 << ++bitsPerPixel)) {}
+    if (bitsPerPixel > 16) {
+      throw const FormatException('halftone has too many patterns');
+    }
+
+    final gray = _decodeGrayScaleImage(
+      Uint8List.sublistView(data, p),
+      gridWidth,
+      gridHeight,
+      bitsPerPixel,
+      template,
+    );
+    final region = _Bitmap(w, h, fill: defaultPixel);
+    for (var mg = 0; mg < gridHeight; mg++) {
+      for (var ng = 0; ng < gridWidth; ng++) {
+        var index = gray[mg * gridWidth + ng];
+        if (index >= patterns.length) index = patterns.length - 1;
+        final px = (gridX + mg * stepY + ng * stepX) >> 8;
+        final py = (gridY + mg * stepX - ng * stepY) >> 8;
+        region.compose(patterns[index], px, py, combOp);
+      }
+    }
+    _ensurePage().compose(region, x, y, op);
+  }
+
+  Uint16List _decodeGrayScaleImage(
+    Uint8List data,
+    int w,
+    int h,
+    int bitsPerPixel,
+    int template,
+  ) {
+    final decoder = MqDecoder(data);
+    final contexts = Int8List(1 << 16);
+    final indexes = Uint8List(1 << 16);
+    final at = template == 0
+        ? [
+            (3, -1),
+            (-3, -1),
+            (2, -2),
+            (-2, -2),
+          ]
+        : [(template <= 1 ? 3 : 2, -1)];
+    final planes = List<_Bitmap?>.filled(bitsPerPixel, null);
+    for (var i = bitsPerPixel - 1; i >= 0; i--) {
+      final plane =
+          _decodeGeneric(decoder, contexts, indexes, w, h, template, at, false);
+      if (i < bitsPerPixel - 1) {
+        final higher = planes[i + 1]!;
+        for (var p = 0; p < plane.data.length; p++) {
+          plane.data[p] ^= higher.data[p];
+        }
+      }
+      planes[i] = plane;
+    }
+
+    final values = Uint16List(w * h);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var value = 0;
+        for (var i = 0; i < bitsPerPixel; i++) {
+          value |= planes[i]!.get(x, y) << i;
+        }
+        values[y * w + x] = value;
+      }
+    }
+    return values;
+  }
+
+  static _Bitmap _copyBitmap(_Bitmap source, int x, int y, int w, int h) {
+    final out = _Bitmap(w, h, fill: 0);
+    for (var sy = 0; sy < h; sy++) {
+      for (var sx = 0; sx < w; sx++) {
+        if (source.get(x + sx, y + sy) != 0) out.set(sx, sy, 1);
+      }
+    }
+    return out;
+  }
+
   static _Bitmap _decodeMmr(Uint8List data, int w, int h) {
     final packed = CcittDecoder(
       data: data,
@@ -233,8 +396,8 @@ class Jbig2Decoder {
     var ltp = 0;
     for (var y = 0; y < h; y++) {
       if (tpgdon) {
-        final bit = decoder.decode(contexts, indexes,
-            _tpgdonContexts[template]);
+        final bit =
+            decoder.decode(contexts, indexes, _tpgdonContexts[template]);
         ltp ^= bit;
         if (ltp == 1) {
           bitmap.copyRow(y); // duplicate the row above
@@ -300,8 +463,8 @@ class Jbig2Decoder {
           throw const FormatException('too many symbols');
         }
         symbolWidth += dw;
-        newSymbols.add(_decodeGeneric(decoder, contexts, indexes,
-            symbolWidth, heightClass, template, at, false));
+        newSymbols.add(_decodeGeneric(decoder, contexts, indexes, symbolWidth,
+            heightClass, template, at, false));
       }
     }
 
@@ -392,8 +555,7 @@ class Jbig2Decoder {
           curS += ds + dsOffset;
         }
         first = false;
-        final curT =
-            strips == 1 ? 0 : (decoder.decodeInt(iait) ?? 0);
+        final curT = strips == 1 ? 0 : (decoder.decodeInt(iait) ?? 0);
         final t = stripT + curT;
         final id = decoder.decodeId(iaidContexts, iaidIndexes, codeLength);
         if (refine == 1 && (decoder.decodeInt(iari) ?? 0) != 0) {
@@ -404,9 +566,7 @@ class Jbig2Decoder {
         }
         final symbol = symbols[id];
         _drawSymbol(region, symbol, curS, t,
-            refCorner: refCorner,
-            transposed: transposed == 1,
-            combOp: combOp);
+            refCorner: refCorner, transposed: transposed == 1, combOp: combOp);
         curS += (transposed == 1 ? symbol.height : symbol.width) - 1;
         decoded++;
         if (decoded >= instanceCount) break;
@@ -416,9 +576,7 @@ class Jbig2Decoder {
   }
 
   static void _drawSymbol(_Bitmap region, _Bitmap symbol, int s, int t,
-      {required int refCorner,
-      required bool transposed,
-      required int combOp}) {
+      {required int refCorner, required bool transposed, required int combOp}) {
     int x, y;
     if (!transposed) {
       // refCorner: 0 bottom-left, 1 top-left, 2 bottom-right, 3 top-right

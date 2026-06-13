@@ -885,7 +885,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
         if (flatten != null) ...[flatten, const _MiniDivider()],
         IconButton(
           key: const ValueKey('pdf-apply-redactions'),
-          icon: const Icon(Icons.block),
+          icon: const Icon(Icons.check),
           tooltip: 'Apply redactions (irreversible)',
           onPressed: controller.hasRedactionMarks
               ? () => _applyRedactions(context)

@@ -317,6 +317,7 @@ class PdfViewer extends StatefulWidget {
     this.showAnnotations = true,
     this.highlightFormFields = true,
     this.pagePreviews = true,
+    this.predictStrokes = true,
   });
 
   final PdfDocument document;
@@ -421,6 +422,17 @@ class PdfViewer extends StatefulWidget {
   /// session plus up to ~40 MB of preview pixels on very long
   /// documents.
   final bool pagePreviews;
+
+  /// Draws a short speculative "lead" ahead of the pen while an ink stroke
+  /// is in flight, forward-extrapolated from the recent samples' velocity
+  /// and curvature, to mask the input+render latency between the pencil
+  /// tip and the painted line the way PencilKit's predicted touches do.
+  /// The lead is display-only — it never enters the committed stroke — and
+  /// is suppressed when prediction would be unstable (too few samples, a
+  /// near-stationary pen, or a sharp direction reversal). Pure geometry, so
+  /// it helps every stylus platform; it approximates, but does not equal,
+  /// Apple's hardware predictor.
+  final bool predictStrokes;
 
   @override
   State<PdfViewer> createState() => _PdfViewerState();
@@ -2386,6 +2398,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                 transformScale: _transformScale,
                 renderScheduler: _renderScheduler,
                 previewCache: widget.pagePreviews ? _previews : null,
+                predictStrokes: widget.predictStrokes,
               ),
             ),
           ),
@@ -2656,6 +2669,7 @@ class _PdfViewerPage extends StatefulWidget {
     required this.transformScale,
     required this.renderScheduler,
     required this.previewCache,
+    required this.predictStrokes,
   });
 
   final PdfPage page;
@@ -2703,6 +2717,9 @@ class _PdfViewerPage extends StatefulWidget {
 
   /// See [PdfPageView.previewCache]; null when previews are off.
   final PdfPagePreviewCache? previewCache;
+
+  /// See [PdfViewer.predictStrokes].
+  final bool predictStrokes;
 
   @override
   State<_PdfViewerPage> createState() => _PdfViewerPageState();
@@ -2812,6 +2829,7 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
                               onShowFormFieldMenu: widget.onShowFormFieldMenu,
                               rasterCurrent: _rastered,
                               zoom: zoom,
+                              predictStrokes: widget.predictStrokes,
                             ),
                           ),
                         ),

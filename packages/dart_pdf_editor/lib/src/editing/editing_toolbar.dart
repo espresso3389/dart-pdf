@@ -318,6 +318,13 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
       controller.tool = PdfEditTool.select;
       return;
     }
+    // tapping the Select chip while Select is already armed disarms it, so
+    // the viewer drops back to plain-reader mode (no chip highlighted)
+    if (group.id == 'select' && controller.tool == PdfEditTool.select) {
+      setState(() => _openGroupId = null);
+      controller.tool = null;
+      return;
+    }
     setState(() => _openGroupId = group.id);
     if (_groupForTool(controller.tool)?.id == group.id) return;
     controller.tool = group.defaultTool;

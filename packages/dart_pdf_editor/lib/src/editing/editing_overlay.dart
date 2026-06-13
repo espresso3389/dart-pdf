@@ -40,6 +40,7 @@ class EditingPageOverlay extends StatefulWidget {
     this.formImagePicker,
     this.onShowAnnotationMenu,
     this.onShowFormFieldMenu,
+    this.onResolvePagePoint,
   });
 
   final PdfEditingController controller;
@@ -101,6 +102,12 @@ class EditingPageOverlay extends StatefulWidget {
   /// right-clicking a field widget with the form tool armed.
   final void Function(Offset globalPosition, String fieldName)?
       onShowFormFieldMenu;
+
+  /// Resolves a global point to the page index and page-space coordinates
+  /// under it — lets a move drag that ends over a *different* page re-home
+  /// the dragged annotation there. Returns null off any page.
+  final (int, double, double)? Function(Offset globalPosition)?
+      onResolvePagePoint;
 
   @override
   State<EditingPageOverlay> createState() => _EditingPageOverlayState();
@@ -286,6 +293,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   // the painter spins by _resizeAngle), not page-axis view rects.
   Offset? _moveStart;
   Offset? _moveCurrent;
+
+  /// The global position of [_moveCurrent] — captured during a move drag
+  /// so a drop over another page can be resolved to a page point (drag-end
+  /// details carry no position).
+  Offset? _moveCurrentGlobal;
   _Handle? _resizeHandle;
   Rect? _resizeFrom;
   Rect? _resizeRect;
@@ -592,6 +604,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       _dragCurrent = null;
       _moveStart = null;
       _moveCurrent = null;
+      _moveCurrentGlobal = null;
       _resizeHandle = null;
       _resizeFrom = null;
       _resizeRect = null;
@@ -1742,6 +1755,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         _resizeRect = _anchorResized(resized);
       });
     } else if (_moveStart != null) {
+      _moveCurrentGlobal = details.globalPosition;
       setState(() => _moveCurrent = position);
     } else if (_activeStroke != null) {
       // hot path: append + repaint the stroke layer only, no rebuild
@@ -1767,6 +1781,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     final dragCurrent = _dragCurrent;
     final moveStart = _moveStart;
     final moveCurrent = _moveCurrent;
+    final moveCurrentGlobal = _moveCurrentGlobal;
     final resizeRect = _resizeHandle != null ? _resizeRect : null;
     final resizeAngle = _resizeAngle;
     final resizeFlipX = _resizeFlipX;
@@ -1787,6 +1802,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       _dragCurrent = null;
       _moveStart = null;
       _moveCurrent = null;
+      _moveCurrentGlobal = null;
       _resizeHandle = null;
       _resizeFrom = null;
       _resizeRect = null;
@@ -1893,6 +1909,19 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       if ((moveCurrent - moveStart).distance < 2) return; // a click
       // mapping both endpoints keeps the delta correct on rotated pages
       final (x0, y0) = _geometry.toPagePoint(moveStart);
+      // a single-annotation move dropped over a *different* page re-homes
+      // it there (drawn on top) instead of leaving it off this page's crop
+      // box, behind the neighbour
+      final resolve = widget.onResolvePagePoint;
+      if (resolve != null &&
+          moveCurrentGlobal != null &&
+          _controller.selectedAnnotationSlots.length == 1) {
+        final drop = resolve(moveCurrentGlobal);
+        if (drop != null && drop.$1 != widget.pageIndex) {
+          _controller.moveSelectedToPage(drop.$1, drop.$2 - x0, drop.$3 - y0);
+          return;
+        }
+      }
       final (x1, y1) = _geometry.toPagePoint(moveCurrent);
       _commitWithGhost(() => _controller.moveSelected(x1 - x0, y1 - y0),
           to: _selectedViewRect?.shift(moveCurrent - moveStart));

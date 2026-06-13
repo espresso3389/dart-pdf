@@ -38,21 +38,73 @@ const skipped = new Set([
   'print_protection.pdf',
 ]);
 
-const cjkSerifFonts = [
-  '/System/Library/Fonts/Supplemental/Songti.ttc',
-  '/System/Library/Fonts/Songti.ttc',
-  '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
-  '/usr/share/fonts/opentype/noto/NotoSerifCJKsc-Regular.otf',
-  '/usr/share/fonts/truetype/arphic/uming.ttc',
-];
-
-const cjkSansFonts = [
-  '/System/Library/Fonts/STHeiti Medium.ttc',
-  '/System/Library/Fonts/STHeiti Light.ttc',
-  '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-  '/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf',
-  '/usr/share/fonts/truetype/arphic/ukai.ttc',
-];
+// Non-embedded CJK fonts must be substituted with a real system font, and the
+// substitute must cover the document's language: a Chinese font has no Japanese
+// kana, so Japanese text (e.g. あいうえお) would still render as .notdef boxes.
+// Each language lists macOS faces first, then Linux Noto/arphic for CI. The
+// Noto pan-CJK .ttc files cover every language, so they double as a fallback.
+const cjkFontsByLang = {
+  ja: {
+    serif: [
+      '/System/Library/Fonts/ヒラギノ明朝 ProN.ttc',
+      '/System/Library/Fonts/Hiragino Mincho ProN.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSerifCJKjp-Regular.otf',
+    ],
+    sans: [
+      '/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc',
+      '/System/Library/Fonts/Hiragino Sans GB.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf',
+    ],
+  },
+  ko: {
+    serif: [
+      '/System/Library/Fonts/Supplemental/AppleMyungjo.ttf',
+      '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSerifCJKkr-Regular.otf',
+    ],
+    sans: [
+      '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
+      '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf',
+    ],
+  },
+  // Simplified and Traditional Chinese share the macOS Songti/STHeiti faces
+  // (both cover GB and Big5); Noto splits sc/tc for CI.
+  'zh-Hans': {
+    serif: [
+      '/System/Library/Fonts/Supplemental/Songti.ttc',
+      '/System/Library/Fonts/Songti.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSerifCJKsc-Regular.otf',
+      '/usr/share/fonts/truetype/arphic/uming.ttc',
+    ],
+    sans: [
+      '/System/Library/Fonts/STHeiti Medium.ttc',
+      '/System/Library/Fonts/STHeiti Light.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf',
+      '/usr/share/fonts/truetype/arphic/ukai.ttc',
+    ],
+  },
+  'zh-Hant': {
+    serif: [
+      '/System/Library/Fonts/Supplemental/Songti.ttc',
+      '/System/Library/Fonts/Songti.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSerifCJKtc-Regular.otf',
+      '/usr/share/fonts/truetype/arphic/uming.ttc',
+    ],
+    sans: [
+      '/System/Library/Fonts/STHeiti Medium.ttc',
+      '/System/Library/Fonts/STHeiti Light.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+      '/usr/share/fonts/opentype/noto/NotoSansCJKtc-Regular.otf',
+      '/usr/share/fonts/truetype/arphic/ukai.ttc',
+    ],
+  },
+};
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageDir = path.resolve(scriptDir, '../..');
@@ -90,11 +142,12 @@ for (const name of files) {
   const fontKeys = [];
   try {
     const bytes = await readFile(path.join(corpusDir, name));
-    if (needsCjkFallback(bytes)) {
-      const keys = registerCjkFallbacks();
+    const cjkLang = cjkLanguage(bytes);
+    if (cjkLang) {
+      const keys = registerCjkFallbacks(cjkLang);
       if (keys.length === 0) {
         console.warn(
-          `Warning: no local CJK fonts found; ${name} may render missing glyph boxes.`,
+          `Warning: no local ${cjkLang} CJK fonts found; ${name} may render missing glyph boxes.`,
         );
       } else {
         fontKeys.push(...keys);
@@ -192,18 +245,55 @@ function positiveNumber(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function needsCjkFallback(bytes) {
+// Returns the CJK language whose system font should substitute for this file's
+// non-embedded fonts, or null when none is needed. Detected from CIDSystemInfo
+// /Ordering and predefined CJK CMap /Encoding names; a hex-encoded BaseFont/
+// FontName (simple non-CID fonts, the legacy heuristic) is treated as
+// Simplified Chinese, which is what those corpus files are.
+function cjkLanguage(bytes) {
   const text = Buffer.from(bytes).toString('latin1');
-  return (
+  if (
+    /\/Ordering\s*\(\s*Japan1\s*\)/.test(text) ||
+    /\/Encoding\s*\/(?:90ms|90msp|90pv|78|78ms|83pv|Add|Ext|Hankaku|Hiragana|Katakana|Roman|WP|EUC|RKSJ|UniJIS)[A-Za-z0-9-]*/.test(
+      text,
+    )
+  ) {
+    return 'ja';
+  }
+  if (
+    /\/Ordering\s*\(\s*Korea1\s*\)/.test(text) ||
+    /\/Encoding\s*\/(?:KSC|KSCms|KSCpc|UniKS)[A-Za-z0-9-]*/.test(text)
+  ) {
+    return 'ko';
+  }
+  if (
+    /\/Ordering\s*\(\s*CNS1\s*\)/.test(text) ||
+    /\/Encoding\s*\/(?:B5|B5pc|ETen|ETenms|CNS|HKscs|UniCNS)[A-Za-z0-9-]*/.test(
+      text,
+    )
+  ) {
+    return 'zh-Hant';
+  }
+  if (
+    /\/Ordering\s*\(\s*GB1\s*\)/.test(text) ||
+    /\/Encoding\s*\/(?:GB|GBK|GBpc|GBT|GBKp|GBK2K|UniGB)[A-Za-z0-9-]*/.test(text)
+  ) {
+    return 'zh-Hans';
+  }
+  if (
     /\/BaseFont \/(?:#[0-9A-Fa-f]{2}){2,}(?:[_-]GB2312)?/.test(text) ||
     /\/FontName <(?:[0-9A-Fa-f]{4}){2,}>/.test(text)
-  );
+  ) {
+    return 'zh-Hans';
+  }
+  return null;
 }
 
-function registerCjkFallbacks() {
+function registerCjkFallbacks(lang) {
+  const set = cjkFontsByLang[lang] ?? cjkFontsByLang['zh-Hans'];
   return [
-    registerFirstAvailableFont(cjkSerifFonts, 'serif'),
-    registerFirstAvailableFont(cjkSansFonts, 'sans-serif'),
+    registerFirstAvailableFont(set.serif, 'serif'),
+    registerFirstAvailableFont(set.sans, 'sans-serif'),
   ].filter((key) => key != null);
 }
 

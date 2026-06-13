@@ -670,6 +670,12 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   Offset? _marqueeCurrent;
   int? _marqueePage;
 
+  /// A single-selection move drag's floating preview, reported by the
+  /// page's editing overlay. The overlay's own layer would clip it behind
+  /// the page below once the drag crosses a page boundary, so the viewer
+  /// paints it in list space (above the whole list) instead.
+  PdfMoveDragPreview? _movePreview;
+
   /// Set when a raw-pointer gesture (mouse double-click word select) has
   /// consumed the press, so the tap recognizer's late-firing callback for
   /// the same press must not clear it again. Reset on every pointer down.
@@ -1446,6 +1452,47 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     final box = _listSpaceKey.currentContext?.findRenderObject() as RenderBox?;
     if (box == null) return null;
     return _pagePointAt(box.globalToLocal(globalPosition));
+  }
+
+  /// A page overlay reports its single-selection move drag here so the
+  /// floating ghost paints above every page (a per-page overlay clips it
+  /// behind the page below once the drag crosses a boundary). Null clears.
+  void _onMoveDragPreview(PdfMoveDragPreview? preview) {
+    if (preview == null && _movePreview == null) return;
+    setState(() => _movePreview = preview);
+  }
+
+  /// The slice of an in-flight single-selection move ghost that lands on
+  /// page [index], expressed in that page's own view space — null when no
+  /// move is dragging, when [index] is the source page (its own overlay
+  /// already draws the in-page part), or when the ghost doesn't reach this
+  /// page. Each page draws its own slice in its overlay Stack (clipped to
+  /// the page, painted over the page's raster), so the part hanging onto a
+  /// neighbour isn't lost behind it — the per-page render path the in-page
+  /// ghost already uses, rather than a viewer-level layer that the web
+  /// build wouldn't paint.
+  PdfMoveDragPreview? _crossPageGhostFor(int index) {
+    final preview = _movePreview;
+    if (preview == null || index == preview.pageIndex) return null;
+    if (index < 0 || index >= _pages.length) return null;
+    if (_viewWidth <= 0) return null;
+    // [from] is the picture's source anchor and must stay in source view
+    // space (paintAnnotationDragPreview places the picture relative to it);
+    // only [to] moves into this page's view space. Page tops differ only
+    // vertically — both pages share the centred x origin (page width
+    // depends only on the viewport, not the page).
+    final dy = _pageTop(preview.pageIndex) - _pageTop(index);
+    final to = preview.to.shift(Offset(0, dy));
+    final pageBox =
+        Offset.zero & Size(_viewWidth * _layoutZoom, _pageHeight(index));
+    if (!to.overlaps(pageBox)) return null;
+    return PdfMoveDragPreview(
+      pageIndex: index,
+      picture: preview.picture,
+      from: preview.from,
+      to: to,
+      scale: preview.scale,
+    );
   }
 
   /// The cumulative top offset (list coordinates) of page [index].
@@ -2665,6 +2712,8 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                 onShowAnnotationMenu: _showSelectionMenu,
                 onShowFormFieldMenu: _showFormFieldMenu,
                 onResolvePagePoint: _resolvePagePointGlobal,
+                onMoveDragPreview: _onMoveDragPreview,
+                crossPageGhost: _crossPageGhostFor(index),
                 transformScale: _transformScale,
                 renderScheduler: _renderScheduler,
                 previewCache: widget.pagePreviews ? _previews : null,
@@ -2962,6 +3011,25 @@ class _MarqueePainter extends CustomPainter {
       oldDelegate.rect != rect || oldDelegate.color != color;
 }
 
+/// Paints the slice of a cross-page move ghost that lands on a page, in
+/// that page's own view space (from/to already mapped there). It sits in
+/// the page's overlay Stack, so it paints over the page raster and is
+/// clipped to the page — the same per-page render path the in-page ghost
+/// uses, so a drag onto a neighbour page shows there.
+class _MoveDragPreviewPainter extends CustomPainter {
+  const _MoveDragPreviewPainter(this.preview);
+
+  final PdfMoveDragPreview preview;
+
+  @override
+  void paint(Canvas canvas, Size size) =>
+      paintMoveDragPreview(canvas, preview, Offset.zero);
+
+  @override
+  bool shouldRepaint(_MoveDragPreviewPainter oldDelegate) =>
+      oldDelegate.preview != preview;
+}
+
 class _PdfViewerPage extends StatefulWidget {
   const _PdfViewerPage({
     required this.page,
@@ -2987,6 +3055,8 @@ class _PdfViewerPage extends StatefulWidget {
     required this.onShowAnnotationMenu,
     required this.onShowFormFieldMenu,
     required this.onResolvePagePoint,
+    required this.onMoveDragPreview,
+    required this.crossPageGhost,
     required this.transformScale,
     required this.renderScheduler,
     required this.previewCache,
@@ -3043,6 +3113,15 @@ class _PdfViewerPage extends StatefulWidget {
   /// See [EditingPageOverlay.onResolvePagePoint].
   final (int, double, double)? Function(Offset globalPosition)
       onResolvePagePoint;
+
+  /// See [EditingPageOverlay.onMoveDragPreview].
+  final PdfMoveDragPreviewCallback onMoveDragPreview;
+
+  /// The slice of an in-flight cross-page move ghost that lands on this
+  /// page (from/to in this page's own view space), so it draws the part of
+  /// the dragged annotation hanging onto it over its own raster. Null when
+  /// nothing is dragging onto this page. See [_PdfViewerState._crossPageGhostFor].
+  final PdfMoveDragPreview? crossPageGhost;
 
   /// The viewer transform's scale — the editing overlay's chrome divides
   /// by it to stay constant-size on screen while zoomed.
@@ -3125,6 +3204,15 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
           ),
         ),
       ),
+      // the slice of a cross-page move ghost landing on this page: drawn
+      // over the raster, clipped to the page by the Stack, so a drag onto
+      // this page from a neighbour shows here instead of vanishing behind
+      if (widget.crossPageGhost case final ghost?)
+        Positioned.fill(
+          child: IgnorePointer(
+            child: CustomPaint(painter: _MoveDragPreviewPainter(ghost)),
+          ),
+        ),
       if (builder != null ||
           editing != null ||
           (formController != null && widget.interactiveForms) ||
@@ -3169,6 +3257,7 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
                               onShowAnnotationMenu: widget.onShowAnnotationMenu,
                               onShowFormFieldMenu: widget.onShowFormFieldMenu,
                               onResolvePagePoint: widget.onResolvePagePoint,
+                              onMoveDragPreview: widget.onMoveDragPreview,
                               rasterCurrent: _rastered,
                               zoom: zoom,
                               predictStrokes: widget.predictStrokes,

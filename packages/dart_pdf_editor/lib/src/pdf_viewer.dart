@@ -933,6 +933,51 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     return offset;
   }
 
+  /// A page's slot extent in the scroll list, mirroring [itemExtentBuilder]:
+  /// the leading [PdfViewer.pageSpacing] belongs to every page but the first.
+  double _scrollExtentOf(int index) =>
+      _pageHeight(index) + (index == 0 ? 0 : widget.pageSpacing);
+
+  /// The list-space offset at which page [index]'s slot begins.
+  double _slotStart(int index) {
+    var offset = 0.0;
+    for (var i = 0; i < index; i++) {
+      offset += _scrollExtentOf(i);
+    }
+    return offset;
+  }
+
+  /// Page heights scale with [_viewWidth] (see [_pageHeight]), so when the
+  /// viewport width changes — most visibly while a side panel's resize grip
+  /// is dragged — a fixed scroll offset maps to a different page and the
+  /// document appears to scroll under the reader. This pins the reading
+  /// position: capture the page (and fraction within it) at the viewport top
+  /// under the OLD geometry, then re-derive the scroll offset once the new
+  /// width has laid out. Called from build while [_viewWidth] still holds the
+  /// previous width.
+  void _preserveReadingAnchor() {
+    final top = _scroll.offset;
+    var acc = 0.0;
+    var anchorPage = _pages.length - 1;
+    var fraction = 0.0;
+    for (var i = 0; i < _pages.length; i++) {
+      final extent = _scrollExtentOf(i);
+      if (top < acc + extent || i == _pages.length - 1) {
+        anchorPage = i;
+        fraction = extent > 0 ? ((top - acc) / extent).clamp(0.0, 1.0) : 0.0;
+        break;
+      }
+      acc += extent;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients || _viewWidth <= 0) return;
+      final target = (_slotStart(anchorPage) +
+              fraction * _scrollExtentOf(anchorPage))
+          .clamp(0.0, _scroll.position.maxScrollExtent);
+      if ((target - _scroll.offset).abs() > 0.5) _scroll.jumpTo(target);
+    });
+  }
+
   void _onScroll() {
     if (_viewWidth <= 0 || !_scroll.hasClients) return;
     _controller._bumpViewport();
@@ -2100,6 +2145,15 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
             ? const Color(0xFF202124)
             : const Color(0xFF404347));
     return LayoutBuilder(builder: (context, constraints) {
+      // _viewWidth still holds the previous layout's width here; a change
+      // rescales every page, so pin the reading position before adopting it
+      // (skips the very first layout, where there is nothing to preserve).
+      if (_viewWidth > 0 &&
+          constraints.maxWidth != _viewWidth &&
+          _scroll.hasClients &&
+          _pages.isNotEmpty) {
+        _preserveReadingAnchor();
+      }
       _viewWidth = constraints.maxWidth;
       _viewHeight = constraints.maxHeight;
       if (!_appliedInitialFit && _viewWidth > 0 && _viewHeight > 0) {

@@ -26,6 +26,14 @@ class PdfViewportMemory {
     required String documentKey,
   }) : _documentKey = documentKey {
     viewer.viewportChanges.addListener(_onViewportChanged);
+    // the debounced write can lose the last position when the app goes
+    // away before it fires — on the web a closed/hidden tab never disposes
+    // this — so flush on every "going away" lifecycle transition too
+    _lifecycle = AppLifecycleListener(
+      onHide: flush,
+      onPause: flush,
+      onDetach: flush,
+    );
     _restore(documentKey);
   }
 
@@ -35,6 +43,7 @@ class PdfViewportMemory {
 
   PdfViewport? _last;
   Timer? _saveTimer;
+  late final AppLifecycleListener _lifecycle;
 
   /// Time to wait after the last scroll/zoom before writing to disk.
   static const _debounce = Duration(milliseconds: 400);
@@ -78,6 +87,7 @@ class PdfViewportMemory {
 
   void dispose() {
     flush();
+    _lifecycle.dispose();
     viewer.viewportChanges.removeListener(_onViewportChanged);
   }
 }

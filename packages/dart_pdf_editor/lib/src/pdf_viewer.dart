@@ -1081,17 +1081,28 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   void _restoreViewport(PdfViewport viewport) {
     if (_viewWidth <= 0 || _viewHeight <= 0 || !_scroll.hasClients) {
       _pendingViewport = viewport;
+      // ensure a build runs to consume it — the caller (e.g. the saved
+      // viewport arriving after an async preferences load) may fire while
+      // the app is otherwise idle, with no frame already scheduled
+      if (mounted) setState(() {});
       return;
     }
     if (_pages.isEmpty) return;
     final page = viewport.page.clamp(0, _pages.length - 1);
     final z =
         viewport.zoom <= 1 ? viewport.zoom.clamp(widget.minZoom, 1.0) : 1.0;
-    if (z != _layoutZoom) setState(() => _layoutZoom = z);
-    // place after the frame so the new layout's scroll extents exist
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _scroll.hasClients) _placeViewport(viewport, page);
-    });
+    if (z != _layoutZoom) {
+      // the new layout's scroll extents exist only after this frame; setState
+      // schedules it, the post-frame callback then places the viewport
+      setState(() => _layoutZoom = z);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scroll.hasClients) _placeViewport(viewport, page);
+      });
+    } else {
+      // the layout already matches — place now, no frame needed (so an idle
+      // app with nothing scheduling frames still restores)
+      _placeViewport(viewport, page);
+    }
   }
 
   /// Sets the scroll offset and transform so [viewport]'s top-left sits at

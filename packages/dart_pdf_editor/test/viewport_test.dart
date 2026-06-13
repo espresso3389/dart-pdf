@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
@@ -242,6 +244,109 @@ void main() {
       await tester.pump(); // post-frame placement scrolls
       await tester.pump(const Duration(milliseconds: 500)); // clear timers
       expect(v2.currentPage, 4);
+    });
+
+    testWidgets(
+        'PdfEditorView with an external controller + documentId restores zoom',
+        (tester) async {
+      // mirrors the example app: editor mode, external session/viewer
+      // controllers, documentId, default initialFit (page)
+      SharedPreferences.setMockInitialValues({});
+      final prefs = PdfEditingPreferences();
+      await prefs.ready;
+      addTearDown(prefs.dispose);
+      final bytes = buildMultiPagePdf(5);
+
+      PdfEditingController? session;
+      Widget editor(PdfEditingController s, PdfViewerController v) => MaterialApp(
+            home: Scaffold(
+              body: PdfEditorView(
+                controller: s,
+                viewerController: v,
+                documentId: 'doc-x',
+                features: const PdfEditorFeatures(
+                  thumbnails: false,
+                  toolbar: false,
+                  headerBar: false,
+                ),
+              ),
+            ),
+          );
+
+      session = PdfEditingController(bytes, preferences: prefs);
+      final v1 = PdfViewerController();
+      await tester.pumpWidget(editor(session, v1));
+      await tester.pump();
+
+      // zoom in with ctrl+wheel (works regardless of editing overlays)
+      final pointer = TestPointer(7, PointerDeviceKind.mouse);
+      pointer.hover(const Offset(400, 300));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      for (var i = 0; i < 3; i++) {
+        await tester.sendEventToBinding(pointer.scroll(const Offset(0, -150)));
+        await tester.pump();
+      }
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle(const Duration(milliseconds: 300));
+      expect(v1.zoom, greaterThan(1));
+
+      // debounce → save
+      await tester.pump(const Duration(milliseconds: 500));
+      final saved = prefs.viewportFor('doc-x');
+      expect(saved, isNotNull);
+      expect(saved!.zoom, greaterThan(1));
+
+      // reopen fresh (fresh State), same preferences + documentId
+      await tester.pumpWidget(const MaterialApp(home: Scaffold()));
+      await tester.pump();
+      session.dispose();
+      session = PdfEditingController(bytes, preferences: prefs);
+      final v2 = PdfViewerController();
+      addTearDown(session.dispose);
+      await tester.pumpWidget(editor(session, v2));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(v2.zoom, greaterThan(1));
+    });
+
+    testWidgets('app going hidden flushes the position before the debounce',
+        (tester) async {
+      // the web case: a tab is closed/hidden without disposing the widget,
+      // and faster than the 400ms save debounce — the lifecycle flush must
+      // still persist the position
+      SharedPreferences.setMockInitialValues({});
+      final prefs = PdfEditingPreferences();
+      await prefs.ready;
+      addTearDown(prefs.dispose);
+      final v = PdfViewerController();
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: PdfReader(
+            bytes: buildMultiPagePdf(6),
+            documentId: 'doc-hide',
+            preferences: prefs,
+            controller: v,
+            initialFit: PdfViewerFit.width,
+            features: const PdfReaderFeatures(thumbnails: false),
+          ),
+        ),
+      ));
+      await tester.pump();
+
+      unawaited(v.jumpToPage(3));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(v.currentPage, 3);
+
+      // go hidden well within the debounce window — nothing written yet
+      expect(prefs.viewportFor('doc-hide'), isNull);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      await tester.pump();
+      expect(prefs.viewportFor('doc-hide')?.page, 3);
     });
   });
 }

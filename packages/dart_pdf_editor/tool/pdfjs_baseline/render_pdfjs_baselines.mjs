@@ -130,6 +130,14 @@ for (const name of files) {
       const outName = `${safeName(name)}.p${pageIndex}.png`;
       await writeFile(path.join(outDir, outName), canvas.toBuffer('image/png'));
       rendered++;
+      // Release PDF.js's retained render/image state for this page now,
+      // rather than holding every page's intent state until pdf.cleanup().
+      page.cleanup();
+      // Drop our references to the native-backed canvas so it can be
+      // finalized; @napi-rs/canvas surfaces live in native memory that V8's
+      // GC does not see, so nothing pressures it to collect on its own.
+      canvas.width = 0;
+      canvas.height = 0;
     }
     await pdf.cleanup();
     await loadingTask.destroy();
@@ -141,6 +149,12 @@ for (const name of files) {
     for (const key of fontKeys) {
       GlobalFonts.remove(key);
     }
+    // V8 sizes its GC heuristics off the (tiny) JS heap and never sees the
+    // megabytes of native Skia/canvas + decoded-image memory each file
+    // leaves behind, so without a nudge RSS climbs into tens of GB across
+    // the corpus. Run with `--expose-gc` (see package.json) to reclaim it
+    // between files; degrade gracefully if the flag is absent.
+    globalThis.gc?.();
   }
 }
 

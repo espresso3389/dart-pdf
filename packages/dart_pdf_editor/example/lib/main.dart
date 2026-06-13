@@ -7,8 +7,15 @@ import 'package:flutter/services.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'demo_document.dart';
+
+/// The project's source repository, opened from the AppBar links menu.
+final _githubUrl = Uri.parse('https://github.com/ben-milanko/dart-pdf');
+
+/// The published Flutter package the example is built on.
+final _pubDevUrl = Uri.parse('https://pub.dev/packages/dart_pdf_editor');
 
 /// One filter, every platform: desktop and web match on the extension,
 /// Android on the MIME type, iOS/macOS on the uniform type identifier —
@@ -149,6 +156,12 @@ class _ViewerScreenState extends State<ViewerScreen> {
         },
       ),
     ];
+  }
+
+  Future<void> _openLink(Uri url) async {
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      _toast('Could not open $url');
+    }
   }
 
   void _toast(String message) {
@@ -386,6 +399,31 @@ class _ViewerScreenState extends State<ViewerScreen> {
             icon: const Icon(Icons.folder_open),
             tooltip: 'Open PDF',
             onPressed: _pickFile,
+          ),
+          // GitHub source + pub.dev package, kept in one slot so the
+          // action row stays inside the 800px test window
+          PopupMenuButton<Uri>(
+            icon: const Icon(Icons.link),
+            tooltip: 'Project links',
+            onSelected: _openLink,
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: _githubUrl,
+                child: const ListTile(
+                  leading: Icon(Icons.code),
+                  title: Text('View source on GitHub'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: _pubDevUrl,
+                child: const ListTile(
+                  leading: Icon(Icons.inventory_2_outlined),
+                  title: Text('dart_pdf_editor on pub.dev'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
           ),
         ],
       ),

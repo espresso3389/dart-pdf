@@ -77,11 +77,13 @@ void main() {
 
     test('stamps a centered, y-flipped Ink annotation', () {
       final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..color = const Color(0xFF1A3E8C)
         ..signature = signature();
       expect(editing.placeSignature(0, 300, 400, width: 100), isTrue);
 
       final ink = editing.document.page(0).annotations.single;
       expect(ink.subtype, 'Ink');
+      // the signature follows the selected toolbar colour
       expect(ink.color, 0x1A3E8C);
       // 100×50 centered on (300, 400): strokes span 250..350, 375..425
       // (the /Rect is padded for the stroke width)
@@ -103,6 +105,15 @@ void main() {
       // themselves stay inside the crop box
       expect(ink.rect.right, lessThan(box.right + 5));
       expect(ink.rect.bottom, greaterThan(box.bottom - 5));
+    });
+
+    test('the placed signature follows the selected colour, not the drawn one',
+        () {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..signature = signature() // drawn in 0x1A3E8C
+        ..color = const Color(0xFF00AA00);
+      expect(editing.placeSignature(0, 300, 400, width: 100), isTrue);
+      expect(editing.document.page(0).annotations.single.color, 0x00AA00);
     });
 
     test('without a saved signature nothing happens', () {

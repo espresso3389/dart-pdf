@@ -1283,6 +1283,20 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   // -----------------------------------------------------------------
   // in-place text editing
 
+  /// A default-sized view rect for a tap-to-place annotation, with its
+  /// top-left at [tap]: ~200pt wide and one line of the current font tall
+  /// (in page points, mapped through the zoom). Nudged back onto the page
+  /// when the tap is near the right or bottom edge so the whole box fits.
+  Rect _defaultPlacementRect(Offset tap) {
+    final scale = _geometry.scale;
+    final w = 200.0 * scale;
+    final h = (_controller.fontSize * 1.6 + 8) * scale;
+    final size = _geometry.viewSize;
+    final left = tap.dx.clamp(0.0, math.max(0.0, size.width - w)).toDouble();
+    final top = tap.dy.clamp(0.0, math.max(0.0, size.height - h)).toDouble();
+    return Rect.fromLTWH(left, top, w, h);
+  }
+
   /// Opens the inline text editor over [viewRect] — empty for a fresh
   /// free-text box, prefilled from the selected annotation when
   /// [existing]. The editor renders with the same font, size, and color
@@ -2242,9 +2256,22 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         _controller.addNote(widget.pageIndex, x, y, text);
       case PdfEditTool.signature:
         _placeSignature(details.localPosition);
+      case PdfEditTool.freeText:
+        // tapping without dragging out a box opens a default-sized one
+        _openTextEditor(_defaultPlacementRect(details.localPosition),
+            existing: false);
       case PdfEditTool.stamp:
-        // no-op without an active custom stamp (the classic flow drags)
-        _controller.placeStamp(widget.pageIndex, x, y);
+        if (_controller.activeStamp != null) {
+          // an active custom stamp drops at its auto-size on tap
+          _controller.placeStamp(widget.pageIndex, x, y);
+        } else {
+          // the classic flow normally drags out a box; a plain tap places
+          // a default-sized stamp after prompting for its caption
+          final text = await widget.textPrompt(context,
+              title: 'Stamp text', initial: 'APPROVED');
+          if (text == null || text.isEmpty) return;
+          _controller.placeTextStamp(widget.pageIndex, x, y, text);
+        }
       case PdfEditTool.form:
         await _onFormTap(details);
       default:

@@ -1034,7 +1034,9 @@ class PdfEditingController extends ChangeNotifier {
   /// The layout [placeSignature] would commit for a tap at ([x], [y]):
   /// the page-space strokes, pressures, ink color, and stroke width —
   /// what the signature tool's live preview paints under the pointer.
-  /// Null when no signature is saved.
+  /// The ink follows the currently selected [color] (not the colour the
+  /// signature was drawn in), so recolouring the toolbar recolours the
+  /// signature. Null when no signature is saved.
   ({
     List<List<(double, double)>> strokes,
     List<List<double>?> pressures,
@@ -1064,7 +1066,8 @@ class PdfEditingController extends ChangeNotifier {
           ]
       ],
       pressures: signature.pressures,
-      color: signature.color,
+      // follow the selected toolbar colour, like every other tool
+      color: _colorValue,
       strokeWidth: w / 75, // pen-like: ~2pt at the default width
     );
   }
@@ -1131,19 +1134,32 @@ class PdfEditingController extends ChangeNotifier {
   bool placeStamp(int pageIndex, double x, double y, {double height = 40}) {
     final stamp = _activeStamp;
     if (stamp == null) return false;
+    return placeTextStamp(pageIndex, x, y, stamp.text,
+        height: height, color: stamp.color);
+  }
+
+  /// Places a default-sized stamp captioned [text], centered on ([x], [y])
+  /// in page space and auto-sized from the caption (like [placeStamp], but
+  /// with arbitrary text/colour). This is the stamp tool's tap-to-place:
+  /// tapping without dragging out a box drops a stamp at a sensible size.
+  /// [color] null uses the selected toolbar colour.
+  bool placeTextStamp(int pageIndex, double x, double y, String text,
+      {double height = 40, int? color}) {
     final box = _page(pageIndex).cropBox;
     final h = height.clamp(8.0, box.height * 0.9);
     // mirror addStamp's appearance math (6pt padding, text 72% of the
     // height) so the caption fills the box without shrinking
     final fontSize = (h - 12) * 0.72;
-    final w = (measureHelvetica(stamp.text, fontSize, bold: true) + 24)
+    final w = (measureHelvetica(text, fontSize, bold: true) + 24)
         .clamp(h, box.width * 0.9);
     final cx = x.clamp(box.left + w / 2, box.right - w / 2);
     final cy = y.clamp(box.bottom + h / 2, box.top - h / 2);
     return apply(
         (e) => e.addStamp(pageIndex,
-            PdfRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), stamp.text,
-            color: stamp.color, opacity: preferences.opacity, author: author),
+            PdfRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), text,
+            color: color ?? _colorValue,
+            opacity: preferences.opacity,
+            author: author),
         pages: [pageIndex]);
   }
 

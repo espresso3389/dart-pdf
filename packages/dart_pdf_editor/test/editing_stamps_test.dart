@@ -90,6 +90,22 @@ void main() {
       expect(editing.document.page(0).annotations, isEmpty);
       expect(editing.isModified, isFalse);
     });
+
+    test('placeTextStamp drops a default-sized stamp without an active stamp',
+        () {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..color = const Color(0xFF1565C0);
+      expect(editing.placeTextStamp(0, 300, 400, 'REVIEWED'), isTrue);
+
+      final stamp = editing.document.page(0).annotations.single;
+      expect(stamp.subtype, 'Stamp');
+      expect(stamp.contents, 'REVIEWED');
+      // no colour given, so it follows the selected toolbar colour
+      expect(stamp.color, 0x1565C0);
+      expect(stamp.rect.height, moreOrLessEquals(40));
+      expect((stamp.rect.left + stamp.rect.right) / 2, moreOrLessEquals(300));
+      expect((stamp.rect.bottom + stamp.rect.top) / 2, moreOrLessEquals(400));
+    });
   });
 
   group('stamp tool in the viewer', () {

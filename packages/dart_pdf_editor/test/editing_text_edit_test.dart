@@ -212,6 +212,26 @@ void main() {
       await settle(tester);
     });
 
+    testWidgets('tapping without dragging places a default-sized text box',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing.tool = PdfEditTool.freeText;
+      await tester.pump();
+
+      // a plain tap (no drag) opens the inline editor at a default size
+      await tap(tester, view(150, 650));
+      expect(find.byKey(editorKey), findsOneWidget);
+      expect(editing.document.page(0).annotations, isEmpty);
+
+      await tester.enterText(find.byKey(editorKey), 'Tapped in');
+      await tap(tester, view(450, 500)); // outside the box: commit
+
+      final annotation = editing.document.page(0).annotations.single;
+      expect(annotation.subtype, 'FreeText');
+      expect(annotation.contents, 'Tapped in');
+      await settle(tester);
+    });
+
     testWidgets('a fresh text box is focused for typing immediately',
         (tester) async {
       final (editing, _) = await pumpEditor(tester);

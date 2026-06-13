@@ -176,41 +176,62 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
   /// The seven dock groups, in order. Filtered by [PdfEditingToolbar.tools]
   /// and [PdfEditingToolbar.showMarkup] before display.
   static const _groups = <_ToolGroup>[
-    _ToolGroup('select', 'Select', Icons.near_me, [
-      _GroupTool.tool(PdfEditTool.select, Icons.near_me, 'Select'),
-    ], defaultTool: PdfEditTool.select),
-    _ToolGroup('markup', 'Markup', Icons.border_color, [
+    _ToolGroup(
+        'select',
+        'Select',
+        Icons.near_me,
+        [
+          _GroupTool.tool(PdfEditTool.select, Icons.near_me, 'Select'),
+        ],
+        defaultTool: PdfEditTool.select),
+    _ToolGroup('markup', 'Markup', Icons.edit_note, [
       _GroupTool.markup(
           PdfMarkupKind.highlight, Icons.border_color, 'Highlight selection'),
       _GroupTool.markup(PdfMarkupKind.underline, Icons.format_underlined,
           'Underline selection'),
       _GroupTool.markup(PdfMarkupKind.strikeOut, Icons.format_strikethrough,
           'Strike out selection'),
-      _GroupTool.markup(
-          PdfMarkupKind.squiggly, Icons.gesture, 'Squiggly-underline selection'),
+      _GroupTool.markup(PdfMarkupKind.squiggly, Icons.gesture,
+          'Squiggly-underline selection'),
     ]),
-    _ToolGroup('draw', 'Draw', Icons.draw, [
-      _GroupTool.tool(PdfEditTool.ink, Icons.draw, 'Draw'),
-      _GroupTool.tool(
-          PdfEditTool.eraser, Icons.auto_fix_normal, 'Erase ink strokes'),
-    ], defaultTool: PdfEditTool.ink),
-    _ToolGroup('shapes', 'Shapes', Icons.rectangle_outlined, [
-      _GroupTool.tool(PdfEditTool.rectangle, Icons.rectangle_outlined,
-          'Rectangle'),
-      _GroupTool.tool(PdfEditTool.ellipse, Icons.circle_outlined, 'Ellipse'),
-      _GroupTool.tool(PdfEditTool.line, Icons.horizontal_rule, 'Line'),
-      _GroupTool.tool(PdfEditTool.arrow, Icons.arrow_right_alt, 'Arrow'),
-      _GroupTool.tool(PdfEditTool.polyline, Icons.timeline, 'Polyline'),
-      _GroupTool.tool(PdfEditTool.polygon, Icons.change_history, 'Polygon'),
-    ], defaultTool: PdfEditTool.rectangle),
-    _ToolGroup('insert', 'Insert', Icons.text_fields, [
-      _GroupTool.tool(PdfEditTool.freeText, Icons.text_fields, 'Text box'),
-      _GroupTool.tool(
-          PdfEditTool.note, Icons.sticky_note_2_outlined, 'Note'),
-      _GroupTool.tool(PdfEditTool.stamp, Icons.approval, 'Stamp'),
-      _GroupTool.tool(PdfEditTool.signature, Icons.history_edu,
-          'Signature — tap a page to place it'),
-    ], defaultTool: PdfEditTool.freeText),
+    _ToolGroup(
+        'draw',
+        'Draw',
+        Icons.draw,
+        [
+          _GroupTool.tool(PdfEditTool.ink, Icons.draw, 'Draw'),
+          _GroupTool.tool(
+              PdfEditTool.eraser, Icons.auto_fix_normal, 'Erase ink strokes'),
+        ],
+        defaultTool: PdfEditTool.ink),
+    _ToolGroup(
+        'shapes',
+        'Shapes',
+        Icons.rectangle_outlined,
+        [
+          _GroupTool.tool(
+              PdfEditTool.rectangle, Icons.rectangle_outlined, 'Rectangle'),
+          _GroupTool.tool(
+              PdfEditTool.ellipse, Icons.circle_outlined, 'Ellipse'),
+          _GroupTool.tool(PdfEditTool.line, Icons.horizontal_rule, 'Line'),
+          _GroupTool.tool(PdfEditTool.arrow, Icons.arrow_right_alt, 'Arrow'),
+          _GroupTool.tool(PdfEditTool.polyline, Icons.timeline, 'Polyline'),
+          _GroupTool.tool(PdfEditTool.polygon, Icons.change_history, 'Polygon'),
+        ],
+        defaultTool: PdfEditTool.rectangle),
+    _ToolGroup(
+        'insert',
+        'Insert',
+        Icons.text_fields,
+        [
+          _GroupTool.tool(PdfEditTool.freeText, Icons.text_fields, 'Text box'),
+          _GroupTool.tool(
+              PdfEditTool.note, Icons.sticky_note_2_outlined, 'Note'),
+          _GroupTool.tool(PdfEditTool.stamp, Icons.approval, 'Stamp'),
+          _GroupTool.tool(PdfEditTool.signature, Icons.history_edu,
+              'Signature — tap a page to place it'),
+        ],
+        defaultTool: PdfEditTool.freeText),
     _ToolGroup('measure', 'Measure', Icons.straighten, [
       _GroupTool.tool(
           PdfEditTool.measureDistance, Icons.straighten, 'Measure distance'),
@@ -223,8 +244,8 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
           PdfEditTool.content, Icons.format_shapes, 'Edit page content'),
       _GroupTool.tool(PdfEditTool.form, Icons.ballot_outlined,
           'Form fields — tap to fill, drag to add'),
-      _GroupTool.tool(
-          PdfEditTool.redact, Icons.gradient, 'Redact — drag a region, then apply'),
+      _GroupTool.tool(PdfEditTool.redact, Icons.gradient,
+          'Redact — drag a region, then apply'),
     ]),
   ];
 
@@ -283,8 +304,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
     // disarming a tool drops back to Select (the resting mode), never to a
     // null/no-tool state — tapping the active tool off should leave you
     // able to select and move things, not in limbo
-    controller.tool =
-        controller.tool == value ? PdfEditTool.select : value;
+    controller.tool = controller.tool == value ? PdfEditTool.select : value;
     viewerController.clearSelection();
   }
 
@@ -320,8 +340,8 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
   }
 
   Future<void> _setScale(BuildContext context) async {
-    final scale = await showPdfScaleDialog(context,
-        initial: controller.measurementScale);
+    final scale =
+        await showPdfScaleDialog(context, initial: controller.measurementScale);
     if (scale != null) controller.measurementScale = scale;
   }
 
@@ -352,6 +372,9 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
     final signature = await showPdfSignatureDialog(context);
     if (signature == null) return false;
     controller.signature = signature;
+    // the signature follows the selected colour, so seed it with the ink
+    // the user just drew in — they can recolour it from the toolbar after
+    controller.color = Color(0xFF000000 | signature.color);
     return true;
   }
 
@@ -414,7 +437,8 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
     const bottom = 84.0;
     if (width >= 600) {
       const pill = 360.0;
-      return EdgeInsets.only(left: width - pill - 24, right: 24, bottom: bottom);
+      return EdgeInsets.only(
+          left: width - pill - 24, right: 24, bottom: bottom);
     }
     return const EdgeInsets.fromLTRB(16, 0, 16, bottom);
   }
@@ -893,8 +917,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 7, 10, 7),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                _StripLabel(switch (
-                    controller.selectedAnnotationSlots.length) {
+                _StripLabel(switch (controller.selectedAnnotationSlots.length) {
                   1 => 'Selection',
                   final n => '$n selected',
                 }),
@@ -1022,7 +1045,8 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
     return Row(mainAxisSize: MainAxisSize.min, children: [
       for (final w in presets)
         Tooltip(
-          message: 'Stroke ${w.toStringAsFixed(w == w.roundToDouble() ? 0 : 1)}',
+          message:
+              'Stroke ${w.toStringAsFixed(w == w.roundToDouble() ? 0 : 1)}',
           child: InkWell(
             onTap: () => set(w),
             borderRadius: BorderRadius.circular(8),
@@ -1145,8 +1169,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
           stroke: true,
           opacity: true,
           dashed: true,
-          lineEndings:
-              tool == PdfEditTool.line || tool == PdfEditTool.polyline,
+          lineEndings: tool == PdfEditTool.line || tool == PdfEditTool.polyline,
           shapeFill:
               tool == PdfEditTool.rectangle || tool == PdfEditTool.ellipse,
         );
@@ -1527,14 +1550,10 @@ class _GroupChip extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3),
       child: Material(
-        color: on
-            ? scheme.primary.withValues(alpha: 0.15)
-            : Colors.transparent,
+        color: on ? scheme.primary.withValues(alpha: 0.15) : Colors.transparent,
         shape: StadiumBorder(
           side: BorderSide(
-            color: on
-                ? scheme.primary.withValues(alpha: 0.55)
-                : scheme.outline,
+            color: on ? scheme.primary.withValues(alpha: 0.55) : scheme.outline,
           ),
         ),
         child: InkWell(
@@ -1654,9 +1673,8 @@ class _SheetToolTile extends StatelessWidget {
             ? scheme.primary
             : scheme.onSurfaceVariant;
     return Material(
-      color: active
-          ? scheme.primary.withValues(alpha: 0.14)
-          : Colors.transparent,
+      color:
+          active ? scheme.primary.withValues(alpha: 0.14) : Colors.transparent,
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
@@ -1724,8 +1742,8 @@ class _SettingChip extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Text(leading,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w600, fontSize: 12)),
+                style:
+                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
             const SizedBox(width: 6),
             Text(value,
                 style: TextStyle(
@@ -1745,8 +1763,7 @@ class _SettingChip extends StatelessWidget {
 /// A small fallback for `colorScheme.onSurfaceFaint` (not a Material role)
 /// — the faint hint colour used for strip labels and disabled tiles.
 extension _FaintColor on ColorScheme {
-  Color get onSurfaceFaintOr =>
-      onSurfaceVariant.withValues(alpha: 0.75);
+  Color get onSurfaceFaintOr => onSurfaceVariant.withValues(alpha: 0.75);
 }
 
 /// Which controls the style popup should show for the active context —
@@ -2340,8 +2357,7 @@ class _FontChip extends StatelessWidget {
               const Text('Aa',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
               const SizedBox(width: 8),
-              Text(_familyLabel(family),
-                  style: const TextStyle(fontSize: 13)),
+              Text(_familyLabel(family), style: const TextStyle(fontSize: 13)),
               const SizedBox(width: 6),
               Text('$size',
                   style: TextStyle(
@@ -2350,8 +2366,7 @@ class _FontChip extends StatelessWidget {
                     color: scheme.onSurfaceVariant,
                   )),
               const SizedBox(width: 2),
-              Icon(Icons.expand_more,
-                  size: 16, color: scheme.onSurfaceVariant),
+              Icon(Icons.expand_more, size: 16, color: scheme.onSurfaceVariant),
             ]),
           ),
         ),
@@ -2365,7 +2380,8 @@ class _FontChip extends StatelessWidget {
 /// exact appearance the editor generates), oriented so [atEnd] puts the
 /// ending on the right.
 class _LineEndingPainter extends CustomPainter {
-  const _LineEndingPainter(this.ending, {required this.atEnd, required this.color});
+  const _LineEndingPainter(this.ending,
+      {required this.atEnd, required this.color});
 
   final PdfLineEnding ending;
   final bool atEnd;
@@ -2435,10 +2451,8 @@ class _LineEndingPainter extends CustomPainter {
       case PdfLineEnding.butt:
         canvas.drawLine(at(0, -s * 0.5), at(0, s * 0.5), stroke);
       case PdfLineEnding.slash:
-        canvas.drawLine(
-            Offset(tip.dx - s * 0.3, cy + s * 0.5),
-            Offset(tip.dx + s * 0.3, cy - s * 0.5),
-            stroke);
+        canvas.drawLine(Offset(tip.dx - s * 0.3, cy + s * 0.5),
+            Offset(tip.dx + s * 0.3, cy - s * 0.5), stroke);
     }
   }
 

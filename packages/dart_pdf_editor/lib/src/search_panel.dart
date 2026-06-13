@@ -137,6 +137,10 @@ class _PdfSearchFieldState extends State<PdfSearchField> {
                     const BoxConstraints(minWidth: 32, minHeight: 32),
               ),
               textInputAction: TextInputAction.search,
+              // The search action unfocuses the field by default; keep
+              // focus so a second enter reaches onSubmitted and steps to
+              // the next match instead of dismissing the field.
+              onEditingComplete: () {},
               onChanged: _onChanged,
               onSubmitted: _onSubmitted,
             ),

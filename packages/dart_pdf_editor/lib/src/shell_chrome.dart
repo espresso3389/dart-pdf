@@ -69,10 +69,16 @@ class PdfShellViewOptionsButton extends StatelessWidget {
     super.key,
     required this.preferences,
     this.reflow = false,
+    this.pageColor = true,
   });
 
   final PdfEditingPreferences preferences;
   final bool reflow;
+
+  /// Whether the "Page color…" item is offered. With it false the paper
+  /// color can't be changed here — for hosts that set [pageColor] from
+  /// the document programmatically and lock it.
+  final bool pageColor;
 
   @override
   Widget build(BuildContext context) {
@@ -120,11 +126,12 @@ class PdfShellViewOptionsButton extends StatelessWidget {
             checked: preferences.showReflowView,
             child: const Text('Reflow text'),
           ),
-        const PopupMenuItem(
-          key: ValueKey('pdf-shell-page-color'),
-          value: _ViewOption.pageColor,
-          child: Text('Page color…'),
-        ),
+        if (pageColor)
+          const PopupMenuItem(
+            key: ValueKey('pdf-shell-page-color'),
+            value: _ViewOption.pageColor,
+            child: Text('Page color…'),
+          ),
       ],
     );
   }

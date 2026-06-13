@@ -156,6 +156,31 @@ void main() {
       expect(editing.selectedAnnotation?.author, 'Ben');
     });
 
+    testWidgets('showAuthor: false hides the author row', (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1))
+        ..addRectangle(0, const PdfRect(100, 600, 220, 660));
+      addTearDown(editing.dispose);
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Row(children: [
+            const Expanded(child: SizedBox()),
+            PdfAnnotationPropertiesPanel(
+                controller: editing, width: 300, showAuthor: false),
+          ]),
+        ),
+      ));
+      await tester.pump();
+
+      editing.selectAnnotation(0, 0);
+      await tester.pump();
+      // contents stays, author is gone
+      expect(find.byKey(const ValueKey('pdf-prop-contents')), findsOneWidget);
+      expect(find.byKey(const ValueKey('pdf-prop-author')), findsNothing);
+    });
+
     testWidgets('X moves and W resizes, anchored bottom-left', (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(1))
         ..addRectangle(0, const PdfRect(100, 600, 220, 660));

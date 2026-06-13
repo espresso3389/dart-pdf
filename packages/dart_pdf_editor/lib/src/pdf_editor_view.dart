@@ -24,7 +24,9 @@ class PdfEditorFeatures {
     this.searchResultsPanel = true,
     this.pageNumber = true,
     this.author = true,
+    this.authorEditable = true,
     this.viewOptions = true,
+    this.pageColorEditable = true,
     this.thumbnails = true,
     this.pageEditing = true,
     this.annotationSidebar = true,
@@ -56,9 +58,20 @@ class PdfEditorFeatures {
   /// The author-name button; the name stamps new annotations' /T.
   final bool author;
 
+  /// Whether the properties panel's "Author" row is shown, letting the
+  /// user edit a selected annotation's author. Independent of [author]
+  /// (the header button), so a host that sets the author
+  /// programmatically can lock it while leaving the button as it likes.
+  final bool authorEditable;
+
   /// The view-options menu: annotation visibility, form-field
   /// highlight, and page (paper) color — display settings only.
   final bool viewOptions;
+
+  /// Whether the view-options menu offers "Page color…". With it false
+  /// the paper color can't be changed from the UI — for hosts that set
+  /// the page color from the document programmatically and lock it.
+  final bool pageColorEditable;
 
   /// The page-thumbnail sidebar and its toggle.
   final bool thumbnails;
@@ -367,7 +380,9 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                       onPressed: _promptAuthor,
                     ),
                   if (features.viewOptions)
-                    PdfShellViewOptionsButton(preferences: prefs),
+                    PdfShellViewOptionsButton(
+                        preferences: prefs,
+                        pageColor: features.pageColorEditable),
                   if (features.thumbnails)
                     PdfShellToggleButton(
                       key: const ValueKey('pdf-shell-thumbnails-toggle'),
@@ -446,6 +461,7 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                   PdfAnnotationPropertiesPanel(
                     key: const ValueKey('pdf-shell-properties'),
                     controller: session,
+                    showAuthor: features.authorEditable,
                   ),
               ]),
             ),

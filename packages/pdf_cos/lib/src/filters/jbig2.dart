@@ -8,10 +8,10 @@ import 'mq.dart';
 /// Coverage: arithmetic-coded generic regions (templates 0–3, TPGDON)
 /// and MMR-coded ones (via the CCITT engine), symbol dictionaries and
 /// text regions (arithmetic coding), pattern dictionaries, and
-/// arithmetic-coded halftone regions, with /JBIG2Globals support — which
+/// arithmetic-coded halftone/refinement regions, with /JBIG2Globals support — which
 /// spans what real-world PDF encoders (jbig2enc, Acrobat) emit. Huffman
-/// coding and refinement/aggregation are not supported; such files decode
-/// to null and the image is skipped.
+/// coding and refined symbol aggregation are not supported; such files
+/// decode to null and the image is skipped.
 ///
 /// Output is 1 bit per pixel with PDF polarity: black pixels are 0 bits
 /// (matching CCITTFaxDecode's default), rows padded to byte boundaries.
@@ -23,6 +23,7 @@ class Jbig2Decoder {
 
   final Map<int, List<_Bitmap>> _symbolDicts = {};
   final Map<int, List<_Bitmap>> _patternDicts = {};
+  final Map<int, _Bitmap> _regionBitmaps = {};
   _Bitmap? _page;
   int _pageDefault = 0;
 
@@ -103,8 +104,18 @@ class Jbig2Decoder {
           _readHalftoneRegion(payload, referred);
         case 4 || 6 || 7: // text region (intermediate/immediate/lossless)
           _readTextRegion(payload, referred);
-        case 36 || 38 || 39: // generic region
-          _readGenericRegionSegment(payload);
+        case 36: // intermediate generic region
+          _regionBitmaps[number] = _readGenericRegionSegment(payload).$1;
+        case 38 || 39: // immediate generic region
+          final (region, x, y, op) = _readGenericRegionSegment(payload);
+          _ensurePage().compose(region, x, y, op);
+        case 40: // intermediate generic refinement region
+          _regionBitmaps[number] =
+              _readGenericRefinementRegionSegment(payload, referred).$1;
+        case 42 || 43: // immediate generic refinement region
+          final (region, x, y, op) =
+              _readGenericRefinementRegionSegment(payload, referred);
+          _ensurePage().compose(region, x, y, op);
         case 48: // page information
           _readPageInfo(payload);
         case 49 || 50 || 51 || 62:
@@ -143,7 +154,7 @@ class Jbig2Decoder {
         view.getUint8(16) & 7, // external combination operator
       );
 
-  void _readGenericRegionSegment(Uint8List data) {
+  (_Bitmap, int, int, int) _readGenericRegionSegment(Uint8List data) {
     final view = ByteData.sublistView(data);
     final (w, h, x, y, op) = _regionInfo(view);
     var p = 17;
@@ -170,7 +181,57 @@ class Jbig2Decoder {
       region = _decodeGeneric(
           decoder, contexts, indexes, w, h, template, at, tpgdon == 1);
     }
-    _ensurePage().compose(region, x, y, op);
+    return (region, x, y, op);
+  }
+
+  (_Bitmap, int, int, int) _readGenericRefinementRegionSegment(
+      Uint8List data, List<int> referred) {
+    if (data.length < 18) throw const FormatException('short refinement');
+    final view = ByteData.sublistView(data);
+    final (w, h, x, y, op) = _regionInfo(view);
+    var p = 17;
+    final flags = data[p++];
+    final template = flags & 1;
+    final tpgdon = (flags >> 1) & 1;
+    if (tpgdon != 0) {
+      throw const FormatException('TPGRON refinement regions');
+    }
+    var at0 = (-1, -1);
+    var at1 = (-1, -1);
+    if (template == 0) {
+      if (data.length < p + 4) {
+        throw const FormatException('short refinement template');
+      }
+      at0 = (view.getInt8(p), view.getInt8(p + 1));
+      at1 = (view.getInt8(p + 2), view.getInt8(p + 3));
+      p += 4;
+    }
+    final reference = _findReferenceBitmap(referred);
+    final decoder = MqDecoder(Uint8List.sublistView(data, p));
+    final contexts = Int8List(template == 0 ? 1 << 13 : 1 << 10);
+    final indexes = Uint8List(contexts.length);
+    final region = _decodeRefinement(
+      decoder,
+      contexts,
+      indexes,
+      w,
+      h,
+      reference,
+      template,
+      at0,
+      at1,
+    );
+    return (region, x, y, op);
+  }
+
+  _Bitmap _findReferenceBitmap(List<int> referred) {
+    for (final segment in referred) {
+      final bitmap = _regionBitmaps[segment];
+      if (bitmap != null) return bitmap;
+    }
+    final page = _page;
+    if (page != null) return page;
+    throw const FormatException('refinement has no reference bitmap');
   }
 
   // ---------- pattern dictionaries and halftone regions (§6.6, §6.7) ----------
@@ -415,6 +476,69 @@ class Jbig2Decoder {
     }
     return bitmap;
   }
+
+  static _Bitmap _decodeRefinement(
+    MqDecoder decoder,
+    Int8List contexts,
+    Uint8List indexes,
+    int w,
+    int h,
+    _Bitmap reference,
+    int template,
+    (int, int) at0,
+    (int, int) at1,
+  ) {
+    final bitmap = _Bitmap(w, h, fill: 0);
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        final context = template == 0
+            ? _refinementContext0(bitmap, reference, x, y, at0, at1)
+            : _refinementContext1(bitmap, reference, x, y);
+        final bit = decoder.decode(contexts, indexes, context);
+        if (bit != 0) bitmap.set(x, y, 1);
+      }
+    }
+    return bitmap;
+  }
+
+  static int _refinementContext0(
+    _Bitmap bitmap,
+    _Bitmap reference,
+    int x,
+    int y,
+    (int, int) at0,
+    (int, int) at1,
+  ) =>
+      bitmap.get(x - 1, y) |
+      (bitmap.get(x + 1, y - 1) << 1) |
+      (bitmap.get(x, y - 1) << 2) |
+      (bitmap.get(x + at0.$1, y + at0.$2) << 3) |
+      (reference.get(x + 1, y + 1) << 4) |
+      (reference.get(x, y + 1) << 5) |
+      (reference.get(x - 1, y + 1) << 6) |
+      (reference.get(x + 1, y) << 7) |
+      (reference.get(x, y) << 8) |
+      (reference.get(x - 1, y) << 9) |
+      (reference.get(x + 1, y - 1) << 10) |
+      (reference.get(x, y - 1) << 11) |
+      (reference.get(x + at1.$1, y + at1.$2) << 12);
+
+  static int _refinementContext1(
+    _Bitmap bitmap,
+    _Bitmap reference,
+    int x,
+    int y,
+  ) =>
+      bitmap.get(x - 1, y) |
+      (bitmap.get(x + 1, y - 1) << 1) |
+      (bitmap.get(x, y - 1) << 2) |
+      (bitmap.get(x - 1, y - 1) << 3) |
+      (reference.get(x + 1, y + 1) << 4) |
+      (reference.get(x, y + 1) << 5) |
+      (reference.get(x + 1, y) << 6) |
+      (reference.get(x, y) << 7) |
+      (reference.get(x - 1, y) << 8) |
+      (reference.get(x, y - 1) << 9);
 
   // ---------- symbol dictionary (§6.5) ----------
 

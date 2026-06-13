@@ -117,7 +117,7 @@ Checked-in visual artifacts:
 - `asciihexdecode.pdf` — ASCIIHexDecode
 - `bitmap-halftone.pdf` — JBIG2 halftone region
 - `bitmap-mmr.pdf` — JBIG2 MMR coding
-- `bitmap-refine.pdf` — JBIG2 refinement (known gap)
+- `bitmap-refine.pdf` — JBIG2 refinement
 - `bitmap-symbol-symhuff-texthuff.pdf` — JBIG2 Huffman (known gap)
 - `bitmap-symbol-textcomposite.pdf` — JBIG2 text region composite
 - `bitmap-symbol.pdf` — JBIG2 symbol dictionary

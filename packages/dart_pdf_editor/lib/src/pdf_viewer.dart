@@ -21,6 +21,9 @@ import 'pdf_page_view.dart';
 import 'preview_cache.dart';
 import 'scrollbar.dart';
 import 'theme.dart';
+import 'viewport.dart';
+
+export 'viewport.dart' show PdfViewport, pdfDocumentKey;
 
 /// One search hit with the text around it, ready for a results list
 /// like [PdfSearchResultsPanel].
@@ -128,6 +131,18 @@ class PdfViewerController extends ChangeNotifier {
   /// annotation sidebar uses this to zoom to an annotation.
   Future<void> showRect(int pageIndex, PdfRect rect) async =>
       _state?._showRect(pageIndex, rect);
+
+  /// The current scroll position and zoom, as a resolution-independent
+  /// snapshot — what to persist so reopening the same document lands the
+  /// user where they left off. Null while no viewer is attached or it has
+  /// not laid out yet. Restore it with [restoreViewport] or
+  /// [PdfViewer.initialViewport].
+  PdfViewport? captureViewport() => _state?._captureViewport();
+
+  /// Scrolls and zooms to a [captureViewport] snapshot. A no-op while no
+  /// viewer is attached; it applies once the viewer has laid out.
+  void restoreViewport(PdfViewport viewport) =>
+      _state?._restoreViewport(viewport);
 
   final _viewport = _ViewportNotifier();
 
@@ -292,6 +307,7 @@ class PdfViewer extends StatefulWidget {
     this.formImagePicker,
     this.pageSpacing = 12,
     this.initialFit = PdfViewerFit.page,
+    this.initialViewport,
     this.minZoom = 0.25,
     this.maxZoom = 6,
     this.doubleTapZoom = 2.5,
@@ -350,8 +366,15 @@ class PdfViewer extends StatefulWidget {
   /// The zoom the document opens at: the whole first page visible
   /// (default, like desktop browser viewers) or filling the viewport
   /// width. Re-applied when a swapped-in document has a different page
-  /// geometry (a different file — not an edit revision).
+  /// geometry (a different file — not an edit revision). Ignored when
+  /// [initialViewport] is given.
   final PdfViewerFit initialFit;
+
+  /// The scroll position and zoom to open at — a [captureViewport]
+  /// snapshot from a previous session, so reopening a document lands
+  /// where the user left it. Overrides [initialFit] for the first layout;
+  /// null falls back to it.
+  final PdfViewport? initialViewport;
 
   /// Smallest zoom factor; below 1 the page shrinks past fit-width and
   /// floats centered in the viewport.
@@ -466,6 +489,13 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   /// yet; that needs the viewport size, so it happens on first layout.
   bool _appliedInitialFit = false;
 
+  /// A viewport waiting to be scrolled/zoomed to once the viewer has laid
+  /// out — the saved position from [PdfViewer.initialViewport] on first
+  /// run, or a runtime [PdfViewerController.restoreViewport]. Applied (and
+  /// cleared) in build, then placed in a post-frame callback once the new
+  /// scroll extents exist.
+  PdfViewport? _pendingViewport;
+
   /// The effective zoom the user sees. Transform values near 1 defer to
   /// the layout zoom; mid-gesture sub-1 transforms combine with it.
   double get _currentZoom {
@@ -554,6 +584,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     _controller = widget.controller ?? PdfViewerController();
     _ownsController = widget.controller == null;
     _controller._state = this;
+    _pendingViewport = widget.initialViewport;
     _zoomAnimator = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 200))
       ..addListener(() {
@@ -1010,6 +1041,99 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeInOut,
     );
+  }
+
+  /// A resolution-independent snapshot of where the viewport sits: the
+  /// page under its top-left corner, fractional offsets into that page,
+  /// and the effective zoom. Null until the viewer has laid out.
+  PdfViewport? _captureViewport() {
+    if (_viewWidth <= 0 || !_scroll.hasClients || _pages.isEmpty) return null;
+    // the InteractiveViewer transform is scale + translation only, so the
+    // viewport's top-left unprojects to list space as (p - t) / s (see
+    // _visibleFractionOf)
+    final m = _transform.value;
+    final scale = m.getMaxScaleOnAxis();
+    final viewTop = -m.storage[13] / scale + _scroll.position.pixels;
+    final viewLeft = -m.storage[12] / scale;
+    final pageWidth = _viewWidth * _layoutZoom;
+    final pageLeft = (_viewWidth - pageWidth) / 2;
+    var top = 0.0;
+    for (var i = 0; i < _pages.length; i++) {
+      final height = _pageHeight(i);
+      if (viewTop < top + height + widget.pageSpacing ||
+          i == _pages.length - 1) {
+        // fractions are layout-zoom independent: numerator and page size
+        // scale together
+        return PdfViewport(
+          page: i,
+          top: height <= 0 ? 0 : (viewTop - top) / height,
+          left: pageWidth <= 0 ? 0 : (viewLeft - pageLeft) / pageWidth,
+          zoom: _currentZoom,
+        );
+      }
+      top += height + widget.pageSpacing;
+    }
+    return null;
+  }
+
+  /// Scrolls and zooms to [viewport]. Defers to the next layout when the
+  /// viewer is not ready yet.
+  void _restoreViewport(PdfViewport viewport) {
+    if (_viewWidth <= 0 || _viewHeight <= 0 || !_scroll.hasClients) {
+      _pendingViewport = viewport;
+      // ensure a build runs to consume it — the caller (e.g. the saved
+      // viewport arriving after an async preferences load) may fire while
+      // the app is otherwise idle, with no frame already scheduled
+      if (mounted) setState(() {});
+      return;
+    }
+    if (_pages.isEmpty) return;
+    final page = viewport.page.clamp(0, _pages.length - 1);
+    final z =
+        viewport.zoom <= 1 ? viewport.zoom.clamp(widget.minZoom, 1.0) : 1.0;
+    if (z != _layoutZoom) {
+      // the new layout's scroll extents exist only after this frame; setState
+      // schedules it, the post-frame callback then places the viewport
+      setState(() => _layoutZoom = z);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _scroll.hasClients) _placeViewport(viewport, page);
+      });
+    } else {
+      // the layout already matches — place now, no frame needed (so an idle
+      // app with nothing scheduling frames still restores)
+      _placeViewport(viewport, page);
+    }
+  }
+
+  /// Sets the scroll offset and transform so [viewport]'s top-left sits at
+  /// the viewport's top-left. The layout zoom is already in place (set in
+  /// build or [_restoreViewport]); this needs the post-layout scroll
+  /// extents.
+  void _placeViewport(PdfViewport viewport, int page) {
+    if (_viewWidth <= 0 || _pages.isEmpty) return;
+    final listTop = _pageOffset(page) + viewport.top * _pageHeight(page);
+    final maxScroll = _scroll.position.maxScrollExtent;
+    if (viewport.zoom <= 1) {
+      _transform.value = Matrix4.identity();
+      _scroll.jumpTo(listTop.clamp(0.0, maxScroll));
+    } else {
+      // zoom above fit-width rides the transform over fit-width pages, so
+      // the page is the full viewport width here (see _zoomTo)
+      final scale = viewport.zoom.clamp(1.0, widget.maxZoom);
+      final scroll = listTop.clamp(0.0, maxScroll);
+      // solve (p - t) / s = target for the translation, matching the
+      // unprojection in _captureViewport / _visibleFractionOf
+      final tx = (-scale * viewport.left * _viewWidth)
+          .clamp(_viewWidth * (1 - scale), 0.0);
+      final ty = (scale * (scroll - listTop))
+          .clamp(_viewHeight * (1 - scale), 0.0);
+      _transform.value = Matrix4.identity()
+        ..translateByDouble(tx, ty, 0, 1)
+        ..scaleByDouble(scale, scale, scale, 1);
+      _scroll.jumpTo(scroll);
+      setState(() => _zoomed = scale > 1.01);
+    }
+    _controller._bumpViewport();
   }
 
   /// Frames [rect] (page space on page [index]): centers it in the
@@ -2161,13 +2285,30 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
       }
       _viewWidth = constraints.maxWidth;
       _viewHeight = constraints.maxHeight;
-      if (!_appliedInitialFit && _viewWidth > 0 && _viewHeight > 0) {
-        _appliedInitialFit = true;
-        _layoutZoom =
-            widget.initialFit == PdfViewerFit.page && _aspects.isNotEmpty
-                ? (_viewHeight / (_viewWidth * _aspects.first))
-                    .clamp(widget.minZoom, 1.0)
-                : 1.0;
+      if (_viewWidth > 0 && _viewHeight > 0) {
+        final pending = _pendingViewport;
+        if (pending != null) {
+          // a saved viewport (initialViewport or restoreViewport) wins
+          // over the initial fit: set its layout zoom now, then place the
+          // scroll/transform once this frame's new extents exist
+          _pendingViewport = null;
+          _appliedInitialFit = true;
+          _layoutZoom = pending.zoom <= 1
+              ? pending.zoom.clamp(widget.minZoom, 1.0)
+              : 1.0;
+          final page =
+              _pages.isEmpty ? 0 : pending.page.clamp(0, _pages.length - 1);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _scroll.hasClients) _placeViewport(pending, page);
+          });
+        } else if (!_appliedInitialFit) {
+          _appliedInitialFit = true;
+          _layoutZoom =
+              widget.initialFit == PdfViewerFit.page && _aspects.isNotEmpty
+                  ? (_viewHeight / (_viewWidth * _aspects.first))
+                      .clamp(widget.minZoom, 1.0)
+                  : 1.0;
+        }
       }
       // no implicit desktop scrollbar: it would attach here, inside the
       // zoom transform — thin, low-contrast, and scaled or translated out

@@ -9,9 +9,9 @@ import 'mq.dart';
 /// and MMR-coded ones (via the CCITT engine), symbol dictionaries and
 /// text regions (arithmetic coding), pattern dictionaries, and
 /// arithmetic-coded halftone/refinement regions, with /JBIG2Globals support — which
-/// spans what real-world PDF encoders (jbig2enc, Acrobat) emit. Huffman
-/// coding and refined symbol aggregation are not supported; such files
-/// decode to null and the image is skipped.
+/// spans what real-world PDF encoders (jbig2enc, Acrobat) emit. Custom
+/// Huffman tables and refined symbol aggregation are not supported; such
+/// files decode to null and the image is skipped.
 ///
 /// Output is 1 bit per pixel with PDF polarity: black pixels are 0 bits
 /// (matching CCITTFaxDecode's default), rows padded to byte boundaries.
@@ -548,7 +548,10 @@ class Jbig2Decoder {
     final huffman = flags & 1;
     final refAgg = (flags >> 1) & 1;
     final template = (flags >> 10) & 3;
-    if (huffman == 1 || refAgg == 1) {
+    if (huffman == 1) {
+      return _readHuffmanSymbolDictionary(data, referred);
+    }
+    if (refAgg == 1) {
       throw const FormatException('Huffman/refinement symbol dictionaries');
     }
     var p = 2;
@@ -612,6 +615,98 @@ class Jbig2Decoder {
     return result;
   }
 
+  List<_Bitmap> _readHuffmanSymbolDictionary(
+      Uint8List data, List<int> referred) {
+    final view = ByteData.sublistView(data);
+    final flags = view.getUint16(0);
+    final refAgg = (flags >> 1) & 1;
+    if (refAgg == 1 ||
+        (flags & 0x0100) != 0 ||
+        (flags & 0x0200) != 0 ||
+        (flags & 0x00CC) != 0) {
+      throw const FormatException('unsupported Huffman symbol dictionary');
+    }
+    final dhTable = switch ((flags & 0x000C) >> 2) {
+      0 => _huffmanD,
+      1 => _huffmanE,
+      _ => throw const FormatException('unsupported DH table'),
+    };
+    final dwTable = switch ((flags & 0x0030) >> 4) {
+      0 => _huffmanB,
+      1 => _huffmanC,
+      _ => throw const FormatException('unsupported DW table'),
+    };
+    var p = 2; // Huffman dictionaries carry no SDAT bytes.
+    final exported = view.getUint32(p);
+    final newCount = view.getUint32(p + 4);
+    p += 8;
+    final input = <_Bitmap>[
+      for (final segment in referred) ...?_symbolDicts[segment],
+    ];
+    if (input.isNotEmpty) {
+      throw const FormatException('imported Huffman symbol dictionaries');
+    }
+
+    final reader = _BitReader(Uint8List.sublistView(data, p));
+    final newSymbols = List<_Bitmap?>.filled(newCount, null);
+    final widths = List<int>.filled(newCount, 0);
+    var heightClass = 0;
+    var decoded = 0;
+    while (decoded < newCount) {
+      final dh = reader.readHuffman(dhTable);
+      if (dh.oob) throw const FormatException('OOB height class');
+      heightClass += dh.value;
+      var symbolWidth = 0;
+      var totalWidth = 0;
+      final first = decoded;
+      while (true) {
+        final dw = reader.readHuffman(dwTable);
+        if (dw.oob) break;
+        if (decoded >= newCount) break;
+        symbolWidth += dw.value;
+        widths[decoded] = symbolWidth;
+        totalWidth += symbolWidth;
+        decoded++;
+      }
+      final size = reader.readHuffman(_huffmanA);
+      if (size.oob) throw const FormatException('OOB collective bitmap size');
+      reader.skipToByte();
+      final _Bitmap collective;
+      if (size.value == 0) {
+        collective = reader.readPackedBitmap(totalWidth, heightClass);
+      } else {
+        collective =
+            _decodeMmr(reader.readBytes(size.value), totalWidth, heightClass);
+      }
+      var x = 0;
+      for (var i = first; i < decoded; i++) {
+        final glyph = _copyBitmap(collective, x, 0, widths[i], heightClass);
+        newSymbols[i] = glyph;
+        x += widths[i];
+      }
+    }
+
+    final all = <_Bitmap>[
+      for (final symbol in newSymbols) symbol!,
+    ];
+    final result = <_Bitmap>[];
+    var index = 0;
+    var exporting = false;
+    while (index < all.length && result.length < exported) {
+      final run = reader.readHuffman(_huffmanA);
+      if (run.oob) throw const FormatException('OOB export run');
+      if (exporting) {
+        for (var i = 0; i < run.value && index < all.length; i++) {
+          result.add(all[index++]);
+        }
+      } else {
+        index += run.value;
+      }
+      exporting = !exporting;
+    }
+    return result;
+  }
+
   // ---------- text region (§6.4) ----------
 
   void _readTextRegion(Uint8List data, List<int> referred) {
@@ -631,7 +726,8 @@ class Jbig2Decoder {
     if (dsOffset > 15) dsOffset -= 32;
     final rTemplate = (flags >> 15) & 1;
     if (huffman == 1) {
-      throw const FormatException('Huffman text regions');
+      _readHuffmanTextRegion(data, referred);
+      return;
     }
     if (refine == 1 && rTemplate == 0) {
       p += 4; // refinement AT pixels (unused: we reject refinement below)
@@ -699,6 +795,121 @@ class Jbig2Decoder {
     _ensurePage().compose(region, x, y, op);
   }
 
+  void _readHuffmanTextRegion(Uint8List data, List<int> referred) {
+    final view = ByteData.sublistView(data);
+    final (w, h, x, y, op) = _regionInfo(view);
+    var p = 17;
+    final flags = view.getUint16(p);
+    p += 2;
+    final refine = (flags >> 1) & 1;
+    final logStrips = (flags >> 2) & 3;
+    final refCorner = (flags >> 4) & 3;
+    final transposed = (flags >> 6) & 1;
+    final combOp = (flags >> 7) & 3;
+    final defaultPixel = (flags >> 9) & 1;
+    var dsOffset = (flags >> 10) & 0x1F;
+    if (dsOffset > 15) dsOffset -= 32;
+    if (refine == 1) throw const FormatException('refined Huffman text');
+    final huffmanFlags = view.getUint16(p);
+    p += 2;
+    if (huffmanFlags != 0) {
+      throw const FormatException('custom Huffman text tables');
+    }
+    final instanceCount = view.getUint32(p);
+    p += 4;
+
+    final symbols = <_Bitmap>[
+      for (final segment in referred) ...?_symbolDicts[segment],
+    ];
+    if (symbols.isEmpty) throw const FormatException('no symbols');
+    final reader = _BitReader(Uint8List.sublistView(data, p));
+    final symbolCodes = _readSymbolIdTable(reader, symbols.length);
+
+    final strips = 1 << logStrips;
+    final region = _Bitmap(w, h, fill: defaultPixel);
+    var stripT = -reader.readHuffman(_huffmanK).value * strips;
+    var firstS = 0;
+    var decoded = 0;
+    while (decoded < instanceCount) {
+      final dt = reader.readHuffman(_huffmanK);
+      if (dt.oob) throw const FormatException('OOB text DT');
+      stripT += dt.value * strips;
+      var curS = firstS;
+      var first = true;
+      while (true) {
+        if (first) {
+          final dfs = reader.readHuffman(_huffmanF);
+          if (dfs.oob) throw const FormatException('OOB text FS');
+          firstS += dfs.value;
+          curS = firstS;
+          first = false;
+        } else {
+          final ds = reader.readHuffman(_huffmanH);
+          if (ds.oob) break;
+          curS += ds.value + dsOffset;
+        }
+        final curT = strips == 1 ? 0 : reader.readBits(logStrips);
+        final t = stripT + curT;
+        final id = reader.readHuffman(symbolCodes);
+        if (id.oob || id.value >= symbols.length) {
+          throw const FormatException('symbol id out of range');
+        }
+        final symbol = symbols[id.value];
+        _drawSymbol(region, symbol, curS, t,
+            refCorner: refCorner, transposed: transposed == 1, combOp: combOp);
+        if (transposed == 1) {
+          if ((refCorner & 1) != 0) curS += symbol.height - 1;
+        } else if (refCorner < 2) {
+          curS += symbol.width - 1;
+        }
+        decoded++;
+        if (decoded >= instanceCount) break;
+      }
+    }
+    _ensurePage().compose(region, x, y, op);
+  }
+
+  static _HuffmanTable _readSymbolIdTable(_BitReader reader, int count) {
+    final runLines = <_HuffmanLine>[
+      for (var i = 0; i < 35; i++) _HuffmanLine(reader.readBits(4), 0, i),
+    ];
+    final runCodes = _HuffmanTable(runLines, htoob: false);
+    final lengths = List<int>.filled(count, 0);
+    var index = 0;
+    while (index < count) {
+      final code = reader.readHuffman(runCodes);
+      if (code.oob || code.value < 0 || code.value >= 35) {
+        throw const FormatException('bad symbol ID run code');
+      }
+      int length, range;
+      if (code.value < 32) {
+        length = code.value;
+        range = 1;
+      } else {
+        if (code.value == 32) {
+          if (index == 0) {
+            throw const FormatException('symbol ID repeat without previous');
+          }
+          length = lengths[index - 1];
+          range = reader.readBits(2) + 3;
+        } else if (code.value == 33) {
+          length = 0;
+          range = reader.readBits(3) + 3;
+        } else {
+          length = 0;
+          range = reader.readBits(7) + 11;
+        }
+      }
+      for (var i = 0; i < range && index < count; i++) {
+        lengths[index++] = length;
+      }
+    }
+    reader.skipToByte();
+    return _HuffmanTable([
+      for (var i = 0; i < count; i++) _HuffmanLine(lengths[i], 0, i),
+    ], htoob: false);
+  }
+
   static void _drawSymbol(_Bitmap region, _Bitmap symbol, int s, int t,
       {required int refCorner, required bool transposed, required int combOp}) {
     int x, y;
@@ -713,6 +924,260 @@ class Jbig2Decoder {
     region.compose(symbol, x, y, combOp);
   }
 }
+
+class _BitReader {
+  _BitReader(this.data);
+
+  final Uint8List data;
+  var _bitOffset = 0;
+
+  int get byteOffset => _bitOffset >> 3;
+
+  int readBits(int count) {
+    var value = 0;
+    for (var i = 0; i < count; i++) {
+      final byte = _bitOffset >> 3;
+      if (byte >= data.length) {
+        throw const FormatException('Huffman data truncated');
+      }
+      value = (value << 1) | ((data[byte] >> (7 - (_bitOffset & 7))) & 1);
+      _bitOffset++;
+    }
+    return value;
+  }
+
+  void skipToByte() {
+    final extra = _bitOffset & 7;
+    if (extra != 0) _bitOffset += 8 - extra;
+  }
+
+  Uint8List readBytes(int count) {
+    skipToByte();
+    final start = byteOffset;
+    final end = start + count;
+    if (end > data.length) {
+      throw const FormatException('Huffman data truncated');
+    }
+    _bitOffset += count * 8;
+    return Uint8List.sublistView(data, start, end);
+  }
+
+  _Bitmap readPackedBitmap(int width, int height) {
+    skipToByte();
+    final rowBytes = (width + 7) >> 3;
+    final bytes = readBytes(rowBytes * height);
+    final bitmap = _Bitmap(width, height, fill: 0);
+    for (var y = 0; y < height; y++) {
+      for (var x = 0; x < width; x++) {
+        if ((bytes[y * rowBytes + (x >> 3)] >> (7 - (x & 7))) & 1 != 0) {
+          bitmap.set(x, y, 1);
+        }
+      }
+    }
+    return bitmap;
+  }
+
+  _HuffmanValue readHuffman(_HuffmanTable table) {
+    var code = 0;
+    for (var length = 1; length <= table.maxLength; length++) {
+      code = (code << 1) | readBits(1);
+      final entry = table.entry(length, code);
+      if (entry == null) continue;
+      var value = entry.rangeLow;
+      if (entry.rangeLength > 0) {
+        final offset = readBits(entry.rangeLength);
+        value = entry.isLow ? value - offset : value + offset;
+      }
+      return _HuffmanValue(value, entry.isOob);
+    }
+    throw const FormatException('bad Huffman code');
+  }
+}
+
+class _HuffmanValue {
+  const _HuffmanValue(this.value, this.oob);
+
+  final int value;
+  final bool oob;
+}
+
+class _HuffmanLine {
+  const _HuffmanLine(this.prefixLength, this.rangeLength, this.rangeLow);
+
+  final int prefixLength;
+  final int rangeLength;
+  final int rangeLow;
+}
+
+class _HuffmanEntry {
+  const _HuffmanEntry(
+    this.code,
+    this.prefixLength,
+    this.rangeLength,
+    this.rangeLow, {
+    required this.isLow,
+    required this.isOob,
+  });
+
+  final int code;
+  final int prefixLength;
+  final int rangeLength;
+  final int rangeLow;
+  final bool isLow;
+  final bool isOob;
+}
+
+class _HuffmanTable {
+  _HuffmanTable(List<_HuffmanLine> lines, {required this.htoob}) {
+    final counts = <int, int>{};
+    maxLength = 0;
+    for (final line in lines) {
+      if (line.prefixLength <= 0) continue;
+      counts[line.prefixLength] = (counts[line.prefixLength] ?? 0) + 1;
+      if (line.prefixLength > maxLength) maxLength = line.prefixLength;
+    }
+    var firstCode = 0;
+    for (var length = 1; length <= maxLength; length++) {
+      firstCode = (firstCode + (counts[length - 1] ?? 0)) << 1;
+      var code = firstCode;
+      for (var i = 0; i < lines.length; i++) {
+        final line = lines[i];
+        if (line.prefixLength != length) continue;
+        final isLow = i == lines.length - (htoob ? 3 : 2);
+        final isOob = htoob && i == lines.length - 1;
+        _entries.add(_HuffmanEntry(
+          code++,
+          length,
+          line.rangeLength,
+          line.rangeLow,
+          isLow: isLow,
+          isOob: isOob,
+        ));
+      }
+    }
+  }
+
+  final bool htoob;
+  var maxLength = 0;
+  final _entries = <_HuffmanEntry>[];
+
+  _HuffmanEntry? entry(int length, int code) {
+    for (final entry in _entries) {
+      if (entry.prefixLength == length && entry.code == code) return entry;
+    }
+    return null;
+  }
+}
+
+final _huffmanA = _HuffmanTable(const [
+  _HuffmanLine(1, 4, 0),
+  _HuffmanLine(2, 8, 16),
+  _HuffmanLine(3, 16, 272),
+  _HuffmanLine(0, 32, -1),
+  _HuffmanLine(3, 32, 65808),
+], htoob: false);
+
+final _huffmanB = _HuffmanTable(const [
+  _HuffmanLine(1, 0, 0),
+  _HuffmanLine(2, 0, 1),
+  _HuffmanLine(3, 0, 2),
+  _HuffmanLine(4, 3, 3),
+  _HuffmanLine(5, 6, 11),
+  _HuffmanLine(0, 32, -1),
+  _HuffmanLine(6, 32, 75),
+  _HuffmanLine(6, 0, 0),
+], htoob: true);
+
+final _huffmanC = _HuffmanTable(const [
+  _HuffmanLine(8, 8, -256),
+  _HuffmanLine(1, 0, 0),
+  _HuffmanLine(2, 0, 1),
+  _HuffmanLine(3, 0, 2),
+  _HuffmanLine(4, 3, 3),
+  _HuffmanLine(5, 6, 11),
+  _HuffmanLine(8, 32, -257),
+  _HuffmanLine(7, 32, 75),
+  _HuffmanLine(6, 0, 0),
+], htoob: true);
+
+final _huffmanD = _HuffmanTable(const [
+  _HuffmanLine(1, 0, 1),
+  _HuffmanLine(2, 0, 2),
+  _HuffmanLine(3, 0, 3),
+  _HuffmanLine(4, 3, 4),
+  _HuffmanLine(5, 6, 12),
+  _HuffmanLine(0, 32, -1),
+  _HuffmanLine(5, 32, 76),
+], htoob: false);
+
+final _huffmanE = _HuffmanTable(const [
+  _HuffmanLine(7, 8, -255),
+  _HuffmanLine(1, 0, 1),
+  _HuffmanLine(2, 0, 2),
+  _HuffmanLine(3, 0, 3),
+  _HuffmanLine(4, 3, 4),
+  _HuffmanLine(5, 6, 12),
+  _HuffmanLine(7, 32, -256),
+  _HuffmanLine(6, 32, 76),
+], htoob: false);
+
+final _huffmanF = _HuffmanTable(const [
+  _HuffmanLine(5, 10, -2048),
+  _HuffmanLine(4, 9, -1024),
+  _HuffmanLine(4, 8, -512),
+  _HuffmanLine(4, 7, -256),
+  _HuffmanLine(5, 6, -128),
+  _HuffmanLine(5, 5, -64),
+  _HuffmanLine(4, 5, -32),
+  _HuffmanLine(2, 7, 0),
+  _HuffmanLine(3, 7, 128),
+  _HuffmanLine(3, 8, 256),
+  _HuffmanLine(4, 9, 512),
+  _HuffmanLine(4, 10, 1024),
+  _HuffmanLine(6, 32, -2049),
+  _HuffmanLine(6, 32, 2048),
+], htoob: false);
+
+final _huffmanH = _HuffmanTable(const [
+  _HuffmanLine(8, 3, -15),
+  _HuffmanLine(9, 1, -7),
+  _HuffmanLine(8, 1, -5),
+  _HuffmanLine(9, 0, -3),
+  _HuffmanLine(7, 0, -2),
+  _HuffmanLine(4, 0, -1),
+  _HuffmanLine(2, 1, 0),
+  _HuffmanLine(5, 0, 2),
+  _HuffmanLine(6, 0, 3),
+  _HuffmanLine(3, 4, 4),
+  _HuffmanLine(6, 1, 20),
+  _HuffmanLine(4, 4, 22),
+  _HuffmanLine(4, 5, 38),
+  _HuffmanLine(5, 6, 70),
+  _HuffmanLine(5, 7, 134),
+  _HuffmanLine(6, 7, 262),
+  _HuffmanLine(7, 8, 390),
+  _HuffmanLine(6, 10, 646),
+  _HuffmanLine(9, 32, -16),
+  _HuffmanLine(9, 32, 1670),
+  _HuffmanLine(2, 0, 0),
+], htoob: true);
+
+final _huffmanK = _HuffmanTable(const [
+  _HuffmanLine(1, 0, 1),
+  _HuffmanLine(2, 1, 2),
+  _HuffmanLine(4, 0, 4),
+  _HuffmanLine(4, 1, 5),
+  _HuffmanLine(5, 1, 7),
+  _HuffmanLine(5, 2, 9),
+  _HuffmanLine(6, 2, 13),
+  _HuffmanLine(7, 2, 17),
+  _HuffmanLine(7, 3, 21),
+  _HuffmanLine(7, 4, 29),
+  _HuffmanLine(7, 5, 45),
+  _HuffmanLine(7, 6, 77),
+  _HuffmanLine(0, 32, -1),
+  _HuffmanLine(7, 32, 141),
+], htoob: false);
 
 /// One-byte-per-pixel bitmap; out-of-bounds reads are 0 (white).
 class _Bitmap {

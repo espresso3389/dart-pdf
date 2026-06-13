@@ -118,7 +118,7 @@ Checked-in visual artifacts:
 - `bitmap-halftone.pdf` — JBIG2 halftone region
 - `bitmap-mmr.pdf` — JBIG2 MMR coding
 - `bitmap-refine.pdf` — JBIG2 refinement
-- `bitmap-symbol-symhuff-texthuff.pdf` — JBIG2 Huffman (known gap)
+- `bitmap-symbol-symhuff-texthuff.pdf` — JBIG2 Huffman symbol/text regions
 - `bitmap-symbol-textcomposite.pdf` — JBIG2 text region composite
 - `bitmap-symbol.pdf` — JBIG2 symbol dictionary
 - `bitmap-template1.pdf` — JBIG2 generic template 1

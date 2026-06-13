@@ -119,6 +119,24 @@ void main() {
     expect(_isBlack(out, 399, 398, 399), isFalse);
   });
 
+  test('Huffman symbol dictionaries and text regions render PDF.js corpus image',
+      () {
+    final raw = _pdfjsImageData('bitmap-symbol-symhuff-texthuff.pdf', 'Im');
+    final out = Jbig2Decoder.decode(
+      data: raw,
+      width: 399,
+      height: 400,
+    );
+    expect(out, isNotNull);
+    expect(_blackPixelCount(out!, 399, 400), 10950);
+    expect(_isBlack(out, 399, 259, 78), isTrue);
+    expect(_isBlack(out, 399, 270, 79), isTrue);
+    expect(_isBlack(out, 399, 200, 150), isTrue);
+    expect(_isBlack(out, 399, 0, 0), isFalse);
+    expect(_isBlack(out, 399, 250, 90), isFalse);
+    expect(_isBlack(out, 399, 398, 399), isFalse);
+  });
+
   test('garbage decodes to null, not an exception', () {
     expect(
         Jbig2Decoder.decode(

@@ -246,6 +246,17 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   Offset? _eraserCursor;
   bool _panErasing = false; // a mouse drag is erasing (arena path)
 
+  /// The ink tool's pen-preview cursor: a dot the size of the pen width,
+  /// in the pen colour, painted in place of the system cursor so the
+  /// drawn colour and width are visible before a stroke is started.
+  Offset? _penCursor;
+
+  /// The rotate knob's cursor position (hover over the knob, or live
+  /// through a rotate drag): Flutter has no rotation cursor, so the
+  /// system cursor is hidden here and a small curved-arrow glyph is
+  /// painted to track the pointer instead.
+  Offset? _rotateCursor;
+
   /// Erase results kept painted until the new revision's raster lands —
   /// without them the old strokes pop back at full strength for a frame.
   List<Rect>? _afterEraseRects;
@@ -1095,6 +1106,16 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         rect.center.dy + handle.dy * rect.height / 2,
       );
 
+  /// The resize cursor for a handle by its corner/edge: orthogonal edges
+  /// get the straight resize cursors, corners the matching diagonal.
+  static MouseCursor _resizeCursorFor(_Handle handle) =>
+      switch ((handle.dx, handle.dy)) {
+        (0, _) => SystemMouseCursors.resizeUpDown,
+        (_, 0) => SystemMouseCursors.resizeLeftRight,
+        (-1, -1) || (1, 1) => SystemMouseCursors.resizeUpLeftDownRight,
+        _ => SystemMouseCursors.resizeUpRightDownLeft,
+      };
+
   _Handle? _handleAt(Rect rect, Offset position) {
     if (!_controller.canResizeSelected) return null;
     for (final handle in _handles) {
@@ -1565,6 +1586,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           _resizeFlipY = false;
           _moveStart = position;
           _moveCurrent = position;
+          // hold the matching resize cursor through the drag (hover stops
+          // firing once the pointer is down)
+          _cursor = _resizeCursorFor(handle);
         });
         // lift the box off the page for a re-wrapping (free-text) resize:
         // render the page without it so the preview floats over the real
@@ -1577,6 +1601,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           _rotateStartAngle = (position - selected.center).direction;
           _rotateResting = resting;
           _rotateDelta = 0;
+          // keep the painted rotation glyph riding the pointer mid-drag
+          _rotateCursor = position;
+          _cursor = SystemMouseCursors.none;
         });
         return;
       }
@@ -1587,6 +1614,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         setState(() {
           _moveStart = position;
           _moveCurrent = position;
+          _cursor = SystemMouseCursors.grabbing; // closed hand while dragging
         });
         return;
       }
@@ -1598,6 +1626,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       setState(() {
         _moveStart = position;
         _moveCurrent = position;
+        _cursor = SystemMouseCursors.grabbing;
       });
       return;
     }
@@ -1680,7 +1709,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     if (_rotateStartAngle != null) {
       final selected = _selectedViewRect;
       if (selected == null) return;
-      setState(() => _rotateDelta = _rotationDelta(selected, position));
+      setState(() {
+        _rotateDelta = _rotationDelta(selected, position);
+        _rotateCursor = position; // the glyph follows the pointer
+      });
     } else if (_vertexHandle != null) {
       setState(() {
         final points = List<Offset>.of(_vertexPoints!);
@@ -1765,11 +1797,14 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       _vertexPoints = null;
       _rotateStartAngle = null;
       _rotateDelta = 0;
+      _rotateCursor = null;
       _marqueeStart = null;
       _marqueeCurrent = null;
       _marqueeAdd = false;
       _viewportPanning = false;
       _signatureDrag = false;
+      // drop any drag cursor; the next hover recomputes it
+      _cursor = MouseCursor.defer;
     });
     // the in-flight lift is done; the afterimage covers the commit gap
     _clearResizeClean();
@@ -2311,20 +2346,20 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                   _rotatePoint(
                       event.localPosition, chrome.$1.center, -resting));
       if (vertex != null) {
-        cursor = SystemMouseCursors.move;
+        cursor = SystemMouseCursors.grab;
       } else if (handle != null) {
-        cursor = switch ((handle.dx, handle.dy)) {
-          (0, _) => SystemMouseCursors.resizeUpDown,
-          (_, 0) => SystemMouseCursors.resizeLeftRight,
-          (-1, -1) || (1, 1) => SystemMouseCursors.resizeUpLeftDownRight,
-          _ => SystemMouseCursors.resizeUpRightDownLeft,
-        };
+        cursor = _resizeCursorFor(handle);
       } else if (chrome != null &&
           _hitsRotateHandle(chrome.$1, resting, event.localPosition)) {
-        cursor = SystemMouseCursors.grab;
+        // no system rotation cursor: hide it and paint a curved-arrow glyph
+        if (_rotateCursor != event.localPosition) {
+          setState(() => _rotateCursor = event.localPosition);
+        }
+        cursor = SystemMouseCursors.none;
       } else if (_selectedViewRects
           .any((rect) => rect.contains(event.localPosition))) {
-        cursor = SystemMouseCursors.move;
+        // hovering a selected annotation: the grab hand reads as "drag me"
+        cursor = SystemMouseCursors.grab;
       } else {
         final (x, y) = _geometry.toPagePoint(event.localPosition);
         // a pointer over a selectable annotation, a crosshair-ish basic
@@ -2336,6 +2371,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       }
     } else if (_tool == PdfEditTool.note) {
       cursor = SystemMouseCursors.click;
+    } else if (_tool == PdfEditTool.ink) {
+      // the painted dot (pen colour at pen width) is the cursor, so the
+      // chosen colour and stroke width are visible before drawing
+      if (_penCursor != event.localPosition) {
+        setState(() => _penCursor = event.localPosition);
+      }
+      cursor = SystemMouseCursors.none;
     } else if (_tool == PdfEditTool.eraser) {
       // the painted ring is the cursor
       if (_eraserCursor != event.localPosition) {
@@ -2378,6 +2420,16 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       }
     } else {
       cursor = SystemMouseCursors.precise;
+    }
+    // retract the painted glyph cursors when the pointer leaves their zone:
+    // the rotate glyph shows only over the knob (the lone `none` in select
+    // mode), the pen dot only with the ink tool armed
+    final overKnob = _selectMode && cursor == SystemMouseCursors.none;
+    if (!overKnob && _rotateCursor != null) {
+      setState(() => _rotateCursor = null);
+    }
+    if (_tool != PdfEditTool.ink && _penCursor != null) {
+      setState(() => _penCursor = null);
     }
     if (cursor != _cursor) setState(() => _cursor = cursor);
   }
@@ -2716,6 +2768,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
             if (_pickPosition == null &&
                 (_signaturePreview == null || _signatureDrag) &&
                 (_eraserCursor == null || _erasePath.isNotEmpty) &&
+                _penCursor == null &&
+                (_rotateCursor == null || _rotateStartAngle != null) &&
                 _polyHover == null) {
               return;
             }
@@ -2724,6 +2778,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
               _pickPreview = null;
               if (!_signatureDrag) _signaturePreview = null;
               if (_erasePath.isEmpty) _eraserCursor = null;
+              _penCursor = null;
+              if (_rotateStartAngle == null) _rotateCursor = null;
               _polyHover = null;
             });
           },
@@ -2812,6 +2868,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                         ? _eraserCursor
                         : null,
                     eraserRadius: _controller.eraserRadius * _geometry.scale,
+                    // the pen-preview dot (ink tool) and the rotation glyph
+                    // (rotate knob): painted in place of the system cursor
+                    penCursor: _tool == PdfEditTool.ink && _activeStroke == null
+                        ? _penCursor
+                        : null,
+                    penOpacity: _controller.opacity,
+                    rotateCursor: _rotateCursor,
                     afterGhost: _afterGhost != null
                         ? (
                             picture: _afterGhost!,
@@ -3196,6 +3259,9 @@ class _EditingPreviewPainter extends CustomPainter {
     this.fadeColor = const Color(0x00000000),
     this.eraserCursor,
     this.eraserRadius = 0,
+    this.penCursor,
+    this.penOpacity = 1,
+    this.rotateCursor,
     required this.afterGhost,
     required this.afterShape,
     required this.afterPath,
@@ -3311,6 +3377,18 @@ class _EditingPreviewPainter extends CustomPainter {
   /// exactly the area the eraser removes at any zoom).
   final Offset? eraserCursor;
   final double eraserRadius;
+
+  /// The ink tool's pen-preview cursor: a filled dot in [color] at
+  /// [penOpacity], sized to the pen width ([strokeWidth], view pixels),
+  /// painted in place of the system cursor so the colour and width that
+  /// will be drawn are visible before the stroke starts.
+  final Offset? penCursor;
+  final double penOpacity;
+
+  /// The rotate knob's cursor: a small curved-arrow glyph painted here
+  /// (Flutter has no built-in rotation cursor, so the system cursor is
+  /// hidden over the knob and this tracks the pointer instead).
+  final Offset? rotateCursor;
 
   /// A just-committed move/resize/rotate, kept painted at full strength
   /// until the new revision's raster lands. [source] is the old
@@ -3781,6 +3859,56 @@ class _EditingPreviewPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5 * chromeScale);
     }
+
+    // the ink tool's pen-preview dot: the pen colour at its opacity, sized
+    // to the stroke width, with a halo + hairline so it reads on any page
+    final pen = penCursor;
+    if (pen != null) {
+      final r = math.max(strokeWidth / 2, 1.5 * chromeScale);
+      canvas.drawCircle(pen, r + 1.5 * chromeScale,
+          Paint()..color = const Color(0x33000000));
+      canvas.drawCircle(
+          pen, r, Paint()..color = color.withValues(alpha: penOpacity));
+      canvas.drawCircle(
+          pen,
+          r,
+          Paint()
+            ..color = const Color(0xB3FFFFFF)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1 * chromeScale);
+    }
+
+    // the rotate knob's cursor: a curved arrow (no system rotation cursor)
+    final rotate = rotateCursor;
+    if (rotate != null) {
+      final rr = 9 * chromeScale;
+      // a 290° arc, leaving a gap for the arrowhead at its end
+      const start = -math.pi / 2;
+      const sweep = 290 * math.pi / 180;
+      final box = Rect.fromCircle(center: rotate, radius: rr);
+      final halo = Paint()
+        ..color = const Color(0x66000000)
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 4 * chromeScale;
+      final arc = Paint()
+        ..color = const Color(0xFFFFFFFF)
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeWidth = 2 * chromeScale;
+      canvas.drawArc(box, start, sweep, false, halo);
+      canvas.drawArc(box, start, sweep, false, arc);
+      // arrowhead tangent to the arc end
+      final end = start + sweep;
+      final tip = rotate + Offset(math.cos(end), math.sin(end)) * rr;
+      final tangent = end + math.pi / 2; // clockwise travel
+      final wing = 4 * chromeScale;
+      for (final a in [tangent + 2.5, tangent - 2.5]) {
+        final p = tip + Offset(math.cos(a), math.sin(a)) * wing;
+        canvas.drawLine(tip, p, halo);
+        canvas.drawLine(tip, p, arc);
+      }
+    }
   }
 
   /// Cheap inequality for the extra ink sets: counts plus each set's
@@ -3836,6 +3964,9 @@ class _EditingPreviewPainter extends CustomPainter {
       oldDelegate.fadeColor != fadeColor ||
       oldDelegate.eraserCursor != eraserCursor ||
       oldDelegate.eraserRadius != eraserRadius ||
+      oldDelegate.penCursor != penCursor ||
+      oldDelegate.penOpacity != penOpacity ||
+      oldDelegate.rotateCursor != rotateCursor ||
       oldDelegate.afterGhost != afterGhost ||
       oldDelegate.afterShape != afterShape ||
       oldDelegate.showHandles != showHandles ||

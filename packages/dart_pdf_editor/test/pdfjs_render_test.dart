@@ -89,11 +89,20 @@ void main() {
   final maxDifferingFraction = _envPositiveDouble(
       'PDFJS_COMPARE_MAX_DIFF_FRACTION', _maxDifferingFraction);
 
+  // PDFJS_ONLY filters to a comma-separated list of filename substrings, so a
+  // single file can be re-rendered while iterating on a fix.
+  final only = (Platform.environment['PDFJS_ONLY'] ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .where((s) => s.isNotEmpty)
+      .toList();
   final files = root
       .listSync()
       .whereType<File>()
       .where((f) => f.path.toLowerCase().endsWith('.pdf'))
       .where((f) => !skipped.contains(f.uri.pathSegments.last))
+      .where((f) => only.isEmpty ||
+          only.any((s) => f.uri.pathSegments.last.contains(s)))
       .toList()
     ..sort((a, b) => a.path.compareTo(b.path));
 

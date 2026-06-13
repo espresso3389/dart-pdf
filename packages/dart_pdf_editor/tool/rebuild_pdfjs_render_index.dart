@@ -148,19 +148,20 @@ String _indexMarkdown(List<_Render> renders) {
   }
   markdown.writeln();
 
+  markdown
+    ..writeln('## Visual Comparisons')
+    ..writeln();
   for (final render in renders) {
-    final title =
-        '${render.pdfName} page ${render.page + 1} - ${render.width}x${render.height} - ${_mdDifference(render.differenceFraction)}';
     markdown
-      ..writeln('<details>')
-      ..writeln('<summary>${_htmlText(title)}</summary>')
+      ..writeln('### ${_mdHeading(render.pdfName)} page ${render.page + 1}')
+      ..writeln()
+      ..writeln(
+          '${render.width}x${render.height}; diff: ${_mdDifference(render.differenceFraction)}')
       ..writeln()
       ..writeln('| PDF.js baseline | Dart render | Diff |')
       ..writeln('| --- | --- | --- |')
       ..writeln(
           '| ${_mdImage(render.baselineName, 'PDF.js baseline')} | ${_mdImage(render.actualName, 'Dart render')} | ${_mdImage(render.diffName, 'Diff')} |')
-      ..writeln()
-      ..writeln('</details>')
       ..writeln();
   }
   return markdown.toString();
@@ -190,6 +191,8 @@ String _mdImage(String? fileName, String label) {
 }
 
 String _mdCell(String text) => text.replaceAll('|', r'\|');
+
+String _mdHeading(String text) => text.replaceAll('#', r'\#');
 
 String _mdUrl(String text) => Uri.encodeComponent(text).replaceAll('%2F', '/');
 

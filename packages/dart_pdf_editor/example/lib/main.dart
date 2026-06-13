@@ -349,11 +349,20 @@ class _ViewerScreenState extends State<ViewerScreen> {
     }
   }
 
+  /// The suggested save name — the active tab's title (the opened file's
+  /// name, or the demo's title), with a `.pdf` extension guaranteed.
+  String _saveFileName() {
+    var name = (_active?.title ?? '').trim();
+    if (name.isEmpty) name = 'document';
+    if (!name.toLowerCase().endsWith('.pdf')) name = '$name.pdf';
+    return name;
+  }
+
   /// Saves with whatever the platform offers: a save dialog on desktop,
   /// a browser download on the web, the share sheet on phones and
   /// tablets (where apps can't write outside their sandbox directly).
   Future<void> _saveAs(Uint8List bytes) async {
-    const name = 'annotated.pdf';
+    final name = _saveFileName();
     final file = XFile.fromData(bytes, mimeType: 'application/pdf');
     if (kIsWeb) {
       await file.saveTo(name);
@@ -367,7 +376,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
             box == null ? null : box.localToGlobal(Offset.zero) & box.size;
         await SharePlus.instance.share(ShareParams(
           files: [file],
-          fileNameOverrides: const [name],
+          fileNameOverrides: [name],
           // required on iPad: the share popover anchors to this rect
           sharePositionOrigin: origin ?? const Rect.fromLTWH(0, 0, 1, 1),
         ));
@@ -566,23 +575,20 @@ class _ViewerScreenState extends State<ViewerScreen> {
       color: scheme.surface,
       child: SizedBox(
         height: _tabStripHeight,
-        child: Row(
-          children: [
-            Expanded(
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                itemCount: _tabs.length,
-                itemBuilder: (context, i) => _buildTab(i),
-              ),
-            ),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.add),
-              tooltip: 'Open PDF in a new tab',
-              onPressed: _pickFile,
-            ),
-          ],
+        // the new-tab button is the last item in the scrolling row, so it
+        // always rides immediately after the final tab
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          itemCount: _tabs.length + 1,
+          itemBuilder: (context, i) => i < _tabs.length
+              ? _buildTab(i)
+              : IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.add),
+                  tooltip: 'Open PDF in a new tab',
+                  onPressed: _pickFile,
+                ),
         ),
       ),
     );

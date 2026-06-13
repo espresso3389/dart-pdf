@@ -1331,8 +1331,13 @@ class PdfEditingController extends ChangeNotifier {
       _selected.contains((pageIndex, index));
 
   /// Resizing manipulates one /Rect; only a single selection has handles.
+  /// Form-field widgets resize too while the form tool is armed (the
+  /// editor regenerates their appearance at the new size).
   bool get canResizeSelected =>
-      _selected.length == 1 && _resizable.contains(selectedAnnotation?.subtype);
+      _selected.length == 1 &&
+      (_resizable.contains(selectedAnnotation?.subtype) ||
+          (tool == PdfEditTool.form &&
+              selectedAnnotation?.subtype == 'Widget'));
 
   /// Rotation rides the appearance stream's /Matrix, so it needs one.
   bool get canRotateSelected =>
@@ -1361,6 +1366,52 @@ class PdfEditingController extends ChangeNotifier {
       if (annotation.rect.contains(x, y)) return (i, annotation);
     }
     return null;
+  }
+
+  /// The topmost form-field widget under ([x], [y]) on [pageIndex] with
+  /// its /Annots slot — the form tool's selection hit test (later
+  /// entries draw on top, so they win). Skips hidden widgets and ones
+  /// the host or /F Locked flag protects ([isAnnotationEditable]); a
+  /// read-only field (one whose *value* can't change) is still
+  /// selectable for move/resize/rename. Null when nothing is hit.
+  (int index, PdfAnnotation)? selectableWidgetAt(
+      int pageIndex, double x, double y) {
+    final annotations = _page(pageIndex).annotations;
+    for (var i = annotations.length - 1; i >= 0; i--) {
+      final annotation = annotations[i];
+      if (annotation.subtype != 'Widget' ||
+          annotation.isHidden ||
+          !isAnnotationEditable(annotation)) {
+        continue;
+      }
+      if (annotation.rect.contains(x, y)) return (i, annotation);
+    }
+    return null;
+  }
+
+  /// Selects the topmost form-field widget under ([x], [y]) on
+  /// [pageIndex] for manipulation (move/resize/menu) — the form tool's
+  /// tap. Clears the selection when nothing is hit. With [toggle]
+  /// (shift/⌘-click) the hit is added to or removed from the selection
+  /// and a miss leaves the selection alone. The form tool stays armed.
+  /// Returns whether a widget was hit.
+  bool selectFormWidgetAt(int pageIndex, double x, double y,
+      {bool toggle = false}) {
+    final hit = selectableWidgetAt(pageIndex, x, y);
+    if (hit == null) {
+      if (!toggle) clearAnnotationSelection();
+      return false;
+    }
+    final slot = (pageIndex, hit.$1);
+    if (toggle) {
+      if (!_selected.remove(slot)) _selected.add(slot);
+    } else {
+      _selected
+        ..clear()
+        ..add(slot);
+    }
+    notifyListeners();
+    return true;
   }
 
   /// The topmost Ink annotation whose strokes pass within [tolerance]
@@ -2013,10 +2064,40 @@ class PdfEditingController extends ChangeNotifier {
     final annotation = selectedAnnotation;
     if (annotation == null || !canResizeSelected) return;
     if (to.width < 1 || to.height < 1) return;
+    if (annotation.subtype == 'Widget') {
+      _resizeWidget(_selected.last, to);
+      return;
+    }
     apply(
         (e) => e.resizeAnnotation(_selected.last.$1, annotation, to,
             flipX: flipX, flipY: flipY),
         pages: [_selected.last.$1]);
+  }
+
+  /// Resizes the selected form-field [widget] so its /Rect becomes [to],
+  /// regenerating the field's appearance ([PdfEditor.resizeFormWidget]).
+  /// The field is re-resolved by name inside the save (fields die with
+  /// every revision); a no-op when the slot isn't a form widget.
+  void _resizeWidget((int, int) slot, PdfRect to) {
+    final field = _widgetFieldForSlot(slot);
+    if (field == null) return;
+    final (name, widgetIndex) = field;
+    apply((e) => e.resizeFormWidget(name, widgetIndex, to), pages: [slot.$1]);
+  }
+
+  /// The (field name, widget index) for the Widget annotation in [slot],
+  /// or null when it isn't a form-field widget.
+  (String name, int widgetIndex)? _widgetFieldForSlot((int, int) slot) {
+    final annotation = _annotationAt(slot);
+    final form = acroForm;
+    if (annotation == null || form == null) return null;
+    for (final field in form.fields) {
+      final widgets = field.widgets;
+      for (var w = 0; w < widgets.length; w++) {
+        if (identical(widgets[w], annotation.dict)) return (field.name, w);
+      }
+    }
+    return null;
   }
 
   /// Resizes the selected annotation in its own (unrotated) frame:
@@ -2030,6 +2111,11 @@ class PdfEditingController extends ChangeNotifier {
     final annotation = selectedAnnotation;
     if (annotation == null || !canResizeSelected) return;
     if (localTo.width < 1 || localTo.height < 1) return;
+    if (annotation.subtype == 'Widget') {
+      // widgets never rotate, so the local frame is the rect itself
+      _resizeWidget(_selected.last, localTo);
+      return;
+    }
     apply(
         (e) => e.resizeAnnotationLocal(_selected.last.$1, annotation, localTo,
             flipX: flipX, flipY: flipY),
@@ -2102,6 +2188,26 @@ class PdfEditingController extends ChangeNotifier {
       return;
     }
     if (_selected.isEmpty) return;
+    // a form-tool selection holds field widgets: dropping the /Annots
+    // entry would leave /AcroForm /Fields dangling, so remove the whole
+    // field instead (one revision for the lot)
+    if (tool == PdfEditTool.form) {
+      final names = <String>{};
+      for (final slot in _selected) {
+        final field = _widgetFieldForSlot(slot);
+        if (field != null) names.add(field.$1);
+      }
+      if (names.isNotEmpty) {
+        clearAnnotationSelection();
+        apply((e) {
+          for (final name in names) {
+            final field = e.acroForm?.fieldNamed(name);
+            if (field != null) e.removeField(field);
+          }
+        });
+        return;
+      }
+    }
     deleteAnnotations(List.of(_selected));
   }
 
@@ -2217,7 +2323,12 @@ class PdfEditingController extends ChangeNotifier {
       double? borderWidth}) {
     if (_selected.isEmpty) return;
     final page = _selected.last.$1;
-    final rect = annotation.rect;
+    // a rotated text box flattens to horizontal under plain remove +
+    // re-add (addFreeText/addStamp/addNote bake a horizontal matrix), so
+    // re-create it in its un-rotated local frame and re-apply the resting
+    // rotation afterwards — the same shape resizeAnnotationLocal uses.
+    final rotation = _appearanceRotationOf(annotation);
+    final rect = rotation == 0 ? annotation.rect : _localFrameOf(annotation);
     final color = annotation.color;
     final by = annotation.author; // a text edit doesn't change ownership
     final nm = annotation.name; // ... nor identity (sync tracks /NM)
@@ -2248,6 +2359,14 @@ class PdfEditingController extends ChangeNotifier {
           e.addNote(page, rect.left, rect.top, text,
               color: color ?? 0xFFD100, author: by, name: nm);
       }
+      // spin the freshly horizontal box back onto the resting rotation:
+      // the just-added annotation is the last /Annots entry
+      if (rotation != 0) {
+        final added = _document.page(page).annotations;
+        if (added.isNotEmpty) {
+          e.rotateAnnotation(page, added.last, rotation * 180 / math.pi);
+        }
+      }
     }, pages: [page]);
     // the rewritten annotation lands in the last /Annots slot — keep it
     // selected so consecutive restyles (a settings popup) stay anchored
@@ -2258,6 +2377,34 @@ class PdfEditingController extends ChangeNotifier {
         ..add((page, annotations.length - 1));
       notifyListeners();
     }
+  }
+
+  /// The page-space rotation baked into [annotation]'s appearance (radians
+  /// CCW, derived from its appearance quad), or 0 when it carries no
+  /// rotation or has no appearance stream.
+  static double _appearanceRotationOf(PdfAnnotation annotation) {
+    final quad = annotation.appearanceQuad;
+    if (quad == null) return 0;
+    final dx = quad[1].$1 - quad[0].$1;
+    final dy = quad[1].$2 - quad[0].$2;
+    if (dx == 0 && dy == 0) return 0;
+    final angle = math.atan2(dy, dx);
+    return angle.abs() < 0.005 ? 0 : angle;
+  }
+
+  /// The un-rotated local box of a rotated [annotation]: its appearance
+  /// quad's edge lengths about the quad center — the frame the text is
+  /// re-created in before [PdfEditor.rotateAnnotation] spins it back.
+  static PdfRect _localFrameOf(PdfAnnotation annotation) {
+    final quad = annotation.appearanceQuad!;
+    final (llx, lly) = quad[0];
+    final (lrx, lry) = quad[1];
+    final (urx, ury) = quad[2];
+    final (ulx, uly) = quad[3];
+    final cx = (llx + urx) / 2, cy = (lly + ury) / 2;
+    final w = math.sqrt((lrx - llx) * (lrx - llx) + (lry - lly) * (lry - lly));
+    final h = math.sqrt((ulx - llx) * (ulx - llx) + (uly - lly) * (uly - lly));
+    return PdfRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2);
   }
 
   // ---------------------------------------------------------------------

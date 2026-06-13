@@ -1959,3 +1959,97 @@ line-type Row label must be `Expanded` (a fixed Text + Spacer + the
 readout widget test ends with pump(400ms) to drain the double-tap timer;
 14 Ghent render-baseline tests fail on this machine independent of these
 changes (pre-existing raster diffs, confirmed by stashing).
+
+Bottom-sheet panels on small screens (Ben: "the panels and strips should
+be bottom sheets on small screens"): below `pdfShellCompactWidth` (700,
+the existing compact threshold) the shells float the side panels and the
+thumbnail strip up from the bottom instead of docking them — a docked
+280px panel crowds the page out on a phone. `pdfShellUseBottomSheets(
+constraints)` + `pdfShellBottomSheets(sheets)` + `PdfPanelBottomSheet`
+all live in shell_chrome.dart (package-private). Each panel
+(PdfThumbnailSidebar/PdfAnnotationSidebar/PdfAnnotationPropertiesPanel/
+PdfSearchResultsPanel) gained a `bottomSheet` bool (default false): when
+true it fills its parent (no fixed-width SizedBox), drops the side resize
+grip, and the scrollbar/list clearance loses the grip width — factored
+through local `showGrip`/`onLeftEdge` flags so the grip-side scrollbar
+inset goes to 0. The thumbnail strip is the exception: it keeps its
+preferred-width tile column `Center`ed in the wider sheet rather than
+stretching one giant thumbnail to phone width (raster resolution, reorder,
+and delete all keep working unchanged); a grid/horizontal strip was
+rejected as too invasive for `_PageTile`'s AspectRatio layout.
+`PdfPanelBottomSheet` is the chrome: rounded top, a drag handle that
+swipes down to dismiss (onVerticalDragEnd primaryVelocity > 200) plus a
+titled header with a close button (keys 'pdf-shell-<panel>-sheet-close');
+`pdfShellBottomSheets` lays the active sheets out in a bottom-anchored
+Column (Positioned.fill + Align.bottomCenter, so the clear area above
+keeps scrolling/tapping the page through to the viewer), each `Flexible`
++ capped at 0.55 of the content height — one sheet rises to 55%, several
+share the area evenly without overflowing off the top. The shells build
+panel closures `panel({required bool bottomSheet})` and switch on
+`useSheets`: docked panels go in the Row (`!useSheets`), sheet-wrapped
+ones go in `pdfShellBottomSheets`; closing a sheet flips the panel's
+visibility preference off (showThumbnailSidebar/showAnnotationSidebar/
+showPropertiesPanel/showSearchResultsPanel). PdfEditorView hides the
+floating toolbar while a sheet is open (`features.toolbar &&
+sheets.isEmpty`) since the sheet covers the bottom; PdfReader (thumbnails
+only) grew a Stack around its viewer Row to host the overlay. The
+thumbnail compact default (`pdfShellShowThumbnailSidebar` — closed on
+compact unless an explicit pref) is unchanged; an explicit on shows the
+strip as a sheet. Tests: pdf_shell_test.dart +4 (compact toggles open a
+sheet, the close button hides it + clears the pref, wide stays docked
+with a resize grip, the reader strip is a sheet). Gotcha: the default
+800x600 test surface is ABOVE 700, so existing shell tests stay docked
+untouched; `compactScreen` (600x800) drives the sheet path.
+
+Form-tool field manipulation (Ben: "the form tool should allow
+manipulating the forms — size, field name — since reading mode already
+fills them"): with read-mode `FormInteractionLayer` owning fill, the
+`PdfEditTool.form` tool now SELECTS widgets for move/resize/rename on a
+single tap, and DOUBLE-tap fills (Ben's pick of the tap-fork). Widgets
+were excluded from the generic selection (`_unselectable` has 'Widget')
+because the §12.5.5 stretch breaks a field — so manipulation goes
+through form-aware paths instead. Controller (editing_controller.dart):
+`selectableWidgetAt`/`selectFormWidgetAt` (mirror the annotation hit
+test but for Widget subtype; read-only fields ARE selectable — readOnly
+gates VALUE edits, not geometry; still respects isAnnotationEditable for
+/F Locked + host predicate), `canResizeSelected` adds a Widget branch
+gated on `tool == form` (arming another tool drops the affordance),
+`resizeSelected`/`resizeSelectedLocal` route Widgets to `_resizeWidget`
+→ `e.resizeFormWidget(name, widgetIndex, to)` (field re-resolved by name
+inside apply, like the fills; `_widgetFieldForSlot` maps the /Annots
+slot → (field name, widget index) by dict identity), and `deleteSelected`
+under the form tool removes the whole FIELD (`e.removeField`, one
+revision) so /AcroForm /Fields never dangles — never `removeAnnotation`
+on a widget. Move reuses the generic `moveAnnotation` (translation; the
+/AP follows /Rect via BBox→Rect, no regen). Editor (form_editor.dart):
+`resizeFormWidget` rewrites the widget /Rect then REGENERATES the
+appearance at the new size — text/choice re-lay their value via
+`_regenerateVariableText` (so the box refits instead of scaling the
+font), checkBox/radio via new `_regenerateButtonStates` (rebuilds /AP /N
+preserving each state name, unlike `_ensureButtonAppearances` which
+skips existing states; checkmark draw factored to `_paintCheckMark`);
+push-button/signature/unknown keep their /AP (only /Rect moves —
+push-button images would otherwise be lost). Overlay (editing_overlay):
+`_onTapUp` form branch → `selectFormWidgetAt`; `_onFormTap` renamed
+`_fillFormFieldAt(local, global)` and driven by `onDoubleTap`
+(`_onDoubleTapDown` stashes `_doubleTapDownDetails`; double-tap wired for
+the form tool alongside the poly tool); `_panStart` form branch routes a
+press on a resize handle or the selected widget body to `_selectPanStart`
+(the existing move/resize machinery — selection chrome + handles appear
+automatically once `canResizeSelected` is true), a press on another
+widget selects-and-moves it in one drag, and only truly empty page area
+drags out a new field; hover cursor shows move/resize/click/precise
+accordingly. The resize drag previews via the generic stretch ghost then
+snaps to the regenerated appearance on raster (same as the FreeText
+fallback) — no widget-specific preview. Single-tap select costs the
+~300ms double-tap delay (inherent to enabling onDoubleTap) — Ben's
+accepted trade for the fork. Tests: pdf_document form_fill_test (+3:
+resize rewrites /Rect + re-lays the value at the new BBox, checkbox mark
+regenerates at the new size, missing-field no-op); dart_pdf_editor
+editing_form_test — the OLD single-tap-fills widget tests now DOUBLE-tap
+(new `doubleTap` helper: tap, pump 60ms, tap, pump 400ms), plus new
+"single tap selects (no fill)", controller move/resize/delete round-trip,
+and the `canResizeSelected` tool gate; the "drag on a widget" test now
+asserts the widget MOVED (it used to assert nothing happened). Toolbar
+tooltip is now 'Form fields — tap to select, double-tap to fill, drag to
+add' (pdf_shell/toolbar tests that find it by tooltip updated).

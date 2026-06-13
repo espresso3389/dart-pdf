@@ -39,6 +39,7 @@ class PdfAnnotationPropertiesPanel extends StatefulWidget {
     this.minWidth = 200,
     this.maxWidth = 420,
     this.showAuthor = true,
+    this.bottomSheet = false,
   });
 
   final PdfEditingController controller;
@@ -62,6 +63,11 @@ class PdfAnnotationPropertiesPanel extends StatefulWidget {
   /// annotation's author can't be edited here — for hosts that set the
   /// author programmatically and lock it.
   final bool showAuthor;
+
+  /// Lays the panel out to fill its parent (full width, no side resize
+  /// grip) for hosting inside a bottom sheet on a small screen, rather
+  /// than as a fixed-width docked column.
+  final bool bottomSheet;
 
   @override
   State<PdfAnnotationPropertiesPanel> createState() =>
@@ -552,11 +558,9 @@ class _PdfAnnotationPropertiesPanelState
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: _width,
-      child: Stack(children: [
-        Positioned.fill(
-          child: Material(
+    final showGrip = widget.resizable && !widget.bottomSheet;
+    final onLeftEdge = !widget.bottomSheet && widget.side == PdfSidebarSide.left;
+    final content = Material(
             color: Theme.of(context).colorScheme.surfaceContainerLow,
             child: ListenableBuilder(
               listenable: _controller,
@@ -577,9 +581,7 @@ class _PdfAnnotationPropertiesPanelState
                     ? _buildSingle(annotation)
                     : _buildMulti(annotation, count);
                 final barClearance = PdfScrollbar.hitExtent +
-                    (widget.resizable && widget.side == PdfSidebarSide.left
-                        ? PdfSidebarResizeGrip.width
-                        : 0);
+                    (showGrip && onLeftEdge ? PdfSidebarResizeGrip.width : 0);
                 return Stack(children: [
                   ScrollConfiguration(
                     behavior: ScrollConfiguration.of(context)
@@ -593,9 +595,7 @@ class _PdfAnnotationPropertiesPanelState
                     top: 0,
                     bottom: 0,
                     right:
-                        widget.resizable && widget.side == PdfSidebarSide.left
-                            ? PdfSidebarResizeGrip.width
-                            : 0,
+                        showGrip && onLeftEdge ? PdfSidebarResizeGrip.width : 0,
                     child: PdfScrollbar(
                       scroll: _scroll,
                       thumbKey:
@@ -605,9 +605,13 @@ class _PdfAnnotationPropertiesPanelState
                 ]);
               },
             ),
-          ),
-        ),
-        if (widget.resizable)
+          );
+    if (widget.bottomSheet) return content;
+    return SizedBox(
+      width: _width,
+      child: Stack(children: [
+        Positioned.fill(child: content),
+        if (showGrip)
           Positioned(
             top: 0,
             bottom: 0,

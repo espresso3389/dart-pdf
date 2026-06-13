@@ -161,6 +161,26 @@ void main() {
       expect(find.byType(PdfReflowView), findsOneWidget);
       expect(find.text('Hello, world!'), findsOneWidget);
     });
+
+    testWidgets('pageColorEditable: false hides the page-color item',
+        (tester) async {
+      final prefs = PdfEditingPreferences();
+      addTearDown(prefs.dispose);
+      await pump(
+          tester,
+          PdfReader(
+              bytes: buildMultiPagePdf(1),
+              preferences: prefs,
+              features: const PdfReaderFeatures(pageColorEditable: false)));
+      await tester.tap(find.byKey(const ValueKey('pdf-shell-view-options')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      // the menu is open (annotations item shows) but page color is gone
+      expect(find.byKey(const ValueKey('pdf-shell-show-annotations')),
+          findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('pdf-shell-page-color')), findsNothing);
+    });
   });
 
   group('PdfEditorView', () {

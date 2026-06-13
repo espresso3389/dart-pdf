@@ -20,6 +20,7 @@ class PdfReaderFeatures {
     this.pageNumber = true,
     this.thumbnails = true,
     this.viewOptions = true,
+    this.pageColorEditable = true,
   });
 
   /// Just the pages: no header bar and no panels.
@@ -51,6 +52,11 @@ class PdfReaderFeatures {
   /// The view-options menu: annotation visibility, form-field
   /// highlight, and page (paper) color — display settings only.
   final bool viewOptions;
+
+  /// Whether the view-options menu offers "Page color…". With it false
+  /// the paper color can't be changed from the UI — for hosts that set
+  /// the page color from the document programmatically and lock it.
+  final bool pageColorEditable;
 }
 
 /// A drop-in, view-only PDF widget: the [PdfViewer] plus a slim header
@@ -208,7 +214,10 @@ class _PdfReaderState extends State<PdfReader> {
                 ],
                 trailing: [
                   if (features.viewOptions)
-                    PdfShellViewOptionsButton(preferences: prefs, reflow: true),
+                    PdfShellViewOptionsButton(
+                        preferences: prefs,
+                        reflow: true,
+                        pageColor: features.pageColorEditable),
                   if (features.thumbnails)
                     PdfShellToggleButton(
                       key: const ValueKey('pdf-shell-thumbnails-toggle'),

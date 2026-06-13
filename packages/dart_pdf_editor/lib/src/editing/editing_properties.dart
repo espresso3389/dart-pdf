@@ -37,6 +37,7 @@ class PdfAnnotationPropertiesPanel extends StatefulWidget {
     this.resizable = true,
     this.minWidth = 200,
     this.maxWidth = 420,
+    this.showAuthor = true,
   });
 
   final PdfEditingController controller;
@@ -55,6 +56,11 @@ class PdfAnnotationPropertiesPanel extends StatefulWidget {
   /// Clamps for the dragged width.
   final double minWidth;
   final double maxWidth;
+
+  /// Whether the "Author" row is shown. With it false the selected
+  /// annotation's author can't be edited here — for hosts that set the
+  /// author programmatically and lock it.
+  final bool showAuthor;
 
   @override
   State<PdfAnnotationPropertiesPanel> createState() =>
@@ -474,8 +480,9 @@ class _PdfAnnotationPropertiesPanelState
           key: const ValueKey('pdf-prop-contents'),
           onCommit: _commitContents,
           maxLines: 4),
-      _textRow('Author', _author,
-          key: const ValueKey('pdf-prop-author'), onCommit: _commitAuthor),
+      if (widget.showAuthor)
+        _textRow('Author', _author,
+            key: const ValueKey('pdf-prop-author'), onCommit: _commitAuthor),
       _section('Position & size (pt)'),
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -507,9 +514,11 @@ class _PdfAnnotationPropertiesPanelState
         subtitle: const Text('Style edits apply to all'),
       ),
       ..._styleControls(primary),
-      _section('Content'),
-      _textRow('Author', _author,
-          key: const ValueKey('pdf-prop-author'), onCommit: _commitAuthor),
+      if (widget.showAuthor) ...[
+        _section('Content'),
+        _textRow('Author', _author,
+            key: const ValueKey('pdf-prop-author'), onCommit: _commitAuthor),
+      ],
       const SizedBox(height: 16),
     ];
   }

@@ -338,9 +338,8 @@ void main() {
               .first);
       await tester.tap(find.byTooltip('Stroke, opacity, font'));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('pdf-text-fill-none')), findsOneWidget);
-      expect(
-          find.byKey(const ValueKey('pdf-text-border-none')), findsOneWidget);
+      // the Shapes popup carries the shape interior-fill colour row
+      expect(find.byKey(const ValueKey('pdf-shape-fill-none')), findsOneWidget);
     });
 
     testWidgets('toolbar buttons drive the owned session', (tester) async {
@@ -426,12 +425,8 @@ void main() {
       );
       editing.addRectangle(0, const PdfRect(100, 550, 300, 650));
       await tester.pump();
-      await tester.scrollUntilVisible(find.byIcon(Icons.save_alt), 80,
-          scrollable: find.descendant(
-            of: find.byType(PdfEditingToolbar),
-            matching: find.byType(Scrollable),
-          ));
-      await tester.tap(find.byIcon(Icons.save_alt),
+      // save now lives in the shell header (near the host's Open), keyed
+      await tester.tap(find.byKey(const ValueKey('pdf-shell-save')),
           kind: PointerDeviceKind.mouse);
       expect(saved, isNotNull);
       expect(saved!.length, editing.bytes.length);

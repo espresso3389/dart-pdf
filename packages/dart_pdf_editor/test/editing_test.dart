@@ -826,10 +826,11 @@ void main() {
       await tester.tap(find.byTooltip('Ellipse'));
       await tester.pump();
       expect(editing.tool, PdfEditTool.ellipse);
-      // re-tapping the active tool disarms it
+      // re-tapping the active tool drops back to Select (not a no-tool
+      // limbo) so you can immediately select and move things
       await tester.tap(find.byTooltip('Ellipse'));
       await tester.pump();
-      expect(editing.tool, isNull);
+      expect(editing.tool, PdfEditTool.select);
 
       editing.addRectangle(0, const PdfRect(100, 650, 250, 750));
       await tester.pump();
@@ -940,9 +941,11 @@ void main() {
       // scope to the popup's sliders — the strip also has an inline opacity
       final menuSliders = find.descendant(
           of: find.byType(MenuAnchor), matching: find.byType(Slider));
-      expect(menuSliders, findsNWidgets(3));
+      // the shapes popup carries stroke width + opacity (font is irrelevant
+      // to a rectangle, so it's no longer shown)
+      expect(menuSliders, findsNWidgets(2));
 
-      // sliders are laid out stroke width, opacity, font size
+      // sliders are laid out stroke width, opacity
       await tester.drag(menuSliders.at(0), const Offset(200, 0));
       await tester.pump();
       expect(editing.strokeWidth, greaterThan(2));

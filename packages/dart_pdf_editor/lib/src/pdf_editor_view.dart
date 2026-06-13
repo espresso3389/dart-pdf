@@ -405,6 +405,16 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                     ),
                 ],
                 trailing: [
+                  // Save sits in the header (near the host's Open), not in
+                  // the floating toolbar — ⌘S/Ctrl+S takes the same path.
+                  if (widget.onSave != null)
+                    IconButton(
+                      key: const ValueKey('pdf-shell-save'),
+                      visualDensity: VisualDensity.compact,
+                      icon: const Icon(Icons.save_alt),
+                      tooltip: 'Save… (⌘S / Ctrl+S)',
+                      onPressed: _save,
+                    ),
                   if (features.author)
                     IconButton(
                       key: const ValueKey('pdf-shell-author'),
@@ -512,7 +522,7 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                     child: PdfEditingToolbar(
                       controller: session,
                       viewerController: _viewer,
-                      onSave: widget.onSave,
+                      // save lives in the header now, not the dock
                       textPrompt: widget.textPrompt ?? showPdfTextPrompt,
                       palette: widget.palette,
                       tools: features.tools,

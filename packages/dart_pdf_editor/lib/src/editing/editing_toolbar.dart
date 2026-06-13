@@ -280,8 +280,12 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
   }
 
   void _toggleTool(PdfEditTool value) {
-    controller.tool = controller.tool == value ? null : value;
-    if (controller.tool != null) viewerController.clearSelection();
+    // disarming a tool drops back to Select (the resting mode), never to a
+    // null/no-tool state — tapping the active tool off should leave you
+    // able to select and move things, not in limbo
+    controller.tool =
+        controller.tool == value ? PdfEditTool.select : value;
+    viewerController.clearSelection();
   }
 
   /// Opens [group]'s strip and, when arming is side-effect-free, arms its
@@ -323,7 +327,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
 
   Future<void> _armMeasureTool(BuildContext context, PdfEditTool tool) async {
     if (controller.tool == tool) {
-      controller.tool = null;
+      controller.tool = PdfEditTool.select;
       return;
     }
     if (!controller.hasMeasurementScale) {
@@ -335,7 +339,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
 
   Future<void> _toggleSignatureTool(BuildContext context) async {
     if (controller.tool == PdfEditTool.signature) {
-      controller.tool = null;
+      controller.tool = PdfEditTool.select;
       return;
     }
     if (controller.signature == null && !await _drawSignature(context)) {
@@ -596,19 +600,17 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
               active: _openGroup?.id == group.id,
               onTap: () => _openGroupTap(group),
             ),
-          if (widget.showFlatten || widget.onSave != null) const _DockDivider(),
-          if (widget.showFlatten)
-            IconButton(
-              icon: const Icon(Icons.layers),
-              tooltip: 'Flatten annotations into the pages',
-              onPressed: () => _flatten(context),
-            ),
-          if (widget.onSave != null)
+          // Flatten now lives in the Edit group's strip, not the dock.
+          // Save stays available for standalone hosts, but the drop-in
+          // shells hide it here and surface it in their header (near Open).
+          if (widget.onSave != null) ...[
+            const _DockDivider(),
             IconButton(
               icon: const Icon(Icons.save_alt),
               tooltip: 'Save… (⌘S / Ctrl+S)',
               onPressed: () => widget.onSave!(controller.bytes),
             ),
+          ],
           if (widget.trailing.isNotEmpty) ...[
             const _DockDivider(),
             for (final builder in widget.trailing)
@@ -623,6 +625,9 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
   /// The tools-left / settings-right card for an open [group].
   Widget _groupStrip(BuildContext context, _ToolGroup group) {
     final hasTextSelection = viewerController.hasSelection;
+    // the Edit group's tools (content/form/redact) read as bare icons —
+    // too cryptic for destructive document edits — so they get text labels
+    final labelled = group.id == 'edit';
     final toolButtons = <Widget>[];
     for (final entry in group.tools) {
       if (entry.tool != null && !_shows(entry.tool!)) continue;
@@ -631,6 +636,20 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
           icon: Icon(entry.icon),
           tooltip: entry.tip,
           onPressed: hasTextSelection ? () => _markup(entry.markup!) : null,
+        ));
+      } else if (labelled) {
+        final tool = entry.tool!;
+        toolButtons.add(_LabeledToolButton(
+          icon: entry.icon,
+          label: switch (tool) {
+            PdfEditTool.content => 'Content',
+            PdfEditTool.form => 'Form',
+            PdfEditTool.redact => 'Redact',
+            _ => _entryLabel(entry),
+          },
+          tooltip: entry.tip,
+          active: controller.tool == tool,
+          onTap: () => _armGroupTool(context, tool),
         ));
       } else {
         final tool = entry.tool!;
@@ -674,19 +693,20 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
   /// The settings cluster for the active tool of [group].
   List<Widget> _groupSettings(BuildContext context, _ToolGroup group) {
     final tool = controller.tool;
+    final fields = _groupStyleFields(group);
     switch (group.id) {
       case 'markup':
         return [
           ..._colorCluster(context),
           if (widget.showColor && widget.showStyle) const _MiniDivider(),
           _opacitySlider(context),
-          ..._tuneTrailing(context),
+          ..._tuneTrailing(context, fields),
         ];
       case 'draw':
         if (tool == PdfEditTool.eraser) {
           return [
             ..._drawToolExtras(context),
-            ..._tuneTrailing(context),
+            ..._tuneTrailing(context, fields),
           ];
         }
         return [
@@ -696,7 +716,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
           const _MiniDivider(),
           _opacitySlider(context),
           ..._drawToolExtras(context),
-          ..._tuneTrailing(context),
+          ..._tuneTrailing(context, fields),
         ];
       case 'shapes':
         return [
@@ -705,7 +725,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
           _strokePresets(context),
           const _MiniDivider(),
           _opacitySlider(context),
-          ..._tuneTrailing(context),
+          ..._tuneTrailing(context, fields),
         ];
       case 'insert':
         return [
@@ -713,7 +733,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
           if (widget.showColor) const _MiniDivider(),
           _opacitySlider(context),
           ..._insertToolExtras(context),
-          ..._tuneTrailing(context, fontChip: true),
+          ..._tuneTrailing(context, fields),
         ];
       case 'measure':
         return [
@@ -722,7 +742,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
           _strokePresets(context),
           const _MiniDivider(),
           _scaleChip(context),
-          ..._tuneTrailing(context),
+          ..._tuneTrailing(context, fields),
         ];
       case 'edit':
         return _editToolExtras(context);
@@ -783,11 +803,23 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
   }
 
   /// Edit-group sub-controls: the form field-type menu + form flatten,
-  /// and the redaction apply button. Each shows only with its tool armed.
+  /// and the redaction apply button (each shows only with its tool armed),
+  /// plus the document-wide Flatten action (which moved here from the
+  /// dock, gated by [PdfEditingToolbar.showFlatten]).
   List<Widget> _editToolExtras(BuildContext context) {
     final tool = controller.tool;
+    final flatten = widget.showFlatten
+        ? _LabeledToolButton(
+            icon: Icons.layers_outlined,
+            label: 'Flatten',
+            tooltip: 'Flatten annotations into the pages',
+            active: false,
+            onTap: () => _flatten(context),
+          )
+        : null;
     if (tool == PdfEditTool.form) {
       return [
+        if (flatten != null) ...[flatten, const _MiniDivider()],
         PopupMenuButton<PdfFormFieldKind>(
           key: const ValueKey('pdf-form-field-type'),
           tooltip: 'New field type — drag on a page to add one',
@@ -826,6 +858,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
     }
     if (tool == PdfEditTool.redact) {
       return [
+        if (flatten != null) ...[flatten, const _MiniDivider()],
         IconButton(
           key: const ValueKey('pdf-apply-redactions'),
           icon: const Icon(Icons.block),
@@ -836,7 +869,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
         ),
       ];
     }
-    return const [];
+    return [if (flatten != null) flatten];
   }
 
   /// The strip shown while an annotation is selected: delete + edit-text,
@@ -849,8 +882,7 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
       if (widget.showColor && canRestyle && widget.showStyle)
         const _MiniDivider(),
       if (canRestyle) _opacitySlider(context),
-      ..._tuneTrailing(context,
-          fontChip: controller.canRestyleSelectedText),
+      ..._tuneTrailing(context, _selectionStyleFields()),
     ];
     final card = Container(
       decoration: _cardDecoration(context),
@@ -1082,19 +1114,82 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
   }
 
   /// The tune popup trigger (and nothing else), or empty when
-  /// [PdfEditingToolbar.showStyle] is off. With [fontChip] the trigger
-  /// renders as the design's font chip rather than the gear icon.
-  List<Widget> _tuneTrailing(BuildContext context, {bool fontChip = false}) {
-    if (!widget.showStyle) return const [];
+  /// [PdfEditingToolbar.showStyle] is off or [fields] carries nothing
+  /// relevant. A font context renders the trigger as the design's font
+  /// chip rather than the gear icon.
+  List<Widget> _tuneTrailing(BuildContext context, _StyleFields fields) {
+    if (!widget.showStyle || fields.isEmpty) return const [];
     return [
-      if (fontChip) const _MiniDivider(),
+      if (fields.font) const _MiniDivider(),
       _StyleMenu(
         controller: controller,
         palette: widget.palette,
         showColor: widget.showColor,
-        fontChipTrigger: fontChip,
+        fields: fields,
+        fontChipTrigger: fields.font,
       ),
     ];
+  }
+
+  /// The style controls relevant to [group]'s active tool — see
+  /// [_StyleFields]. Drives the tune popup so a rectangle never offers a
+  /// font picker, ink never offers line endings, and so on.
+  _StyleFields _groupStyleFields(_ToolGroup group) {
+    final tool = controller.tool;
+    switch (group.id) {
+      case 'draw':
+        if (tool == PdfEditTool.eraser) return const _StyleFields(eraser: true);
+        return const _StyleFields(stroke: true, opacity: true);
+      case 'shapes':
+        return _StyleFields(
+          stroke: true,
+          opacity: true,
+          dashed: true,
+          lineEndings:
+              tool == PdfEditTool.line || tool == PdfEditTool.polyline,
+          shapeFill:
+              tool == PdfEditTool.rectangle || tool == PdfEditTool.ellipse,
+        );
+      case 'insert':
+        return const _StyleFields(opacity: true, font: true, boxColors: true);
+      case 'measure':
+        return const _StyleFields(stroke: true, opacity: true, font: true);
+      case 'markup':
+        return const _StyleFields(opacity: true);
+      default:
+        return const _StyleFields();
+    }
+  }
+
+  /// The style controls relevant to the current annotation selection — by
+  /// the primary selection's subtype, gated by what can actually restyle.
+  _StyleFields _selectionStyleFields() {
+    final annotation = controller.selectedAnnotation;
+    if (annotation == null) return const _StyleFields();
+    final canStroke = controller.canRestyleSelected;
+    switch (annotation.subtype) {
+      case 'FreeText':
+        final text = controller.canRestyleSelectedText;
+        return _StyleFields(opacity: true, font: text, boxColors: text);
+      case 'Square':
+      case 'Circle':
+        return _StyleFields(
+            stroke: canStroke,
+            opacity: true,
+            shapeFill: controller.canFillSelected);
+      case 'Line':
+      case 'PolyLine':
+        return _StyleFields(
+            stroke: canStroke,
+            opacity: true,
+            lineEndings: controller.canSetLineEndings);
+      case 'Ink':
+      case 'Polygon':
+        return _StyleFields(stroke: canStroke, opacity: true);
+      default:
+        // markup, stamps, notes: opacity is the only shared restyle
+        return const _StyleFields(opacity: true);
+    }
   }
 
   // ---- mobile: collapsed dock + bottom sheet ------------------------------
@@ -1476,6 +1571,64 @@ class _GroupChip extends StatelessWidget {
   }
 }
 
+/// An icon + text button used for the Edit group's tools (and its
+/// Flatten action), where a bare icon would be too cryptic for the
+/// document-altering operations they trigger.
+class _LabeledToolButton extends StatelessWidget {
+  const _LabeledToolButton({
+    required this.icon,
+    required this.label,
+    required this.tooltip,
+    required this.active,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final String tooltip;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fg = active ? scheme.primary : scheme.onSurfaceVariant;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Tooltip(
+        message: tooltip,
+        child: Material(
+          color: active
+              ? scheme.primary.withValues(alpha: 0.12)
+              : Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: active
+                  ? scheme.primary.withValues(alpha: 0.55)
+                  : scheme.outline,
+            ),
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(icon, size: 18, color: fg),
+                const SizedBox(width: 6),
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600, color: fg)),
+              ]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// A tile in the mobile sheet's tool grid: icon above a label.
 class _SheetToolTile extends StatelessWidget {
   const _SheetToolTile({
@@ -1596,18 +1749,66 @@ extension _FaintColor on ColorScheme {
       onSurfaceVariant.withValues(alpha: 0.75);
 }
 
+/// Which controls the style popup should show for the active context —
+/// each tool/selection only carries the settings it can actually use, so
+/// the popup never shows (say) a font picker while a rectangle is armed.
+class _StyleFields {
+  const _StyleFields({
+    this.stroke = false,
+    this.opacity = false,
+    this.dashed = false,
+    this.lineEndings = false,
+    this.font = false,
+    this.boxColors = false,
+    this.shapeFill = false,
+    this.eraser = false,
+  });
+
+  final bool stroke;
+  final bool opacity;
+  final bool dashed;
+  final bool lineEndings;
+
+  /// Font size + family (free text).
+  final bool font;
+
+  /// The text-box fill + border colour rows (free text).
+  final bool boxColors;
+
+  /// The shape interior-fill colour row (rectangle / ellipse).
+  final bool shapeFill;
+
+  /// Eraser radius — replaces every other control while the eraser is armed.
+  final bool eraser;
+
+  bool get isEmpty =>
+      !stroke &&
+      !opacity &&
+      !dashed &&
+      !lineEndings &&
+      !font &&
+      !boxColors &&
+      !shapeFill &&
+      !eraser;
+}
+
 /// The style popup: sliders for stroke width, opacity, and font size,
 /// the font family for free text, and the text box's fill and border
 /// colors. With a free-text annotation selected, the text controls show
 /// — and change — that annotation's style; otherwise they set the style
-/// new text is created with.
+/// new text is created with. Only the [fields] relevant to the active
+/// tool or selection are rendered.
 class _StyleMenu extends StatefulWidget {
   const _StyleMenu({
     required this.controller,
     required this.palette,
+    required this.fields,
     this.showColor = true,
     this.fontChipTrigger = false,
   });
+
+  /// Which controls to show — see [_StyleFields].
+  final _StyleFields fields;
 
   final PdfEditingController controller;
 
@@ -1654,6 +1855,13 @@ class _StyleMenuState extends State<_StyleMenu> {
     controller.textFillColor = color; // the new default either way
     if (controller.canRestyleSelectedText) {
       controller.restyleSelectedText(fill: (_rgb(color),));
+    }
+  }
+
+  void _setShapeFill(Color? color) {
+    controller.shapeFillColor = color; // the new default either way
+    if (controller.canFillSelected) {
+      controller.restyleSelected(fill: (color,));
     }
   }
 
@@ -1815,6 +2023,7 @@ class _StyleMenuState extends State<_StyleMenu> {
         ListenableBuilder(
           listenable: controller,
           builder: (context, _) {
+            final fields = widget.fields;
             final selectedStyle = controller.selectedTextStyle;
             // with a restylable selection the stroke/opacity sliders
             // show — and change — its style; otherwise the defaults
@@ -1822,7 +2031,7 @@ class _StyleMenuState extends State<_StyleMenu> {
             // the eraser doesn't paint, so none of the stroke/opacity/
             // font/line controls apply to it — while it's armed the menu
             // collapses to just the eraser-size slider
-            final isEraser = controller.tool == PdfEditTool.eraser;
+            final isEraser = fields.eraser;
             final annotationStyle =
                 restylingAnnotation ? controller.selectedAnnotationStyle : null;
             final strokeValue = _draggingStroke ??
@@ -1836,9 +2045,6 @@ class _StyleMenuState extends State<_StyleMenu> {
             // line endings: edit a selected /Line or /PolyLine in place,
             // else set the creation defaults while a line tool is armed
             final lineEndingTarget = controller.canSetLineEndings;
-            final showLineEndings = lineEndingTarget ||
-                controller.tool == PdfEditTool.line ||
-                controller.tool == PdfEditTool.polyline;
             final lineEndings = lineEndingTarget
                 ? controller.selectedLineEndings!
                 : (controller.lineStartEnding, controller.lineEndEnding);
@@ -1856,6 +2062,11 @@ class _StyleMenuState extends State<_StyleMenu> {
                     ? Color(0xFF000000 | boxStyle!.borderColor!)
                     : null)
                 : controller.textBorderColor;
+            // shape interior fill: a selected shape shows its own /IC,
+            // else the creation default
+            final shapeFillValue = controller.canFillSelected
+                ? controller.selectedShapeFill
+                : controller.shapeFillColor;
             return Container(
               width: 300,
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -1874,7 +2085,7 @@ class _StyleMenuState extends State<_StyleMenu> {
                       onChanged: (v) =>
                           controller.eraserRadius = v.roundToDouble(),
                     ),
-                  if (!isEraser)
+                  if (fields.stroke)
                     _slider(
                       label: 'Stroke width',
                       value: strokeValue,
@@ -1893,7 +2104,7 @@ class _StyleMenuState extends State<_StyleMenu> {
                         setState(() => _draggingStroke = null);
                       },
                     ),
-                  if (!isEraser)
+                  if (fields.opacity)
                     _slider(
                       label: 'Opacity',
                       value: opacityValue,
@@ -1912,7 +2123,7 @@ class _StyleMenuState extends State<_StyleMenu> {
                         setState(() => _draggingOpacity = null);
                       },
                     ),
-                  if (!isEraser && !restylingAnnotation)
+                  if (fields.dashed && !restylingAnnotation)
                     SwitchListTile(
                       key: const ValueKey('pdf-dashed-stroke'),
                       dense: true,
@@ -1921,7 +2132,7 @@ class _StyleMenuState extends State<_StyleMenu> {
                       value: controller.dashedStroke,
                       onChanged: (value) => controller.dashedStroke = value,
                     ),
-                  if (!isEraser && showLineEndings) ...[
+                  if (fields.lineEndings) ...[
                     _lineEndingRow(
                       context: context,
                       label: 'Line start',
@@ -1949,7 +2160,15 @@ class _StyleMenuState extends State<_StyleMenu> {
                       },
                     ),
                   ],
-                  if (!isEraser)
+                  if (fields.shapeFill && widget.showColor)
+                    _boxColorRow(
+                      context: context,
+                      label: 'Fill',
+                      keyPrefix: 'pdf-shape-fill',
+                      value: shapeFillValue,
+                      onChanged: _setShapeFill,
+                    ),
+                  if (fields.font)
                     _slider(
                       label: 'Font size',
                       value: _draggingFontSize ??
@@ -1974,7 +2193,7 @@ class _StyleMenuState extends State<_StyleMenu> {
                         setState(() => _draggingFontSize = null);
                       },
                     ),
-                  if (!isEraser)
+                  if (fields.font)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Row(children: [
@@ -2007,7 +2226,7 @@ class _StyleMenuState extends State<_StyleMenu> {
                         ),
                       ]),
                     ),
-                  if (!isEraser && widget.showColor) ...[
+                  if (fields.boxColors && widget.showColor) ...[
                     _boxColorRow(
                       context: context,
                       label: 'Text fill',
@@ -2033,9 +2252,8 @@ class _StyleMenuState extends State<_StyleMenu> {
         listenable: controller,
         builder: (context, _) {
           void toggle() => menu.isOpen ? menu.close() : menu.open();
-          final tip = controller.tool == PdfEditTool.eraser
-              ? 'Eraser size'
-              : 'Stroke, opacity, font';
+          final tip =
+              widget.fields.eraser ? 'Eraser size' : 'Stroke, opacity, font';
           if (widget.fontChipTrigger) {
             return _FontChip(
               controller: controller,

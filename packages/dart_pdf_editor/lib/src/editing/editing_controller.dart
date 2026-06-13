@@ -502,6 +502,12 @@ class PdfEditingController extends ChangeNotifier {
 
   set textBorderColor(Color? value) => preferences.textBorderColor = value;
 
+  /// The interior fill new shapes (rectangle/ellipse) get, or null for an
+  /// unfilled outline (the default). Persisted.
+  Color? get shapeFillColor => preferences.shapeFillColor;
+
+  set shapeFillColor(Color? value) => preferences.shapeFillColor = value;
+
   int get _colorValue => preferences.color.toARGB32() & 0xFFFFFF;
 
   static int? _rgbOf(Color? color) =>
@@ -780,6 +786,7 @@ class PdfEditingController extends ChangeNotifier {
       (e) => e.addSquare(pageIndex, rect,
           strokeColor: _colorValue,
           strokeWidth: preferences.strokeWidth,
+          fillColor: _rgbOf(preferences.shapeFillColor),
           opacity: preferences.opacity,
           author: author),
       pages: [pageIndex]);
@@ -854,6 +861,7 @@ class PdfEditingController extends ChangeNotifier {
       (e) => e.addCircle(pageIndex, rect,
           strokeColor: _colorValue,
           strokeWidth: preferences.strokeWidth,
+          fillColor: _rgbOf(preferences.shapeFillColor),
           opacity: preferences.opacity,
           author: author),
       pages: [pageIndex]);
@@ -1778,6 +1786,23 @@ class PdfEditingController extends ChangeNotifier {
       strokeWidth: annotation.borderWidth,
       opacity: annotation.appearanceOpacity,
     );
+  }
+
+  /// Whether every selected annotation is a fillable shape (Square or
+  /// Circle) — i.e. [restyleSelected]'s `fill` parameter applies to the
+  /// whole selection.
+  bool get canFillSelected =>
+      canRestyleSelected &&
+      _selected.every((slot) {
+        final subtype = _annotationAt(slot)?.subtype;
+        return subtype == 'Square' || subtype == 'Circle';
+      });
+
+  /// The primary selected shape's interior fill, or null when it has none
+  /// (or the selection isn't a shape). For the fill control to display.
+  Color? get selectedShapeFill {
+    final rgb = selectedAnnotation?.interiorColor;
+    return rgb == null ? null : Color(0xFF000000 | rgb);
   }
 
   /// Restyles every selected annotation in place — one revision, one

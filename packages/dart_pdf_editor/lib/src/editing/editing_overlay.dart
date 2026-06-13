@@ -274,7 +274,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
 
   // in-place text editor: open after a free-text drag-out (new) or a
   // tap on the already-selected free text annotation (existing)
-  Rect? _textEditRect; // view space; null = closed
+  Rect? _textEditRect; // view space; null = closed; derived per build
+  // page space is the source of truth: a zoom that re-lays-out the page
+  // (the _layoutZoom regime changes _geometry.scale) would leave a cached
+  // view rect stale, so the box would drift across the page — build
+  // refreshes _textEditRect from this through the live geometry
+  PdfRect? _textEditPageRect;
   bool _textEditExisting = false;
   PdfEditTool? _textEditTool;
   late final TextEditingController _textEditText = TextEditingController();
@@ -1363,6 +1368,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _textEditText.text = existing ? (_controller.selectedText ?? '') : '';
     setState(() {
       _textEditRect = rect;
+      _textEditPageRect = _geometry.toPageRect(rect);
       _textEditRotation = rotation;
       _textEditExisting = existing;
       _textEditTool = _tool;
@@ -1399,6 +1405,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _textEditText.text = field.value ?? '';
     setState(() {
       _textEditRect = _geometry.toViewRect(rect);
+      _textEditPageRect = rect;
       _textEditRotation = 0;
       _textEditExisting = false;
       _textEditTool = _tool;
@@ -1490,10 +1497,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     if (mounted) {
       setState(() {
         _textEditRect = null;
+        _textEditPageRect = null;
         _textEditFieldName = null;
       });
     } else {
       _textEditRect = null;
+      _textEditPageRect = null;
       _textEditFieldName = null;
     }
     _controller.setEditingText(false);
@@ -2763,6 +2772,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     if (_polyPoints != null && !_polyTool) {
       _polyPoints = null;
       _polyHover = null;
+    }
+    // re-derive the editor's view rect through the LIVE geometry: a zoom
+    // can re-lay-out the page (_layoutZoom) between open and now, so a
+    // cached view rect would have drifted across the page content
+    if (_textEditPageRect != null) {
+      _textEditRect = _geometry.toViewRect(_textEditPageRect!);
     }
     // switching tools mid-edit commits the text, like leaving the ink tool
     if (_textEditRect != null && _tool != _textEditTool) {

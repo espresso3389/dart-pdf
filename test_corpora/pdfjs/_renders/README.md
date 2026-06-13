@@ -10,26 +10,26 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 | PDF | Page | Size | Diff | Result |
 | --- | ---: | ---: | ---: | :---: |
-| 90ms_rksj_h_sample.pdf | 1 | 612x792 | 0.168% | ❌ fail |
-| ContentStreamCycleType3insideType3.pdf | 1 | 600x840 | 1.477% | ❌ fail |
-| ContentStreamNoCycleType3insideType3.pdf | 1 | 600x840 | 1.602% | ❌ fail |
+| 90ms_rksj_h_sample.pdf | 1 | 612x792 | 0.196% | ❌ fail |
+| ContentStreamCycleType3insideType3.pdf | 1 | 600x840 | 0.866% | ❌ fail |
+| ContentStreamNoCycleType3insideType3.pdf | 1 | 600x840 | 0.888% | ❌ fail |
 | IdentityToUnicodeMap_charCodeOf.pdf | 1 | 200x50 | 4.170% | ❌ fail |
-| IndexedCS_negative_and_high.pdf | 1 | 500x100 | 1.600% | ❌ fail |
+| IndexedCS_negative_and_high.pdf | 1 | 500x100 | 0.000% | ✅ pass |
 | PDFBOX-3148-2-fuzzed.pdf | 1 | 612x792 | 0.000% | ✅ pass |
 | PDFBOX-4352-0.pdf | 1 | 200x50 | 0.000% | ✅ pass |
 | PDFJS-7562-reduced.pdf | 1 | 596x842 | 0.004% | ✅ pass |
 | Pages-tree-refs.pdf | 1 | 595x842 | n/a | — |
 | ShowText-ShadingPattern.pdf | 1 | 612x792 | 1.140% | ❌ fail |
-| SimFang-variant.pdf | 1 | 463x626 | 0.285% | ❌ fail |
+| SimFang-variant.pdf | 1 | 463x626 | 0.282% | ❌ fail |
 | TrueType_without_cmap.pdf | 1 | 200x50 | 1.680% | ❌ fail |
 | Type3WordSpacing.pdf | 1 | 300x80 | 5.375% | ❌ fail |
 | XiaoBiaoSong.pdf | 1 | 463x626 | 6.212% | ❌ fail |
-| ZapfDingbats.pdf | 1 | 576x792 | 12.973% | ❌ fail |
+| ZapfDingbats.pdf | 1 | 576x792 | 12.972% | ❌ fail |
 | ZapfDingbats.pdf | 2 | 576x792 | 5.821% | ❌ fail |
-| alphatrans.pdf | 1 | 596x842 | 3.792% | ❌ fail |
+| alphatrans.pdf | 1 | 596x842 | 1.032% | ❌ fail |
 | annotation-highlight-without-appearance.pdf | 1 | 612x792 | 0.077% | ❌ fail |
 | annotation-ink-without-appearance.pdf | 1 | 612x792 | 0.536% | ❌ fail |
-| annotation-line-without-appearance-empty-Rect.pdf | 1 | 650x792 | 0.562% | ❌ fail |
+| annotation-line-without-appearance-empty-Rect.pdf | 1 | 650x792 | 0.340% | ❌ fail |
 | annotation-line-without-appearance.pdf | 1 | 612x792 | 0.012% | ✅ pass |
 | annotation-square-circle-without-appearance.pdf | 1 | 612x792 | 0.333% | ❌ fail |
 | annotation-squiggly-without-appearance.pdf | 1 | 612x792 | 0.080% | ❌ fail |
@@ -39,7 +39,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | arial_unicode_ab_cidfont.pdf | 1 | 595x842 | 0.015% | ✅ pass |
 | asciihexdecode.pdf | 1 | 795x842 | 0.253% | ❌ fail |
 | bad-PageLabels.pdf | 1 | 200x50 | 8.490% | ❌ fail |
-| bigboundingbox.pdf | 1 | 612x792 | 1.317% | ❌ fail |
+| bigboundingbox.pdf | 1 | 612x792 | 1.320% | ❌ fail |
 | bitmap-halftone.pdf | 1 | 399x400 | 0.000% | ✅ pass |
 | bitmap-mmr.pdf | 1 | 399x400 | 0.000% | ✅ pass |
 | bitmap-refine.pdf | 1 | 399x400 | 0.000% | ✅ pass |
@@ -59,10 +59,10 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | bug1782186.pdf | 1 | 842x596 | 0.202% | ❌ fail |
 | bug816075.pdf | 1 | 596x842 | 0.000% | ✅ pass |
 | bug866395.pdf | 1 | 200x50 | 4.790% | ❌ fail |
-| bug886717.pdf | 1 | 596x842 | 0.011% | ✅ pass |
+| bug886717.pdf | 1 | 596x842 | 0.029% | ✅ pass |
 | bug898853.pdf | 1 | 200x50 | 0.000% | ✅ pass |
-| bug921409.pdf | 1 | 200x50 | 0.000% | ✅ pass |
-| bug946506.pdf | 1 | 799x596 | 2.026% | ❌ fail |
+| bug921409.pdf | 1 | 200x50 | 0.020% | ✅ pass |
+| bug946506.pdf | 1 | 799x596 | 2.030% | ❌ fail |
 | calgray.pdf | 1 | 850x1100 | 0.665% | ❌ fail |
 | calgray.pdf | 2 | 850x1100 | 0.758% | ❌ fail |
 | calgray.pdf | 3 | 850x1100 | 0.658% | ❌ fail |
@@ -71,31 +71,32 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | calrgb.pdf | 3 | 850x1100 | 2.960% | ❌ fail |
 | calrgb.pdf | 4 | 850x1100 | 3.107% | ❌ fail |
 | calrgb.pdf | 5 | 850x1100 | 3.007% | ❌ fail |
+| calrgb.pdf | 6 | 850x1100 | n/a | — |
 | ccitt_EndOfBlock_false.pdf | 1 | 596x842 | 9.054% | ❌ fail |
 | checkbox-bad-appearance.pdf | 1 | 596x842 | 0.034% | ✅ pass |
 | cid_cff.pdf | 1 | 756x562 | 0.000% | ✅ pass |
 | cidfont_cmap_overflow.pdf | 1 | 400x150 | 0.000% | ✅ pass |
 | clippath.pdf | 1 | 200x100 | 0.000% | ✅ pass |
 | close-path-bug.pdf | 1 | 612x792 | 0.001% | ✅ pass |
-| cmykjpeg.pdf | 1 | 612x792 | 5.996% | ❌ fail |
+| cmykjpeg.pdf | 1 | 612x792 | 0.845% | ❌ fail |
 | colorkeymask.pdf | 1 | 596x842 | 0.000% | ✅ pass |
 | colorspace_atan.pdf | 1 | 276x276 | 0.068% | ❌ fail |
-| complex_ttf_font.pdf | 1 | 595x842 | 3.206% | ❌ fail |
+| complex_ttf_font.pdf | 1 | 595x842 | 0.323% | ❌ fail |
 | coons-allflags-withfunction.pdf | 1 | 612x792 | 0.436% | ❌ fail |
 | decodeACSuccessive.pdf | 1 | 400x400 | 2.978% | ❌ fail |
-| devicen.pdf | 1 | 612x792 | 1.977% | ❌ fail |
+| devicen.pdf | 1 | 612x792 | 0.000% | ✅ pass |
 | empty.pdf | 1 | 612x792 | 0.000% | ✅ pass |
 | empty_protected.pdf | 1 | 612x792 | 0.000% | ✅ pass |
 | encrypted-attachment.pdf | 1 | 612x792 | 0.126% | ❌ fail |
-| endchar.pdf | 1 | 15x34 | 32.745% | ❌ fail |
+| endchar.pdf | 1 | 15x34 | 0.588% | ❌ fail |
 | extractPages_null_in_array.pdf | 1 | 612x792 | 0.000% | ✅ pass |
-| file_url_link.pdf | 1 | 200x50 | 11.470% | ❌ fail |
+| file_url_link.pdf | 1 | 200x50 | 9.770% | ❌ fail |
 | font_ascent_descent.pdf | 1 | 842x595 | 0.006% | ✅ pass |
 | franz.pdf | 1 | 200x50 | 10.600% | ❌ fail |
 | franz_2.pdf | 1 | 200x50 | 98.170% | ❌ fail |
 | freetext_no_appearance.pdf | 1 | 612x792 | 0.000% | ✅ pass |
 | function_based_shading.pdf | 1 | 612x792 | 5.768% | ❌ fail |
-| glyph_accent.pdf | 1 | 200x50 | 0.000% | ✅ pass |
+| glyph_accent.pdf | 1 | 200x50 | 0.080% | ❌ fail |
 | gradientfill.pdf | 1 | 596x842 | 0.169% | ❌ fail |
 | hello_world_rotated.pdf | 1 | 792x612 | 0.551% | ❌ fail |
 | hello_world_rotated.pdf | 2 | 792x612 | 0.551% | ❌ fail |
@@ -106,18 +107,18 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | image-rotated-black-white-ratio.pdf | 1 | 612x792 | 0.023% | ✅ pass |
 | images_1bit_grayscale.pdf | 1 | 596x842 | 9.987% | ❌ fail |
 | issue1293r.pdf | 1 | 200x50 | 4.900% | ❌ fail |
-| issue14802.pdf | 1 | 260x50 | 9.431% | ❌ fail |
+| issue14802.pdf | 1 | 260x50 | 9.246% | ❌ fail |
 | issue15893_reduced.pdf | 1 | 200x50 | 10.750% | ❌ fail |
-| issue269_1.pdf | 1 | 100x100 | 14.550% | ❌ fail |
+| issue269_1.pdf | 1 | 100x100 | 0.000% | ✅ pass |
 | issue2761.pdf | 1 | 612x792 | 0.531% | ❌ fail |
 | issue3061.pdf | 1 | 596x842 | 0.173% | ❌ fail |
 | issue3371.pdf | 1 | 596x842 | 0.318% | ❌ fail |
 | issue3458.pdf | 1 | 720x540 | 0.192% | ❌ fail |
 | issue3521.pdf | 1 | 596x842 | 0.103% | ❌ fail |
 | issue3566.pdf | 1 | 200x50 | 0.940% | ❌ fail |
-| issue3584.pdf | 1 | 200x50 | 0.000% | ✅ pass |
-| issue3928.pdf | 1 | 300x50 | 0.000% | ✅ pass |
-| issue3928.pdf | 2 | 300x50 | 0.000% | ✅ pass |
+| issue3584.pdf | 1 | 200x50 | 0.050% | ✅ pass |
+| issue3928.pdf | 1 | 300x50 | 0.033% | ✅ pass |
+| issue3928.pdf | 2 | 300x50 | 0.020% | ✅ pass |
 | issue4246.pdf | 1 | 595x842 | 13.010% | ❌ fail |
 | issue4461.pdf | 1 | 30x20 | 0.000% | ✅ pass |
 | issue4573.pdf | 1 | 200x50 | 0.000% | ✅ pass |
@@ -126,10 +127,10 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | issue5138.pdf | 1 | 200x50 | 0.110% | ❌ fail |
 | issue5280.pdf | 1 | 595x842 | 0.004% | ✅ pass |
 | issue5564_reduced.pdf | 1 | 200x50 | 0.000% | ✅ pass |
-| issue5686.pdf | 1 | 300x50 | 0.007% | ✅ pass |
+| issue5686.pdf | 1 | 300x50 | 0.013% | ✅ pass |
 | issue6010_1.pdf | 1 | 200x50 | 5.010% | ❌ fail |
 | issue6010_2.pdf | 1 | 200x50 | 5.010% | ❌ fail |
-| issue7115.pdf | 1 | 200x50 | 10.250% | ❌ fail |
+| issue7115.pdf | 1 | 200x50 | 9.310% | ❌ fail |
 | issue7446.pdf | 1 | 200x200 | 2.107% | ❌ fail |
 | issue7665.pdf | 1 | 200x50 | 4.900% | ❌ fail |
 | issue7872.pdf | 1 | 250x50 | 8.344% | ❌ fail |
@@ -137,14 +138,15 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | jbig2_symbol_offset.pdf | 1 | 596x842 | 1.560% | ❌ fail |
 | jp2k-resetprob.pdf | 1 | 30x21 | 95.238% | ❌ fail |
 | knockout_isolated_overlap.pdf | 1 | 200x160 | 9.375% | ❌ fail |
-| knockout_smask.pdf | 1 | 200x160 | 25.000% | ❌ fail |
+| knockout_smask.pdf | 1 | 200x160 | 12.500% | ❌ fail |
 | labelled_pages.pdf | 1 | 612x792 | 0.000% | ✅ pass |
 | labelled_pages.pdf | 2 | 612x792 | 0.000% | ✅ pass |
 | labelled_pages.pdf | 3 | 612x792 | 0.000% | ✅ pass |
 | labelled_pages.pdf | 4 | 612x792 | 0.000% | ✅ pass |
 | labelled_pages.pdf | 5 | 612x792 | 0.000% | ✅ pass |
-| mesh_shading_empty.pdf | 1 | 500x250 | 1.515% | ❌ fail |
-| mmtype1.pdf | 1 | 200x50 | 0.000% | ✅ pass |
+| labelled_pages.pdf | 6 | 612x792 | n/a | — |
+| mesh_shading_empty.pdf | 1 | 500x250 | 0.795% | ❌ fail |
+| mmtype1.pdf | 1 | 200x50 | 0.010% | ✅ pass |
 | multiple-filters-length-zero.pdf | 1 | 612x792 | 0.048% | ✅ pass |
 | nested_outline.pdf | 1 | 596x842 | 0.394% | ❌ fail |
 | nested_outline.pdf | 2 | 596x842 | 0.431% | ❌ fail |
@@ -153,34 +155,34 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | nested_outline.pdf | 5 | 596x842 | 0.385% | ❌ fail |
 | noembed-eucjp.pdf | 1 | 595x842 | 0.119% | ❌ fail |
 | noembed-identity.pdf | 1 | 595x842 | 0.022% | ✅ pass |
-| noembed-sjis.pdf | 1 | 595x842 | 0.119% | ❌ fail |
+| noembed-sjis.pdf | 1 | 595x842 | 0.223% | ❌ fail |
 | non-embedded-NuptialScript.pdf | 1 | 350x50 | 21.069% | ❌ fail |
 | openoffice.pdf | 1 | 200x50 | 1.340% | ❌ fail |
 | operator-in-TJ-array.pdf | 1 | 595x839 | 0.244% | ❌ fail |
 | operator_list_cycle.pdf | 1 | 612x792 | 0.249% | ❌ fail |
-| pattern_text_embedded_font.pdf | 1 | 596x842 | 5.011% | ❌ fail |
+| pattern_text_embedded_font.pdf | 1 | 596x842 | 5.019% | ❌ fail |
 | pdfjsbad1586.pdf | 1 | 612x792 | 0.003% | ✅ pass |
 | pdfkit_compressed.pdf | 1 | 612x792 | 0.849% | ❌ fail |
 | poppler-67295-0.pdf | 1 | 612x792 | 0.282% | ❌ fail |
 | poppler-91414-0-53.pdf | 1 | 795x842 | 0.146% | ❌ fail |
 | poppler-91414-0-54.pdf | 1 | 795x842 | 0.146% | ❌ fail |
-| pr4922.pdf | 1 | 400x50 | 7.975% | ❌ fail |
-| pr4922.pdf | 2 | 400x50 | 8.030% | ❌ fail |
-| quadpoints.pdf | 1 | 596x842 | 0.553% | ❌ fail |
-| radial_gradients.pdf | 1 | 595x842 | 4.358% | ❌ fail |
+| pr4922.pdf | 1 | 400x50 | 7.955% | ❌ fail |
+| pr4922.pdf | 2 | 400x50 | 8.010% | ❌ fail |
+| quadpoints.pdf | 1 | 596x842 | 0.551% | ❌ fail |
+| radial_gradients.pdf | 1 | 595x842 | 2.969% | ❌ fail |
 | radial_gradients.pdf | 2 | 595x842 | 2.898% | ❌ fail |
-| radial_gradients.pdf | 3 | 595x842 | 3.580% | ❌ fail |
-| radial_gradients.pdf | 4 | 595x842 | 9.538% | ❌ fail |
-| radial_gradients.pdf | 5 | 595x842 | 9.791% | ❌ fail |
+| radial_gradients.pdf | 3 | 595x842 | 3.070% | ❌ fail |
+| radial_gradients.pdf | 4 | 595x842 | 9.252% | ❌ fail |
+| radial_gradients.pdf | 5 | 595x842 | 9.275% | ❌ fail |
 | rc_annotation.pdf | 1 | 100x100 | 0.000% | ✅ pass |
 | rc_annotation.pdf | 2 | 100x100 | 0.000% | ✅ pass |
-| recursiveCompositGlyf.pdf | 1 | 612x792 | 0.926% | ❌ fail |
+| recursiveCompositGlyf.pdf | 1 | 612x792 | 0.000% | ✅ pass |
 | rotation.pdf | 1 | 612x792 | 0.529% | ❌ fail |
 | rotation.pdf | 2 | 792x612 | 0.511% | ❌ fail |
 | scan-bad.pdf | 1 | 612x792 | 0.048% | ✅ pass |
 | sci-notation.pdf | 1 | 612x792 | 0.362% | ❌ fail |
 | secHandler.pdf | 1 | 612x792 | 0.165% | ❌ fail |
-| shading_extend.pdf | 1 | 596x842 | 6.151% | ❌ fail |
+| shading_extend.pdf | 1 | 596x842 | 2.098% | ❌ fail |
 | simpletype3font.pdf | 1 | 612x792 | 0.000% | ✅ pass |
 | sizes.pdf | 1 | 612x792 | 0.004% | ✅ pass |
 | sizes.pdf | 2 | 649x323 | 0.003% | ✅ pass |
@@ -201,25 +203,25 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | text_rise_eol_bug.pdf | 1 | 612x792 | 0.220% | ❌ fail |
 | textfields.pdf | 1 | 612x792 | 1.172% | ❌ fail |
 | tiling-pattern-box.pdf | 1 | 596x842 | 0.997% | ❌ fail |
-| tiling-pattern-large-steps.pdf | 1 | 4000x400 | 72.620% | ❌ fail |
+| tiling-pattern-large-steps.pdf | 1 | 4000x400 | 0.001% | ✅ pass |
 | tiling_patterns_variations.pdf | 1 | 600x800 | 4.001% | ❌ fail |
-| transparent.pdf | 1 | 200x200 | 11.063% | ❌ fail |
-| type4psfunc.pdf | 1 | 612x792 | 4.618% | ❌ fail |
-| vertical.pdf | 1 | 250x322 | 1.511% | ❌ fail |
+| transparent.pdf | 1 | 200x200 | 0.000% | ✅ pass |
+| type4psfunc.pdf | 1 | 612x792 | 0.008% | ✅ pass |
+| vertical.pdf | 1 | 250x322 | 1.512% | ❌ fail |
 | vertical.pdf | 2 | 250x322 | 0.932% | ❌ fail |
 | vertical.pdf | 3 | 250x322 | 0.932% | ❌ fail |
-| visibility_expressions.pdf | 1 | 341x341 | 7.555% | ❌ fail |
+| visibility_expressions.pdf | 1 | 341x341 | 0.243% | ❌ fail |
 | xobject-image.pdf | 1 | 200x100 | 0.000% | ✅ pass |
 | xref_command_missing.pdf | 1 | 200x50 | 8.480% | ❌ fail |
-| zerowidthline.pdf | 1 | 596x842 | 1.629% | ❌ fail |
+| zerowidthline.pdf | 1 | 596x842 | 0.935% | ❌ fail |
 
-61 of 200 compared pages pass (≤ 0.050% of pixels differing); 139 fail.
+67 of 200 compared pages pass (≤ 0.050% of pixels differing); 133 fail.
 
 ## Visual Comparisons
 
 ### 90ms_rksj_h_sample.pdf page 1
 
-612x792; diff: 0.168%
+612x792; diff: 0.196%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -227,7 +229,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### ContentStreamCycleType3insideType3.pdf page 1
 
-600x840; diff: 1.477%
+600x840; diff: 0.866%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -235,7 +237,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### ContentStreamNoCycleType3insideType3.pdf page 1
 
-600x840; diff: 1.602%
+600x840; diff: 0.888%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -251,7 +253,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### IndexedCS_negative_and_high.pdf page 1
 
-500x100; diff: 1.600%
+500x100; diff: 0.000%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -299,7 +301,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### SimFang-variant.pdf page 1
 
-463x626; diff: 0.285%
+463x626; diff: 0.282%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -331,7 +333,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### ZapfDingbats.pdf page 1
 
-576x792; diff: 12.973%
+576x792; diff: 12.972%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -347,7 +349,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### alphatrans.pdf page 1
 
-596x842; diff: 3.792%
+596x842; diff: 1.032%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -371,7 +373,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### annotation-line-without-appearance-empty-Rect.pdf page 1
 
-650x792; diff: 0.562%
+650x792; diff: 0.340%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -451,7 +453,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### bigboundingbox.pdf page 1
 
-612x792; diff: 1.317%
+612x792; diff: 1.320%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -611,7 +613,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### bug886717.pdf page 1
 
-596x842; diff: 0.011%
+596x842; diff: 0.029%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -627,7 +629,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### bug921409.pdf page 1
 
-200x50; diff: 0.000%
+200x50; diff: 0.020%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -635,7 +637,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### bug946506.pdf page 1
 
-799x596; diff: 2.026%
+799x596; diff: 2.030%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -705,6 +707,14 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | --- | --- | --- |
 | [![PDF.js baseline](calrgb.pdf.p4.baseline.png)](calrgb.pdf.p4.baseline.png) | [![Dart render](calrgb.pdf.p4.dart.png)](calrgb.pdf.p4.dart.png) | [![Diff](calrgb.pdf.p4.diff.png)](calrgb.pdf.p4.diff.png) |
 
+### calrgb.pdf page 6
+
+850x1100; diff: n/a
+
+| PDF.js baseline | Dart render | Diff |
+| --- | --- | --- |
+| missing | [![Dart render](calrgb.pdf.p5.dart.png)](calrgb.pdf.p5.dart.png) | missing |
+
 ### ccitt_EndOfBlock_false.pdf page 1
 
 596x842; diff: 9.054%
@@ -755,7 +765,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### cmykjpeg.pdf page 1
 
-612x792; diff: 5.996%
+612x792; diff: 0.845%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -779,7 +789,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### complex_ttf_font.pdf page 1
 
-595x842; diff: 3.206%
+595x842; diff: 0.323%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -803,7 +813,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### devicen.pdf page 1
 
-612x792; diff: 1.977%
+612x792; diff: 0.000%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -835,7 +845,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### endchar.pdf page 1
 
-15x34; diff: 32.745%
+15x34; diff: 0.588%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -851,7 +861,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### file_url_link.pdf page 1
 
-200x50; diff: 11.470%
+200x50; diff: 9.770%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -899,7 +909,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### glyph_accent.pdf page 1
 
-200x50; diff: 0.000%
+200x50; diff: 0.080%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -987,7 +997,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### issue14802.pdf page 1
 
-260x50; diff: 9.431%
+260x50; diff: 9.246%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1003,7 +1013,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### issue269_1.pdf page 1
 
-100x100; diff: 14.550%
+100x100; diff: 0.000%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1059,7 +1069,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### issue3584.pdf page 1
 
-200x50; diff: 0.000%
+200x50; diff: 0.050%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1067,7 +1077,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### issue3928.pdf page 1
 
-300x50; diff: 0.000%
+300x50; diff: 0.033%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1075,7 +1085,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### issue3928.pdf page 2
 
-300x50; diff: 0.000%
+300x50; diff: 0.020%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1147,7 +1157,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### issue5686.pdf page 1
 
-300x50; diff: 0.007%
+300x50; diff: 0.013%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1171,7 +1181,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### issue7115.pdf page 1
 
-200x50; diff: 10.250%
+200x50; diff: 9.310%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1235,7 +1245,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### knockout_smask.pdf page 1
 
-200x160; diff: 25.000%
+200x160; diff: 12.500%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1281,9 +1291,17 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | --- | --- | --- |
 | [![PDF.js baseline](labelled_pages.pdf.p4.baseline.png)](labelled_pages.pdf.p4.baseline.png) | [![Dart render](labelled_pages.pdf.p4.dart.png)](labelled_pages.pdf.p4.dart.png) | [![Diff](labelled_pages.pdf.p4.diff.png)](labelled_pages.pdf.p4.diff.png) |
 
+### labelled_pages.pdf page 6
+
+612x792; diff: n/a
+
+| PDF.js baseline | Dart render | Diff |
+| --- | --- | --- |
+| missing | [![Dart render](labelled_pages.pdf.p5.dart.png)](labelled_pages.pdf.p5.dart.png) | missing |
+
 ### mesh_shading_empty.pdf page 1
 
-500x250; diff: 1.515%
+500x250; diff: 0.795%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1291,7 +1309,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### mmtype1.pdf page 1
 
-200x50; diff: 0.000%
+200x50; diff: 0.010%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1363,7 +1381,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### noembed-sjis.pdf page 1
 
-595x842; diff: 0.119%
+595x842; diff: 0.223%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1403,7 +1421,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### pattern_text_embedded_font.pdf page 1
 
-596x842; diff: 5.011%
+596x842; diff: 5.019%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1451,7 +1469,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### pr4922.pdf page 1
 
-400x50; diff: 7.975%
+400x50; diff: 7.955%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1459,7 +1477,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### pr4922.pdf page 2
 
-400x50; diff: 8.030%
+400x50; diff: 8.010%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1467,7 +1485,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### quadpoints.pdf page 1
 
-596x842; diff: 0.553%
+596x842; diff: 0.551%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1475,7 +1493,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### radial_gradients.pdf page 1
 
-595x842; diff: 4.358%
+595x842; diff: 2.969%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1491,7 +1509,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### radial_gradients.pdf page 3
 
-595x842; diff: 3.580%
+595x842; diff: 3.070%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1499,7 +1517,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### radial_gradients.pdf page 4
 
-595x842; diff: 9.538%
+595x842; diff: 9.252%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1507,7 +1525,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### radial_gradients.pdf page 5
 
-595x842; diff: 9.791%
+595x842; diff: 9.275%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1531,7 +1549,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### recursiveCompositGlyf.pdf page 1
 
-612x792; diff: 0.926%
+612x792; diff: 0.000%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1579,7 +1597,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### shading_extend.pdf page 1
 
-596x842; diff: 6.151%
+596x842; diff: 2.098%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1747,7 +1765,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### tiling-pattern-large-steps.pdf page 1
 
-4000x400; diff: 72.620%
+4000x400; diff: 0.001%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1763,7 +1781,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### transparent.pdf page 1
 
-200x200; diff: 11.063%
+200x200; diff: 0.000%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1771,7 +1789,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### type4psfunc.pdf page 1
 
-612x792; diff: 4.618%
+612x792; diff: 0.008%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1779,7 +1797,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### vertical.pdf page 1
 
-250x322; diff: 1.511%
+250x322; diff: 1.512%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1803,7 +1821,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### visibility_expressions.pdf page 1
 
-341x341; diff: 7.555%
+341x341; diff: 0.243%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1827,7 +1845,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### zerowidthline.pdf page 1
 
-596x842; diff: 1.629%
+596x842; diff: 0.935%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

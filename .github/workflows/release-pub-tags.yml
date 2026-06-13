@@ -1,0 +1,117 @@
+name: Tag pub.dev releases
+
+on:
+  push:
+    branches: [deploy]
+  workflow_dispatch:
+
+concurrency:
+  group: pub-release-tags
+  cancel-in-progress: false
+
+jobs:
+  validate-and-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG_TOKEN: ${{ secrets.PUB_RELEASE_TAG_TOKEN }}
+      PACKAGE_ORDER: >-
+        pdf_cos:packages/pdf_cos
+        pdf_test_fixtures:packages/pdf_test_fixtures
+        pdf_document:packages/pdf_document
+        pdf_graphics:packages/pdf_graphics
+        dart_pdf_editor:packages/dart_pdf_editor
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.2
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      - run: dart analyze --fatal-infos
+      - run: dart test
+        working-directory: packages/pdf_cos
+      - run: dart test
+        working-directory: packages/pdf_document
+      - run: dart test
+        working-directory: packages/pdf_graphics
+      - run: flutter test
+        working-directory: packages/dart_pdf_editor
+
+      - name: Create release tags for unpublished versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "dart-pdf release automation"
+          git config user.email "actions@github.com"
+
+          version_for() {
+            ruby -ryaml -e 'puts YAML.load_file(ARGV.fetch(0)).fetch("version")' "$1/pubspec.yaml"
+          }
+
+          pub_has_version() {
+            local package="$1"
+            local version="$2"
+            ruby -rjson -ropen-uri -e '
+              package = ARGV.fetch(0)
+              version = ARGV.fetch(1)
+              data = URI.open("https://pub.dev/api/packages/#{package}", &:read)
+              versions = JSON.parse(data).fetch("versions").map { |entry| entry.fetch("version") }
+              exit(versions.include?(version) ? 0 : 1)
+            ' "$package" "$version"
+          }
+
+          tag_exists() {
+            local tag="$1"
+            git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1
+          }
+
+          wait_for_pub() {
+            local package="$1"
+            local version="$2"
+
+            for _ in {1..60}; do
+              if pub_has_version "$package" "$version"; then
+                return 0
+              fi
+              sleep 10
+            done
+
+            echo "::error::$package $version was not visible on pub.dev after waiting 10 minutes"
+            return 1
+          }
+
+          for spec in $PACKAGE_ORDER; do
+            package="${spec%%:*}"
+            directory="${spec#*:}"
+            version="$(version_for "$directory")"
+            tag="$package-v$version"
+
+            if pub_has_version "$package" "$version"; then
+              echo "$package $version is already on pub.dev; skipping $tag"
+              continue
+            fi
+
+            if tag_exists "$tag"; then
+              echo "::error::$tag already exists, but $package $version is not on pub.dev"
+              exit 1
+            fi
+
+            if [[ -z "${RELEASE_TAG_TOKEN:-}" ]]; then
+              echo "::error::PUB_RELEASE_TAG_TOKEN is required to push $tag. GITHUB_TOKEN-created tags do not trigger the tag publishing workflow."
+              exit 1
+            fi
+
+            git tag -a "$tag" -m "Release $package $version"
+            git push "https://x-access-token:${RELEASE_TAG_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/$tag"
+            wait_for_pub "$package" "$version"
+          done

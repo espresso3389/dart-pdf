@@ -1,0 +1,61 @@
+name: Publish to pub.dev
+
+on:
+  push:
+    tags:
+      - 'pdf_cos-v*'
+      - 'pdf_test_fixtures-v*'
+      - 'pdf_document-v*'
+      - 'pdf_graphics-v*'
+      - 'dart_pdf_editor-v*'
+
+jobs:
+  publish-pdf-cos:
+    if: startsWith(github.ref_name, 'pdf_cos-v')
+    permissions:
+      contents: read
+      id-token: write
+    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
+    with:
+      environment: pub.dev
+      working-directory: packages/pdf_cos
+
+  publish-pdf-test-fixtures:
+    if: startsWith(github.ref_name, 'pdf_test_fixtures-v')
+    permissions:
+      contents: read
+      id-token: write
+    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
+    with:
+      environment: pub.dev
+      working-directory: packages/pdf_test_fixtures
+
+  publish-pdf-document:
+    if: startsWith(github.ref_name, 'pdf_document-v')
+    permissions:
+      contents: read
+      id-token: write
+    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
+    with:
+      environment: pub.dev
+      working-directory: packages/pdf_document
+
+  publish-pdf-graphics:
+    if: startsWith(github.ref_name, 'pdf_graphics-v')
+    permissions:
+      contents: read
+      id-token: write
+    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
+    with:
+      environment: pub.dev
+      working-directory: packages/pdf_graphics
+
+  publish-dart-pdf-editor:
+    if: startsWith(github.ref_name, 'dart_pdf_editor-v')
+    permissions:
+      contents: read
+      id-token: write
+    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1
+    with:
+      environment: pub.dev
+      working-directory: packages/dart_pdf_editor

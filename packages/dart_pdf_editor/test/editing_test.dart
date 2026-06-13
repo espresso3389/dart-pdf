@@ -818,10 +818,16 @@ void main() {
       ));
       await tester.pump();
 
-      await tester.tap(find.byTooltip('Rectangle'));
+      // opening a group raises its strip and arms its default tool
+      await tester.tap(find.byKey(const ValueKey('pdf-group-shapes')));
       await tester.pump();
       expect(editing.tool, PdfEditTool.rectangle);
-      await tester.tap(find.byTooltip('Rectangle'));
+      // the strip exposes the group's other tools
+      await tester.tap(find.byTooltip('Ellipse'));
+      await tester.pump();
+      expect(editing.tool, PdfEditTool.ellipse);
+      // re-tapping the active tool disarms it
+      await tester.tap(find.byTooltip('Ellipse'));
       await tester.pump();
       expect(editing.tool, isNull);
 
@@ -923,19 +929,25 @@ void main() {
         ),
       ));
 
-      // the style button sits at the far right of the scrolling toolbar
+      // open the Shapes group; its strip carries the tune button
+      await tester.tap(find.byKey(const ValueKey('pdf-group-shapes')));
+      await tester.pump();
       await tester.scrollUntilVisible(
-          find.byTooltip('Stroke, opacity, font'), 100);
+          find.byTooltip('Stroke, opacity, font'), 100,
+          scrollable: find.byType(Scrollable).first);
       await tester.tap(find.byTooltip('Stroke, opacity, font'));
       await tester.pumpAndSettle();
-      expect(find.byType(Slider), findsNWidgets(3));
+      // scope to the popup's sliders — the strip also has an inline opacity
+      final menuSliders = find.descendant(
+          of: find.byType(MenuAnchor), matching: find.byType(Slider));
+      expect(menuSliders, findsNWidgets(3));
 
       // sliders are laid out stroke width, opacity, font size
-      await tester.drag(find.byType(Slider).at(0), const Offset(200, 0));
+      await tester.drag(menuSliders.at(0), const Offset(200, 0));
       await tester.pump();
       expect(editing.strokeWidth, greaterThan(2));
 
-      await tester.drag(find.byType(Slider).at(1), const Offset(-200, 0));
+      await tester.drag(menuSliders.at(1), const Offset(-200, 0));
       await tester.pump();
       expect(editing.opacity, lessThan(1));
       await tester.pumpAndSettle();

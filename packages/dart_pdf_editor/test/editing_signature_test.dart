@@ -138,12 +138,27 @@ void main() {
       ));
       await tester.pump();
 
+      // the signature tool lives in the Insert group's strip
+      final dockScrollable = find
+          .descendant(
+              of: find.byType(PdfEditingToolbar),
+              matching: find.byType(Scrollable))
+          .last;
+      final stripScrollable = find
+          .descendant(
+              of: find.byType(PdfEditingToolbar),
+              matching: find.byType(Scrollable))
+          .first;
+      final insertChip = find.byKey(const ValueKey('pdf-group-insert'));
+      await tester.scrollUntilVisible(insertChip, 80,
+          scrollable: dockScrollable);
+      await tester.tap(insertChip);
+      await tester.pump();
+
       // no saved signature: the tool button opens the pad dialog first
       await tester.scrollUntilVisible(
           find.byTooltip('Signature — tap a page to place it'), 100,
-          scrollable: find.descendant(
-              of: find.byType(PdfEditingToolbar),
-              matching: find.byType(Scrollable)));
+          scrollable: stripScrollable);
       await tester.tap(find.byTooltip('Signature — tap a page to place it'));
       await tester.pumpAndSettle();
       expect(find.byType(PdfSignatureDialog), findsOneWidget);
@@ -175,6 +190,9 @@ void main() {
       // armed again later, the saved signature is reused without a dialog
       editing.tool = null;
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+          find.byTooltip('Signature — tap a page to place it'), 100,
+          scrollable: stripScrollable);
       await tester.tap(find.byTooltip('Signature — tap a page to place it'));
       await tester.pumpAndSettle();
       expect(find.byType(PdfSignatureDialog), findsNothing);

@@ -118,16 +118,31 @@ void main() {
       ));
       await tester.pump();
 
-      final toolbarScrollable = find.descendant(
-          of: find.byType(PdfEditingToolbar),
-          matching: find.byType(Scrollable));
+      final dockScrollable = find
+          .descendant(
+              of: find.byType(PdfEditingToolbar),
+              matching: find.byType(Scrollable))
+          .last;
+      final stripScrollable = find
+          .descendant(
+              of: find.byType(PdfEditingToolbar),
+              matching: find.byType(Scrollable))
+          .first;
+      // the Stamp tool lives in the Insert group's strip
+      final insertChip = find.byKey(const ValueKey('pdf-group-insert'));
+      await tester.scrollUntilVisible(insertChip, 80,
+          scrollable: dockScrollable);
+      await tester.tap(insertChip);
+      await tester.pump();
       await tester.scrollUntilVisible(find.byTooltip('Stamp'), 100,
-          scrollable: toolbarScrollable);
+          scrollable: stripScrollable);
       await tester.tap(find.byTooltip('Stamp'));
       await tester.pumpAndSettle();
       expect(editing.tool, PdfEditTool.stamp);
 
       // the picker button only shows while the stamp tool is armed
+      await tester.scrollUntilVisible(find.byTooltip('Custom stamps…'), 100,
+          scrollable: stripScrollable);
       await tester.tap(find.byTooltip('Custom stamps…'));
       await tester.pumpAndSettle();
       expect(find.byType(PdfStampPickerDialog), findsOneWidget);

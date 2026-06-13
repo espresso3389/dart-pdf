@@ -870,6 +870,11 @@ class PdfInterpreter {
             for (final item in (o[0] as CosArray).items) {
               if (item is CosString) {
                 _showText(item.bytes);
+              } else if (_state.font?.isVertical ?? false) {
+                // Vertical writing: the adjustment moves the pen along y.
+                final shift = -_numOf(item) / 1000 * _state.fontSize;
+                _textMatrix =
+                    PdfMatrix.translation(0, shift).concat(_textMatrix);
               } else {
                 final shift = -_numOf(item) /
                     1000 *
@@ -1514,22 +1519,45 @@ class PdfInterpreter {
     final glyphs = (font.hasOutlines || font.isType3) && emScale != 0
         ? <PdfGlyphPlacement>[]
         : null;
-    var advance = 0.0; // in unscaled text-space units
+    // Vertical writing mode (§9.7.4.3): glyphs stack downward. The pen advances
+    // along y by the vertical displacement, and each glyph is shifted by its
+    // position vector so the column centres on the baseline.
+    final vertical = font.isVertical;
+    final hScale = _state.horizontalScale == 0 ? 1.0 : _state.horizontalScale;
+    var advance = 0.0; // text-space along the writing direction (x or y)
     for (final code in codes) {
       buffer.write(font.charFor(code));
-      glyphs?.add(PdfGlyphPlacement(
-        offset: advance / emScale,
-        outline: font.outlineFor(code),
-      ));
+      if (glyphs != null) {
+        if (vertical) {
+          final v = font.verticalOriginOf(code);
+          glyphs.add(PdfGlyphPlacement(
+            // run.transform scales x by size*Th but the position vector scales
+            // by size only, so divide x back out by Th; y is in em directly.
+            offset: -v.x / hScale,
+            offsetY: size == 0 ? 0 : advance / size - v.y,
+            outline: font.outlineFor(code),
+          ));
+        } else {
+          glyphs.add(PdfGlyphPlacement(
+            offset: emScale == 0 ? 0 : advance / emScale,
+            outline: font.outlineFor(code),
+          ));
+        }
+      }
       if (font.isType3 &&
           _state.renderMode != 3 &&
           _state.renderMode != 7 &&
           size != 0) {
         _drawType3Glyph(font, code, advance);
       }
-      var tx = font.widthOf(code) * size + _state.charSpacing;
-      if (!font.isCid && code == 0x20) tx += _state.wordSpacing;
-      advance += tx * _state.horizontalScale;
+      if (vertical) {
+        // Tc applies along the writing direction; Tw only to single-byte 0x20.
+        advance += font.verticalAdvanceOf(code) * size + _state.charSpacing;
+      } else {
+        var tx = font.widthOf(code) * size + _state.charSpacing;
+        if (!font.isCid && code == 0x20) tx += _state.wordSpacing;
+        advance += tx * _state.horizontalScale;
+      }
     }
 
     if (size != 0 && _contentVisible) {
@@ -1556,7 +1584,7 @@ class PdfInterpreter {
           _appendTransformedPath(
             _textClipSegments,
             outline,
-            PdfMatrix.translation(g.offset, 0).concat(transform),
+            PdfMatrix.translation(g.offset, g.offsetY).concat(transform),
           );
         }
       }
@@ -1609,7 +1637,7 @@ class PdfInterpreter {
           gradient: (embedded ? fillText : doFill)
               ? _gradientOfPattern(pattern)
               : null,
-          width: advance / emScale,
+          width: emScale == 0 ? 0 : advance / emScale,
           fontName: font.baseFont,
           fontSize: size,
           glyphs: glyphs,
@@ -1617,7 +1645,12 @@ class PdfInterpreter {
         ));
       }
     }
-    _textMatrix = PdfMatrix.translation(advance, 0).concat(_textMatrix);
+    // The pen advances along the writing direction: x for horizontal text,
+    // y (downward, advance is negative) for vertical.
+    _textMatrix = (vertical
+            ? PdfMatrix.translation(0, advance)
+            : PdfMatrix.translation(advance, 0))
+        .concat(_textMatrix);
   }
 
   /// Executes a Type3 glyph procedure: a tiny content stream in glyph space,
@@ -1737,7 +1770,7 @@ class PdfInterpreter {
       final outline = g.outline;
       if (outline == null) continue;
       _appendTransformedPath(segments, outline,
-          PdfMatrix.translation(g.offset, 0).concat(transform));
+          PdfMatrix.translation(g.offset, g.offsetY).concat(transform));
     }
     return segments.isEmpty ? null : PdfPath(segments);
   }

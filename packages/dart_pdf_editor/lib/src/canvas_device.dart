@@ -450,8 +450,8 @@ class CanvasPdfDevice implements PdfDevice {
       if (outline == null) continue;
       path.addPath(
         _toUiPath(outline, PdfFillRule.nonzero).transform(
-          _toFloat64(
-              PdfMatrix.translation(glyph.offset, 0).concat(run.transform)),
+          _toFloat64(PdfMatrix.translation(glyph.offset, glyph.offsetY)
+              .concat(run.transform)),
         ),
         Offset.zero,
       );

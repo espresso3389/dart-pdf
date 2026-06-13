@@ -30,10 +30,15 @@ enum PdfBlendMode {
 /// One glyph within a [PdfTextRun]: its outline (when the font is embedded
 /// and parsed) and its pen offset, both in em units.
 class PdfGlyphPlacement {
-  const PdfGlyphPlacement({required this.offset, this.outline});
+  const PdfGlyphPlacement({required this.offset, this.offsetY = 0, this.outline});
 
   /// Horizontal pen position within the run, in em units.
   final double offset;
+
+  /// Vertical pen position within the run, in em units. Non-zero only for
+  /// vertical writing mode (§9.7.4.3), where glyphs stack downward and each
+  /// carries a position-vector offset; 0 for ordinary horizontal text.
+  final double offsetY;
 
   /// Glyph outline in em units (y-up, origin on the baseline), or null when
   /// the glyph is blank or its outline could not be parsed.

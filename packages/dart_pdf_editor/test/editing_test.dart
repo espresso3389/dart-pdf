@@ -705,6 +705,36 @@ void main() {
       await settle(tester);
     });
 
+    testWidgets('Shift-dragging a corner handle keeps the aspect ratio',
+        (tester) async {
+      final (editing, _) = await pumpEditor(tester);
+      editing
+        ..addRectangle(0, const PdfRect(100, 650, 250, 750)) // 150×100 (3:2)
+        ..tool = PdfEditTool.select;
+      await tester.pump();
+      await tester.tapAt(view(175, 700));
+      await settle(tester);
+      expect(editing.selectedAnnotation, isNotNull);
+
+      // hold Shift across a bottom-right corner drag that only pushes the
+      // width out — the aspect lock must grow the height to match
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      const from = Offset(250, 650), to = Offset(330, 650);
+      final gesture = await tester.startGesture(view(from.dx, from.dy));
+      await gesture.moveTo(view((from.dx + to.dx) / 2, from.dy));
+      await gesture.moveTo(view(to.dx, to.dy));
+      await gesture.up();
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pump();
+
+      final rect = editing.selectedAnnotation!.rect;
+      expect(rect.width, greaterThan(150),
+          reason: 'the corner drag widened the box');
+      expect(rect.width / rect.height, closeTo(1.5, 0.05),
+          reason: 'Shift locked the 3:2 aspect, so the height grew too');
+      await settle(tester);
+    });
+
     testWidgets('ctrl+Z undoes, ctrl+shift+Z redoes', (tester) async {
       final (editing, _) = await pumpEditor(tester);
       editing.addRectangle(0, const PdfRect(100, 650, 250, 750));

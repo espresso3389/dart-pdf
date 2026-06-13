@@ -898,7 +898,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         .shift(_rotatePoint(delta, Offset.zero, _resizeAngle) - delta);
   }
 
-  Rect _resizedRect(Rect from, _Handle handle, Offset delta) {
+  Rect _resizedRect(Rect from, _Handle handle, Offset delta,
+      {double? aspectRatio}) {
     final minSize = _minSizeView * _chromeScale;
     var left = from.left, top = from.top;
     var right = from.right, bottom = from.bottom;
@@ -919,6 +920,50 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         top = bottom - minSize;
       } else {
         bottom = top + minSize;
+      }
+    }
+    if (aspectRatio != null && aspectRatio > 0) {
+      var width = right - left;
+      var height = bottom - top;
+      if (handle.dx != 0 && handle.dy != 0) {
+        // corner: lock the off-axis to whichever side the pointer pushed
+        // harder (relative to the original size), then re-anchor at the
+        // fixed corner so the dragged corner tracks the pointer
+        if (width / from.width >= height / from.height) {
+          height = width / aspectRatio;
+        } else {
+          width = height * aspectRatio;
+        }
+        if (height < minSize) {
+          height = minSize;
+          width = height * aspectRatio;
+        }
+        if (width < minSize) {
+          width = minSize;
+          height = width / aspectRatio;
+        }
+        if (handle.dx < 0) {
+          left = right - width;
+        } else {
+          right = left + width;
+        }
+        if (handle.dy < 0) {
+          top = bottom - height;
+        } else {
+          bottom = top + height;
+        }
+      } else if (handle.dy == 0) {
+        // vertical edge: width drives, height follows about the center
+        height = math.max(width / aspectRatio, minSize);
+        final cy = from.center.dy;
+        top = cy - height / 2;
+        bottom = cy + height / 2;
+      } else {
+        // horizontal edge: height drives, width follows about the center
+        width = math.max(height * aspectRatio, minSize);
+        final cx = from.center.dx;
+        left = cx - width / 2;
+        right = cx + width / 2;
       }
     }
     return Rect.fromLTRB(left, top, right, bottom);
@@ -1312,12 +1357,18 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         // a rotated selection's handles move along its own axes, so the
         // pointer delta rotates into the local frame
         final delta = position - _moveStart!;
+        // holding Shift locks the original aspect ratio
+        final aspectRatio = HardwareKeyboard.instance.isShiftPressed &&
+                _resizeFrom!.height > 0
+            ? _resizeFrom!.width / _resizeFrom!.height
+            : null;
         _resizeRect = _anchorResized(_resizedRect(
             _resizeFrom!,
             _resizeHandle!,
             _resizeAngle == 0
                 ? delta
-                : _rotatePoint(delta, Offset.zero, -_resizeAngle)));
+                : _rotatePoint(delta, Offset.zero, -_resizeAngle),
+            aspectRatio: aspectRatio));
       });
     } else if (_moveStart != null) {
       setState(() => _moveCurrent = position);

@@ -177,10 +177,10 @@ class PdfEditorView extends StatefulWidget {
   final Uint8List? bytes;
 
   /// A stable identifier for this document, used to remember its scroll
-  /// position and zoom across sessions (persisted in [preferences]). Null
-  /// derives a key from the bytes; pass a file path or URL when you have
-  /// one. Only used with [bytes] — an external [controller] drives its own
-  /// viewport.
+  /// position and zoom across sessions (persisted in the preferences).
+  /// With [bytes] a key is derived from the content when this is null;
+  /// with an external [controller] (no bytes) pass one explicitly to
+  /// enable the memory — a file path or URL is ideal.
   final String? documentId;
 
   /// An external edit session, for hosts that drive edits
@@ -275,19 +275,20 @@ class _PdfEditorViewState extends State<PdfEditorView> {
 
   PdfEditingPreferences get _prefs => _session.preferences;
 
-  /// A stable key for the open document, or null when an external
-  /// controller drives the document (no [bytes] to remember a position
-  /// for).
-  String? get _documentKey => widget.bytes == null
-      ? null
-      : widget.documentId ?? pdfDocumentKey(widget.bytes!);
+  /// A stable key for the open document, or null when there is nothing to
+  /// key a remembered position on — an external controller with no
+  /// [documentId]. With [bytes] one is derived from the content.
+  String? get _documentKey {
+    if (widget.documentId != null) return widget.documentId;
+    final bytes = widget.bytes;
+    return bytes == null ? null : pdfDocumentKey(bytes);
+  }
 
   @override
   void initState() {
     super.initState();
     _openSession();
-    // remember and restore where the user left this document (only when we
-    // own the session — an external controller drives its own viewport)
+    // remember and restore where the user left this document
     final key = _documentKey;
     if (key != null) {
       _viewportMemory = PdfViewportMemory(

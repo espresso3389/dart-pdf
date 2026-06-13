@@ -934,8 +934,9 @@ class PdfEditingController extends ChangeNotifier {
   }
 
   /// Bakes every page's annotation appearances into its content and
-  /// removes the annotations.
-  void flattenAllAnnotations() => apply((editor) {
+  /// removes the annotations. Returns whether anything was flattened
+  /// (false when no page carried a flattenable annotation).
+  bool flattenAllAnnotations() => apply((editor) {
         for (var i = 0; i < _document.pageCount; i++) {
           editor.flattenAnnotations(i);
         }

@@ -54,7 +54,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | boundingBox_invalid.pdf | 2 | 800x600 | 0.337% |
 | boundingBox_invalid.pdf | 3 | 600x800 | 0.855% |
 | bug1011159.pdf | 1 | 200x50 | 2.660% |
-| bug1065245.pdf | 1 | 596x843 | 2.251% |
+| bug1065245.pdf | 1 | 596x843 | 0.311% |
 | bug1552113.pdf | 1 | 250x50 | 14.832% |
 | bug1782186.pdf | 1 | 842x596 | 0.230% |
 | bug816075.pdf | 1 | 596x842 | 0.000% |
@@ -568,7 +568,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### bug1065245.pdf page 1
 
-596x843; diff: 2.251%
+596x843; diff: 0.311%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

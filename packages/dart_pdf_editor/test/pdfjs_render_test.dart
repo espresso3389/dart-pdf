@@ -3,10 +3,10 @@
 // Every corpus page renders through the real pipeline (interpreter →
 // display list → raster), which is what exercises the image decoders
 // (JBIG2, JPX, CCITT, JPEG flavors, PNG predictors) that the pure-Dart
-// corpus test never touches. There are no baselines here — the pin is
-// that nothing throws and nothing hangs; pixel regressions are the Ghent
-// suite's job. Expectations (passwords, unopenable fuzz files) mirror
-// packages/pdf_graphics/test/pdfjs_corpus_test.dart.
+// corpus test never touches. By default the pin is that nothing throws and
+// nothing hangs; with PDFJS_BASELINE_DIR set, the rendered pages are compared
+// against the checked-in PDF.js reference PNGs. Expectations (passwords,
+// unopenable fuzz files) mirror packages/pdf_graphics/test/pdfjs_corpus_test.dart.
 //
 // For visual review, set PDFJS_RENDER_OUT to write PNGs plus an index.html:
 //   PDFJS_RENDER_OUT=../../test_corpora/pdfjs/_renders \

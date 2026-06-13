@@ -140,4 +140,5 @@ Encrypted files (RC4/AES-128/AES-256, encrypt-on-write), digital
 signature validation, the full shading and blend-mode set, ICC color,
 CCITT/JBIG2/JPEG 2000 images, and lenient parsing of broken real-world
 files, with conformance pinned against the Ghent Output Suite and the
-PDF.js test corpus.
+PDF.js test corpus. Checked-in PDF.js visual comparisons are available at
+[`../../test_corpora/pdfjs/_renders/index.html`](../../test_corpora/pdfjs/_renders/index.html).

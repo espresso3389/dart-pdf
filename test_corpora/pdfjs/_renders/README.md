@@ -115,7 +115,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | issue3371.pdf | 1 | 596x842 | 0.318% | ❌ fail |
 | issue3458.pdf | 1 | 720x540 | 0.192% | ❌ fail |
 | issue3521.pdf | 1 | 596x842 | 0.272% | ❌ fail |
-| issue3566.pdf | 1 | 200x50 | 0.940% | ❌ fail |
+| issue3566.pdf | 1 | 200x50 | 0.000% | ✅ pass |
 | issue3584.pdf | 1 | 200x50 | 0.050% | ✅ pass |
 | issue3928.pdf | 1 | 300x50 | 0.033% | ✅ pass |
 | issue3928.pdf | 2 | 300x50 | 0.020% | ✅ pass |
@@ -215,7 +215,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | xref_command_missing.pdf | 1 | 200x50 | 8.480% | ❌ fail |
 | zerowidthline.pdf | 1 | 596x842 | 0.935% | ❌ fail |
 
-68 of 200 compared pages pass (≤ 0.050% of pixels differing); 132 fail.
+69 of 200 compared pages pass (≤ 0.050% of pixels differing); 131 fail.
 
 ## Visual Comparisons
 
@@ -1061,7 +1061,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### issue3566.pdf page 1
 
-200x50; diff: 0.940%
+200x50; diff: 0.000%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

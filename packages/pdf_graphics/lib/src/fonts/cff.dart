@@ -162,13 +162,13 @@ class CffFont {
     // encoding: code → gid for simple fonts
     final codeToGid = <int, int>{};
     if (!isCid) {
+      final sidToGid = <int, int>{};
+      gidToSid.forEach((gid, sid) => sidToGid[sid] = gid);
       final encodingOffset = _firstInt(top[16]) ?? 0;
       if (encodingOffset > 1) {
-        _parseEncoding(bytes, encodingOffset, codeToGid);
+        _parseEncoding(bytes, encodingOffset, codeToGid, sidToGid);
       } else {
         // standard encoding: codes 32..126 carry SIDs 1..95 in order
-        final sidToGid = <int, int>{};
-        gidToSid.forEach((gid, sid) => sidToGid[sid] = gid);
         for (var code = 32; code <= 126; code++) {
           final gid = sidToGid[code - 31];
           if (gid != null) codeToGid[code] = gid;
@@ -431,10 +431,11 @@ class CffFont {
     return result;
   }
 
-  static void _parseEncoding(
-      Uint8List bytes, int offset, Map<int, int> codeToGid) {
+  static void _parseEncoding(Uint8List bytes, int offset,
+      Map<int, int> codeToGid, Map<int, int> sidToGid) {
     final r = _Reader(bytes)..seek(offset);
-    final format = r.u8() & 0x7F;
+    final raw = r.u8();
+    final format = raw & 0x7F;
     if (format == 0) {
       final count = r.u8();
       for (var gid = 1; gid <= count; gid++) {
@@ -449,6 +450,19 @@ class CffFont {
         for (var k = 0; k <= left; k++) {
           codeToGid[first + k] = gid++;
         }
+      }
+    }
+    // Supplements (high bit of the format byte): extra code → SID mappings,
+    // commonly used for ligatures/accented glyphs that fall outside the base
+    // encoding (e.g. an ff ligature at code 0xAE). Resolve the SID to a gid
+    // through the charset (CFF spec / Adobe TN #5176 §12).
+    if (raw & 0x80 != 0) {
+      final nSups = r.u8();
+      for (var i = 0; i < nSups; i++) {
+        final code = r.u8();
+        final sid = r.u16();
+        final gid = sidToGid[sid];
+        if (gid != null) codeToGid[code] = gid;
       }
     }
   }

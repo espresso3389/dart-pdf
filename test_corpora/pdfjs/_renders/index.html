@@ -1,9 +1,10 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>PDF corpus renders</title>
+<title>PDF.js corpus render comparisons</title>
 <style>
 body{font:14px system-ui,sans-serif;margin:24px;background:#f6f7f8;color:#202124}
-h1{font-size:20px;margin:0 0 16px}
+h1{font-size:20px;margin:0 0 6px}
+p{margin:0 0 16px;color:#5f6368}
 .results{display:flex;flex-direction:column;gap:16px}
 .result{margin:0;padding:12px;background:white;border:1px solid #dadce0;border-radius:6px}
 .meta{margin:0 0 10px;overflow-wrap:anywhere;color:#3c4043}
@@ -13,7 +14,8 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 .missing{border:1px dashed #dadce0;color:#80868b;padding:32px 8px;text-align:center;background:#fafafa}
 @media (max-width: 900px){.shots{grid-template-columns:1fr}}
 </style>
-<h1>PDF corpus renders</h1>
+<h1>PDF.js corpus render comparisons</h1>
+<p>Checked-in visual results: PDF.js baseline, Dart render, and diff.</p>
 <div class="results">
 <figure class="result">
 <figcaption class="meta">90ms_rksj_h_sample.pdf page 1<br>612x792<br>0.168% differing pixels</figcaption>
@@ -24,7 +26,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">ContentStreamCycleType3insideType3.pdf page 1<br>600x840<br>1.047% differing pixels</figcaption>
+<figcaption class="meta">ContentStreamCycleType3insideType3.pdf page 1<br>600x840<br>1.477% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="ContentStreamCycleType3insideType3.pdf.p0.baseline.png"><img src="ContentStreamCycleType3insideType3.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="ContentStreamCycleType3insideType3.pdf.p0.dart.png"><img src="ContentStreamCycleType3insideType3.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -32,7 +34,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">ContentStreamNoCycleType3insideType3.pdf page 1<br>600x840<br>1.178% differing pixels</figcaption>
+<figcaption class="meta">ContentStreamNoCycleType3insideType3.pdf page 1<br>600x840<br>1.602% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="ContentStreamNoCycleType3insideType3.pdf.p0.baseline.png"><img src="ContentStreamNoCycleType3insideType3.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="ContentStreamNoCycleType3insideType3.pdf.p0.dart.png"><img src="ContentStreamNoCycleType3insideType3.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -48,7 +50,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">IndexedCS_negative_and_high.pdf page 1<br>500x100<br>8.800% differing pixels</figcaption>
+<figcaption class="meta">IndexedCS_negative_and_high.pdf page 1<br>500x100<br>9.600% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="IndexedCS_negative_and_high.pdf.p0.baseline.png"><img src="IndexedCS_negative_and_high.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="IndexedCS_negative_and_high.pdf.p0.dart.png"><img src="IndexedCS_negative_and_high.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -96,7 +98,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">SimFang-variant.pdf page 1<br>463x626<br>0.282% differing pixels</figcaption>
+<figcaption class="meta">SimFang-variant.pdf page 1<br>463x626<br>0.285% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="SimFang-variant.pdf.p0.baseline.png"><img src="SimFang-variant.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="SimFang-variant.pdf.p0.dart.png"><img src="SimFang-variant.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -144,7 +146,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">alphatrans.pdf page 1<br>596x842<br>1.032% differing pixels</figcaption>
+<figcaption class="meta">alphatrans.pdf page 1<br>596x842<br>3.792% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="alphatrans.pdf.p0.baseline.png"><img src="alphatrans.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="alphatrans.pdf.p0.dart.png"><img src="alphatrans.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -168,7 +170,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">annotation-line-without-appearance-empty-Rect.pdf page 1<br>650x792<br>0.340% differing pixels</figcaption>
+<figcaption class="meta">annotation-line-without-appearance-empty-Rect.pdf page 1<br>650x792<br>0.562% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="annotation-line-without-appearance-empty-Rect.pdf.p0.baseline.png"><img src="annotation-line-without-appearance-empty-Rect.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="annotation-line-without-appearance-empty-Rect.pdf.p0.dart.png"><img src="annotation-line-without-appearance-empty-Rect.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -600,7 +602,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">devicen.pdf page 1<br>612x792<br>0.000% differing pixels</figcaption>
+<figcaption class="meta">devicen.pdf page 1<br>612x792<br>1.977% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="devicen.pdf.p0.baseline.png"><img src="devicen.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="devicen.pdf.p0.dart.png"><img src="devicen.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -648,7 +650,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">file_url_link.pdf page 1<br>200x50<br>9.770% differing pixels</figcaption>
+<figcaption class="meta">file_url_link.pdf page 1<br>200x50<br>11.470% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="file_url_link.pdf.p0.baseline.png"><img src="file_url_link.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="file_url_link.pdf.p0.dart.png"><img src="file_url_link.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -784,7 +786,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">issue14802.pdf page 1<br>260x50<br>9.246% differing pixels</figcaption>
+<figcaption class="meta">issue14802.pdf page 1<br>260x50<br>9.431% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="issue14802.pdf.p0.baseline.png"><img src="issue14802.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="issue14802.pdf.p0.dart.png"><img src="issue14802.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -968,7 +970,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">issue7115.pdf page 1<br>200x50<br>9.310% differing pixels</figcaption>
+<figcaption class="meta">issue7115.pdf page 1<br>200x50<br>10.250% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="issue7115.pdf.p0.baseline.png"><img src="issue7115.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="issue7115.pdf.p0.dart.png"><img src="issue7115.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -1032,7 +1034,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">knockout_smask.pdf page 1<br>200x160<br>12.500% differing pixels</figcaption>
+<figcaption class="meta">knockout_smask.pdf page 1<br>200x160<br>25.000% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="knockout_smask.pdf.p0.baseline.png"><img src="knockout_smask.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="knockout_smask.pdf.p0.dart.png"><img src="knockout_smask.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -1080,7 +1082,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">mesh_shading_empty.pdf page 1<br>500x250<br>0.795% differing pixels</figcaption>
+<figcaption class="meta">mesh_shading_empty.pdf page 1<br>500x250<br>1.515% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="mesh_shading_empty.pdf.p0.baseline.png"><img src="mesh_shading_empty.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="mesh_shading_empty.pdf.p0.dart.png"><img src="mesh_shading_empty.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -1272,7 +1274,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">radial_gradients.pdf page 1<br>595x842<br>2.969% differing pixels</figcaption>
+<figcaption class="meta">radial_gradients.pdf page 1<br>595x842<br>4.358% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="radial_gradients.pdf.p0.baseline.png"><img src="radial_gradients.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="radial_gradients.pdf.p0.dart.png"><img src="radial_gradients.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -1288,7 +1290,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">radial_gradients.pdf page 3<br>595x842<br>3.070% differing pixels</figcaption>
+<figcaption class="meta">radial_gradients.pdf page 3<br>595x842<br>3.580% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="radial_gradients.pdf.p2.baseline.png"><img src="radial_gradients.pdf.p2.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="radial_gradients.pdf.p2.dart.png"><img src="radial_gradients.pdf.p2.dart.png" loading="lazy"></a></div>
@@ -1296,7 +1298,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">radial_gradients.pdf page 4<br>595x842<br>9.252% differing pixels</figcaption>
+<figcaption class="meta">radial_gradients.pdf page 4<br>595x842<br>9.538% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="radial_gradients.pdf.p3.baseline.png"><img src="radial_gradients.pdf.p3.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="radial_gradients.pdf.p3.dart.png"><img src="radial_gradients.pdf.p3.dart.png" loading="lazy"></a></div>
@@ -1304,7 +1306,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">radial_gradients.pdf page 5<br>595x842<br>9.275% differing pixels</figcaption>
+<figcaption class="meta">radial_gradients.pdf page 5<br>595x842<br>9.791% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="radial_gradients.pdf.p4.baseline.png"><img src="radial_gradients.pdf.p4.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="radial_gradients.pdf.p4.dart.png"><img src="radial_gradients.pdf.p4.dart.png" loading="lazy"></a></div>
@@ -1328,7 +1330,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">recursiveCompositGlyf.pdf page 1<br>612x792<br>0.000% differing pixels</figcaption>
+<figcaption class="meta">recursiveCompositGlyf.pdf page 1<br>612x792<br>0.926% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="recursiveCompositGlyf.pdf.p0.baseline.png"><img src="recursiveCompositGlyf.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="recursiveCompositGlyf.pdf.p0.dart.png"><img src="recursiveCompositGlyf.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -1376,7 +1378,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">shading_extend.pdf page 1<br>596x842<br>2.098% differing pixels</figcaption>
+<figcaption class="meta">shading_extend.pdf page 1<br>596x842<br>6.151% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="shading_extend.pdf.p0.baseline.png"><img src="shading_extend.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="shading_extend.pdf.p0.dart.png"><img src="shading_extend.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -1496,6 +1498,14 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
+<figcaption class="meta">standard_fonts.pdf page 6<br>596x842</figcaption>
+<div class="shots">
+<div><div class="shot-label">PDF.js baseline</div><div class="missing">missing</div></div>
+<div><div class="shot-label">Dart render</div><a href="standard_fonts.pdf.p5.dart.png"><img src="standard_fonts.pdf.p5.dart.png" loading="lazy"></a></div>
+<div><div class="shot-label">Diff</div><div class="missing">missing</div></div>
+</div>
+</figure>
+<figure class="result">
 <figcaption class="meta">tensor-allflags-withfunction.pdf page 1<br>612x792<br>0.477% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="tensor-allflags-withfunction.pdf.p0.baseline.png"><img src="tensor-allflags-withfunction.pdf.p0.baseline.png" loading="lazy"></a></div>
@@ -1536,7 +1546,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">tiling-pattern-large-steps.pdf page 1<br>4000x400<br>13.282% differing pixels</figcaption>
+<figcaption class="meta">tiling-pattern-large-steps.pdf page 1<br>4000x400<br>85.901% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="tiling-pattern-large-steps.pdf.p0.baseline.png"><img src="tiling-pattern-large-steps.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="tiling-pattern-large-steps.pdf.p0.dart.png"><img src="tiling-pattern-large-steps.pdf.p0.dart.png" loading="lazy"></a></div>
@@ -1616,7 +1626,7 @@ img{display:block;max-width:100%;height:auto;background:white;border:1px solid #
 </div>
 </figure>
 <figure class="result">
-<figcaption class="meta">zerowidthline.pdf page 1<br>596x842<br>0.935% differing pixels</figcaption>
+<figcaption class="meta">zerowidthline.pdf page 1<br>596x842<br>1.629% differing pixels</figcaption>
 <div class="shots">
 <div><div class="shot-label">PDF.js baseline</div><a href="zerowidthline.pdf.p0.baseline.png"><img src="zerowidthline.pdf.p0.baseline.png" loading="lazy"></a></div>
 <div><div class="shot-label">Dart render</div><a href="zerowidthline.pdf.p0.dart.png"><img src="zerowidthline.pdf.p0.dart.png" loading="lazy"></a></div>

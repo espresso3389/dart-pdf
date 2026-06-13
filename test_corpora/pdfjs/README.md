@@ -25,7 +25,12 @@ Checked-in visual artifacts:
 - [`_baselines/`](_baselines/) — PDF.js reference PNGs generated from this
   corpus.
 - [`_renders/README.md`](_renders/README.md) — GitHub-rendered side-by-side
-  visual review gallery with PDF.js baseline, Dart render, and diff images.
+  visual review gallery with PDF.js baseline, Dart render, and diff images,
+  plus a summary table of per-page diff percentages and pass/fail results.
+  As of the last regeneration,
+  <!-- render-summary:start -->**61 of 200 compared pages pass**<!-- render-summary:end -->
+  (≤ 0.05% of pixels differing from the PDF.js baseline); see that file for
+  the per-file breakdown.
 - Rebuild only the gallery index after adding/removing PNGs with
   `fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart`
   from the repo root.

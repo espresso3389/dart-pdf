@@ -276,7 +276,12 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
     // strip drops the side resize grip; the tile column keeps its preferred
     // width, centered in the wider sheet rather than stretched
     final showGrip = widget.resizable && !widget.bottomSheet;
-    final list = Material(
+    // [inset] centers the tile column inside a full-width parent: in a
+    // bottom sheet the list fills the whole sheet (so a drag anywhere in
+    // it scrolls — not just over the narrow tile column) and the inset is
+    // baked into the list's own horizontal padding, which keeps the
+    // scroll viewport full-width while the tiles stay centered.
+    Widget buildList(double inset) => Material(
       color: Theme.of(context).colorScheme.surfaceContainerLow,
       // only document changes rebuild the list — viewer scrolling
       // repaints the per-tile indicators alone
@@ -292,7 +297,8 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
             if (widget.onPickPdfToInsert != null ||
                 widget.onExportPages != null)
               Padding(
-                padding: EdgeInsets.fromLTRB(8, 2, _extraRightPadding, 0),
+                padding:
+                    EdgeInsets.fromLTRB(8 + inset, 2, _extraRightPadding + inset, 0),
                 child: Row(
                   children: [
                     Expanded(
@@ -316,7 +322,8 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
             // navigation cursor — the per-tile delete handles it)
             if (controller.selectedPageCount > 1)
               Padding(
-                padding: EdgeInsets.fromLTRB(8, 2, _extraRightPadding, 0),
+                padding:
+                    EdgeInsets.fromLTRB(8 + inset, 2, _extraRightPadding + inset, 0),
                 child: Row(
                   children: [
                     Expanded(
@@ -365,7 +372,8 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
                 child: ReorderableListView.builder(
                   scrollController: _scroll,
                   buildDefaultDragHandles: false,
-                  padding: EdgeInsets.fromLTRB(0, 8, _extraRightPadding, 8),
+                  padding:
+                      EdgeInsets.fromLTRB(inset, 8, _extraRightPadding + inset, 8),
                   itemCount: controller.document.pageCount,
                   onReorderItem: controller.movePage,
                   itemBuilder: (context, index) {
@@ -393,7 +401,8 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
             // is editable (a read-only strip is purely navigational)
             if (widget.allowPageEditing)
               Padding(
-                padding: EdgeInsets.fromLTRB(4, 2, _extraRightPadding, 4),
+                padding:
+                    EdgeInsets.fromLTRB(4 + inset, 2, _extraRightPadding + inset, 4),
                 child: TextButton.icon(
                   key: const ValueKey('pdf-thumbnail-add-page'),
                   icon: const Icon(Icons.add, size: 16),
@@ -416,20 +425,24 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
       thumbKey: const ValueKey('pdf-thumbnail-scrollbar-thumb'),
     );
 
-    // a bottom sheet spans the full width: keep the tile column at its
-    // preferred width, centered, but pin the scrollbar to the sheet's
-    // right edge rather than the centered column's
+    // a bottom sheet spans the full width: the list fills it so a drag
+    // anywhere in the sheet scrolls (not just over the narrow tile
+    // column), the column stays centered via the list's own inset, and
+    // the scrollbar pins to the sheet's right edge over the margin
     if (widget.bottomSheet) {
-      return Stack(children: [
-        Center(child: SizedBox(width: width, child: list)),
-        Positioned(top: 0, bottom: 0, right: 0, child: scrollbar),
-      ]);
+      return LayoutBuilder(builder: (context, constraints) {
+        final inset = math.max(0.0, (constraints.maxWidth - width) / 2);
+        return Stack(children: [
+          Positioned.fill(child: buildList(inset)),
+          Positioned(top: 0, bottom: 0, right: 0, child: scrollbar),
+        ]);
+      });
     }
 
     return SizedBox(
       width: width,
       child: Stack(children: [
-        Positioned.fill(child: list),
+        Positioned.fill(child: buildList(0)),
         // stepped off the resize grip when the grip rides the same
         // (right) edge
         Positioned(

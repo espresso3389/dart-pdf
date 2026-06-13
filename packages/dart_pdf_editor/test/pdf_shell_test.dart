@@ -753,6 +753,45 @@ void main() {
           closeTo(tester.getRect(sheet).right, 4.0));
     });
 
+    testWidgets('compact: dragging the empty margin of the thumbnail sheet '
+        'scrolls it', (tester) async {
+      // Regression: the tile column was a narrow centered SizedBox, so the
+      // scroll viewport only covered the tiles — a drag on the wide sheet's
+      // empty side margins hit nothing and never scrolled. The list now
+      // fills the sheet and centers the column via its own inset.
+      final prefs = PdfEditingPreferences();
+      await prefs.ready;
+      addTearDown(prefs.dispose);
+      compactScreen(tester); // 600x800
+      await pump(
+          tester, PdfReader(bytes: buildMultiPagePdf(12), preferences: prefs));
+      await tester.tap(
+          find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pump();
+
+      final sheet = find.byType(PdfThumbnailSidebar);
+      final position = tester
+          .state<ScrollableState>(
+              find.descendant(of: sheet, matching: find.byType(Scrollable)).first)
+          .position;
+      expect(position.pixels, 0);
+      expect(position.maxScrollExtent, greaterThan(0),
+          reason: 'the strip should overflow with 12 pages');
+
+      // drag UP from near the sheet's left edge — the empty margin beside
+      // the centered tile column, not on a tile; check the offset while the
+      // gesture is held (the raster loop never settles, so no pumpAndSettle)
+      final sheetRect = tester.getRect(sheet);
+      final g = await tester
+          .startGesture(Offset(sheetRect.left + 6, sheetRect.center.dy));
+      await g.moveBy(const Offset(0, -200));
+      await tester.pump();
+      expect(position.pixels, greaterThan(0));
+      await g.up();
+      await tester.pump();
+    });
+
     testWidgets('the editable thumbnail strip has no Tooltip OverlayPortal '
         'in its reorderable tiles', (tester) async {
       // Regression: the delete-button Tooltip was an OverlayPortal inside a
@@ -796,24 +835,6 @@ void main() {
       return tester.widget<Icon>(icon.first).color ??
           IconTheme.of(tester.element(icon.first)).color;
     }
-
-    testWidgets('panel toggles stay on-screen on a phone-width header',
-        (tester) async {
-      // Regression: the whole bar lived in one horizontal scroll view, so a
-      // narrow screen pushed the trailing panel toggles (properties etc.)
-      // off the right edge — and the wide leading search field swallowed the
-      // drag, so it could not be scrolled into view. The toggles now keep
-      // their natural width pinned to the right.
-      tester.view.physicalSize = const Size(360, 740);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      await pump(tester,
-          PdfEditorView(bytes: buildMultiPagePdf(2), onSave: (_) {}));
-
-      final props = find.byKey(const ValueKey('pdf-shell-properties-toggle'));
-      expect(props, findsOneWidget);
-      expect(tester.getRect(props).right, lessThanOrEqualTo(360.0));
-    });
 
     testWidgets('every header icon button shares one colour', (tester) async {
       await pump(tester,

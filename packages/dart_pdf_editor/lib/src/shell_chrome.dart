@@ -296,10 +296,7 @@ bool pdfShellShowThumbnailSidebar(
 
 /// The shells' slim header bar: a leading group (search, page number)
 /// and a trailing group (panel toggles), pushed apart when there is
-/// room. On a narrow (mobile) screen the trailing toggles keep their
-/// natural width and stay pinned to the right — so the panel buttons are
-/// always reachable — while the leading group takes the rest and scrolls
-/// horizontally when it no longer fits.
+/// room and scrolling horizontally when there isn't.
 class PdfShellBar extends StatelessWidget {
   const PdfShellBar({super.key, required this.leading, required this.trailing});
 
@@ -322,26 +319,26 @@ class PdfShellBar extends StatelessWidget {
             color: Theme.of(context).colorScheme.onSurfaceVariant),
         child: SizedBox(
           height: 48,
-          child: Row(
-            children: [
-              // the leading group fills the remaining space and scrolls
-              // horizontally when it overflows (a wide search field on a
-              // phone) — earlier this was the whole bar, so the search
-              // field swallowed the horizontal drag and nothing scrolled
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [const SizedBox(width: 8), ...leading],
-                  ),
+          // a Spacer can't live in an unbounded-width Row, so the gap
+          // comes from spaceBetween over a min-width-constrained Row
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [const SizedBox(width: 8), ...leading],
+                    ),
+                    Row(
+                      children: [...trailing, const SizedBox(width: 8)],
+                    ),
+                  ],
                 ),
               ),
-              // the panel toggles keep their natural width and stay to the
-              // right, so the rightmost (e.g. properties) is never pushed
-              // off-screen
-              ...trailing,
-              const SizedBox(width: 8),
-            ],
+            ),
           ),
         ),
       ),

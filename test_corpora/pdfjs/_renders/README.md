@@ -50,9 +50,9 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | bitmap-template2-tpgdon.pdf | 1 | 399x400 | 0.000% |
 | bitmap-template3-customat.pdf | 1 | 399x400 | 0.000% |
 | blendmode.pdf | 1 | 596x842 | 4.931% |
-| boundingBox_invalid.pdf | 1 | 1x1 | n/a |
-| boundingBox_invalid.pdf | 2 | 1x1 | n/a |
-| boundingBox_invalid.pdf | 3 | 1x1 | n/a |
+| boundingBox_invalid.pdf | 1 | 612x792 | 0.359% |
+| boundingBox_invalid.pdf | 2 | 800x600 | 0.337% |
+| boundingBox_invalid.pdf | 3 | 600x800 | 0.855% |
 | bug1011159.pdf | 1 | 200x50 | 2.660% |
 | bug1065245.pdf | 1 | 596x843 | 2.251% |
 | bug1552113.pdf | 1 | 250x50 | 14.832% |
@@ -536,27 +536,27 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### boundingBox_invalid.pdf page 1
 
-1x1; diff: n/a
+612x792; diff: 0.359%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
-| [![PDF.js baseline](boundingBox_invalid.pdf.p0.baseline.png)](boundingBox_invalid.pdf.p0.baseline.png) | [![Dart render](boundingBox_invalid.pdf.p0.dart.png)](boundingBox_invalid.pdf.p0.dart.png) | missing |
+| [![PDF.js baseline](boundingBox_invalid.pdf.p0.baseline.png)](boundingBox_invalid.pdf.p0.baseline.png) | [![Dart render](boundingBox_invalid.pdf.p0.dart.png)](boundingBox_invalid.pdf.p0.dart.png) | [![Diff](boundingBox_invalid.pdf.p0.diff.png)](boundingBox_invalid.pdf.p0.diff.png) |
 
 ### boundingBox_invalid.pdf page 2
 
-1x1; diff: n/a
+800x600; diff: 0.337%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
-| [![PDF.js baseline](boundingBox_invalid.pdf.p1.baseline.png)](boundingBox_invalid.pdf.p1.baseline.png) | [![Dart render](boundingBox_invalid.pdf.p1.dart.png)](boundingBox_invalid.pdf.p1.dart.png) | missing |
+| [![PDF.js baseline](boundingBox_invalid.pdf.p1.baseline.png)](boundingBox_invalid.pdf.p1.baseline.png) | [![Dart render](boundingBox_invalid.pdf.p1.dart.png)](boundingBox_invalid.pdf.p1.dart.png) | [![Diff](boundingBox_invalid.pdf.p1.diff.png)](boundingBox_invalid.pdf.p1.diff.png) |
 
 ### boundingBox_invalid.pdf page 3
 
-1x1; diff: n/a
+600x800; diff: 0.855%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
-| [![PDF.js baseline](boundingBox_invalid.pdf.p2.baseline.png)](boundingBox_invalid.pdf.p2.baseline.png) | [![Dart render](boundingBox_invalid.pdf.p2.dart.png)](boundingBox_invalid.pdf.p2.dart.png) | missing |
+| [![PDF.js baseline](boundingBox_invalid.pdf.p2.baseline.png)](boundingBox_invalid.pdf.p2.baseline.png) | [![Dart render](boundingBox_invalid.pdf.p2.dart.png)](boundingBox_invalid.pdf.p2.dart.png) | [![Diff](boundingBox_invalid.pdf.p2.diff.png)](boundingBox_invalid.pdf.p2.diff.png) |
 
 ### bug1011159.pdf page 1
 

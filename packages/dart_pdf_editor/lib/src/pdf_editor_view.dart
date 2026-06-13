@@ -399,9 +399,17 @@ class _PdfEditorViewState extends State<PdfEditorView> {
           // sheets instead of docking to the side and crowding the page
           final useSheets = pdfShellUseBottomSheets(constraints);
 
+          // The docked and bottom-sheet variants carry DISTINCT keys: when
+          // the responsive breakpoint flips, the panel must be disposed and
+          // remounted, never reparented across the docked<->sheet boundary.
+          // Reparenting reactivates any OverlayPortal in the subtree (the
+          // thumbnail tiles' delete-button Tooltips) during the enclosing
+          // LayoutBuilder's layout pass, which trips a RenderObject mutation
+          // assertion. A fresh mount has no such overlay reactivation.
           PdfThumbnailSidebar thumbnails({required bool bottomSheet}) =>
               PdfThumbnailSidebar(
-                key: const ValueKey('pdf-shell-thumbnails'),
+                key: ValueKey(
+                    'pdf-shell-thumbnails-${bottomSheet ? 'sheet' : 'docked'}'),
                 controller: session,
                 viewerController: _viewer,
                 pageColor: pageColor,
@@ -411,21 +419,24 @@ class _PdfEditorViewState extends State<PdfEditorView> {
               );
           PdfSearchResultsPanel searchResults({required bool bottomSheet}) =>
               PdfSearchResultsPanel(
-                key: const ValueKey('pdf-shell-search-panel'),
+                key: ValueKey(
+                    'pdf-shell-search-panel-${bottomSheet ? 'sheet' : 'docked'}'),
                 controller: _viewer,
                 preferences: prefs,
                 bottomSheet: bottomSheet,
               );
           PdfAnnotationSidebar annotations({required bool bottomSheet}) =>
               PdfAnnotationSidebar(
-                key: const ValueKey('pdf-shell-annotations'),
+                key: ValueKey(
+                    'pdf-shell-annotations-${bottomSheet ? 'sheet' : 'docked'}'),
                 controller: session,
                 viewerController: _viewer,
                 bottomSheet: bottomSheet,
               );
           PdfAnnotationPropertiesPanel properties({required bool bottomSheet}) =>
               PdfAnnotationPropertiesPanel(
-                key: const ValueKey('pdf-shell-properties'),
+                key: ValueKey(
+                    'pdf-shell-properties-${bottomSheet ? 'sheet' : 'docked'}'),
                 controller: session,
                 showAuthor: features.authorEditable,
                 bottomSheet: bottomSheet,

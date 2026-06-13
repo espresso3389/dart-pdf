@@ -231,9 +231,14 @@ class _PdfReaderState extends State<PdfReader> {
           final showThumbnailsPanel =
               features.thumbnails && showThumbnails && !prefs.showReflowView;
 
+          // Distinct keys for docked vs sheet so the strip is remounted, not
+          // reparented, when the breakpoint flips — reparenting reactivates
+          // the tiles' Tooltip overlays mid-layout (a RenderObject mutation
+          // assertion). See the matching note in pdf_editor_view.dart.
           PdfThumbnailSidebar thumbnails({required bool bottomSheet}) =>
               PdfThumbnailSidebar(
-                key: const ValueKey('pdf-shell-thumbnails'),
+                key: ValueKey(
+                    'pdf-shell-thumbnails-${bottomSheet ? 'sheet' : 'docked'}'),
                 controller: _session,
                 viewerController: _viewer,
                 pageColor: pageColor,

@@ -652,5 +652,44 @@ void main() {
       expect(find.byKey(const ValueKey('pdf-thumbnail-resize-grip')),
           findsNothing);
     });
+
+    testWidgets('crossing the breakpoint with the thumbnail strip shown '
+        'remounts it instead of reparenting (no overlay mutation)',
+        (tester) async {
+      // Regression: the docked and sheet variants once shared a key, so
+      // flipping the responsive breakpoint reparented the strip — its
+      // reorderable tiles' delete-button Tooltips reactivated their
+      // OverlayPortals during the shell LayoutBuilder's layout pass and
+      // tripped "A RenderObject was mutated ... performLayout".
+      final prefs = PdfEditingPreferences();
+      await prefs.ready;
+      addTearDown(prefs.dispose);
+
+      // start wide with the strip docked and visible
+      await pump(tester,
+          PdfEditorView(bytes: buildMultiPagePdf(3), preferences: prefs));
+      if (find
+          .byKey(const ValueKey('pdf-thumbnail-resize-grip'))
+          .evaluate()
+          .isEmpty) {
+        await tester.tap(
+            find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
+            kind: PointerDeviceKind.mouse);
+        await tester.pump();
+      }
+      expect(find.byKey(const ValueKey('pdf-thumbnail-resize-grip')),
+          findsOneWidget);
+
+      // shrink past the compact width: the strip becomes a bottom sheet
+      tester.view.physicalSize = const Size(600, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(PdfThumbnailSidebar), findsOneWidget);
+      expect(find.byKey(const ValueKey('pdf-shell-thumbnails-sheet-close')),
+          findsOneWidget);
+    });
   });
 }

@@ -137,9 +137,9 @@ class PdfEditorFeatures {
 /// The widget owns the edit session (undo/redo, revisions). Hosts that
 /// need programmatic access pass their own [controller] instead of
 /// [bytes] — exactly one of the two must be given. [onSave] receives
-/// the current revision's bytes from the toolbar's save button;
-/// [onDocumentChanged] fires after every revision (edit, undo, redo)
-/// for hosts that autosave.
+/// the current revision's bytes from the toolbar's save button or the
+/// ⌘S / Ctrl+S shortcut; [onDocumentChanged] fires after every revision
+/// (edit, undo, redo) for hosts that autosave.
 ///
 /// The widget is a plain body: give it bounded space (a [Scaffold]
 /// body, an [Expanded]...). Swapping [bytes] for a different document
@@ -191,8 +191,9 @@ class PdfEditorView extends StatefulWidget {
   final PdfEditorFeatures features;
 
   /// Receives the current revision's bytes when the toolbar's save
-  /// button is pressed; the button is hidden when null. Writing the
-  /// bytes somewhere is the app's job.
+  /// button is pressed or ⌘S / Ctrl+S is hit; the button (and the
+  /// shortcut) are off when null. Writing the bytes somewhere is the
+  /// app's job.
   final void Function(Uint8List bytes)? onSave;
 
   /// Called after every revision — edits, undo, redo — with the new
@@ -321,6 +322,8 @@ class _PdfEditorViewState extends State<PdfEditorView> {
     _searchField.selection =
         TextSelection(baseOffset: 0, extentOffset: _searchField.text.length);
   }
+
+  void _save() => widget.onSave?.call(_session.bytes);
 
   Future<void> _promptAuthor() async {
     final session = _session;
@@ -488,16 +491,22 @@ class _PdfEditorViewState extends State<PdfEditorView> {
     if (widget.viewerTheme != null) {
       body = PdfViewerTheme(data: widget.viewerTheme!, child: body);
     }
-    if (features.headerBar && features.search) {
-      body = CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
-              _focusSearch,
-          const SingleActivator(LogicalKeyboardKey.keyF, control: true):
-              _focusSearch,
-        },
-        child: body,
-      );
+    final bindings = <ShortcutActivator, VoidCallback>{
+      if (features.headerBar && features.search) ...{
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+            _focusSearch,
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            _focusSearch,
+      },
+      // ⌘S / Ctrl+S saves through the host's [onSave], the same path the
+      // toolbar's save button takes.
+      if (widget.onSave != null) ...{
+        const SingleActivator(LogicalKeyboardKey.keyS, meta: true): _save,
+        const SingleActivator(LogicalKeyboardKey.keyS, control: true): _save,
+      },
+    };
+    if (bindings.isNotEmpty) {
+      body = CallbackShortcuts(bindings: bindings, child: body);
     }
     return body;
   }

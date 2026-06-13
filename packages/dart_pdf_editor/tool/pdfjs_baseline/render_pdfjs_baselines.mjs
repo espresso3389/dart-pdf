@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createCanvas,
   DOMMatrix,
+  GlobalFonts,
   ImageData,
   Path2D,
 } from '@napi-rs/canvas';
@@ -36,6 +37,22 @@ const skipped = new Set([
   'poppler-937-0-fuzzed.pdf',
   'print_protection.pdf',
 ]);
+
+const cjkSerifFonts = [
+  '/System/Library/Fonts/Supplemental/Songti.ttc',
+  '/System/Library/Fonts/Songti.ttc',
+  '/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc',
+  '/usr/share/fonts/opentype/noto/NotoSerifCJKsc-Regular.otf',
+  '/usr/share/fonts/truetype/arphic/uming.ttc',
+];
+
+const cjkSansFonts = [
+  '/System/Library/Fonts/STHeiti Medium.ttc',
+  '/System/Library/Fonts/STHeiti Light.ttc',
+  '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+  '/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf',
+  '/usr/share/fonts/truetype/arphic/ukai.ttc',
+];
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageDir = path.resolve(scriptDir, '../..');
@@ -70,13 +87,27 @@ const files = (await readdir(corpusDir, { withFileTypes: true }))
 let rendered = 0;
 const failures = [];
 for (const name of files) {
+  const fontKeys = [];
   try {
     const bytes = await readFile(path.join(corpusDir, name));
+    if (needsCjkFallback(bytes)) {
+      const keys = registerCjkFallbacks();
+      if (keys.length === 0) {
+        console.warn(
+          `Warning: no local CJK fonts found; ${name} may render missing glyph boxes.`,
+        );
+      } else {
+        fontKeys.push(...keys);
+      }
+    }
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(bytes),
       password: passwords.get(name) ?? '',
       useSystemFonts: true,
-      disableFontFace: false,
+      // In Node, @napi-rs/canvas does not load PDF.js-created FontFace
+      // instances like a browser does. Force PDF.js to draw embedded glyph
+      // outlines itself so CID subset fonts and CIDToGIDMap entries are used.
+      disableFontFace: true,
       cMapUrl: resourcePath('cmaps'),
       cMapPacked: true,
       iccUrl: resourcePath('iccs'),
@@ -106,6 +137,10 @@ for (const name of files) {
   } catch (error) {
     failures.push(`${name}: ${error?.message ?? error}`);
     console.warn(`FAILED ${name}: ${error?.message ?? error}`);
+  } finally {
+    for (const key of fontKeys) {
+      GlobalFonts.remove(key);
+    }
   }
 }
 
@@ -141,6 +176,30 @@ function positiveInteger(value, fallback) {
 function positiveNumber(value, fallback) {
   const parsed = Number.parseFloat(value ?? '');
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function needsCjkFallback(bytes) {
+  const text = Buffer.from(bytes).toString('latin1');
+  return (
+    /\/BaseFont \/(?:#[0-9A-Fa-f]{2}){2,}(?:[_-]GB2312)?/.test(text) ||
+    /\/FontName <(?:[0-9A-Fa-f]{4}){2,}>/.test(text)
+  );
+}
+
+function registerCjkFallbacks() {
+  return [
+    registerFirstAvailableFont(cjkSerifFonts, 'serif'),
+    registerFirstAvailableFont(cjkSansFonts, 'sans-serif'),
+  ].filter((key) => key != null);
+}
+
+function registerFirstAvailableFont(fontPaths, alias) {
+  for (const fontPath of fontPaths) {
+    if (!existsSync(fontPath)) continue;
+    const key = GlobalFonts.registerFromPath(fontPath, alias);
+    if (key != null) return key;
+  }
+  return null;
 }
 
 function safeName(name) {

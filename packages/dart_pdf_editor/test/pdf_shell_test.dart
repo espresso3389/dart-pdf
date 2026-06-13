@@ -614,6 +614,43 @@ void main() {
       expect(prefs.showPropertiesPanel, isFalse);
     });
 
+    testWidgets('compact: dragging the sheet handle up resizes it (to 90%)',
+        (tester) async {
+      final prefs = PdfEditingPreferences();
+      addTearDown(prefs.dispose);
+      compactScreen(tester); // 600x800
+      await pump(tester,
+          PdfEditorView(bytes: buildMultiPagePdf(2), preferences: prefs));
+      await tester.tap(
+          find.byKey(const ValueKey('pdf-shell-properties-toggle')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pump();
+
+      // the panel fills the sheet below its header, so its height tracks the
+      // sheet's
+      final panel = find.byType(PdfAnnotationPropertiesPanel);
+      final before = tester.getSize(panel).height;
+
+      // drag the handle (just above the panel) up by a lot; the sheet grows,
+      // capped at 90% of the content area
+      final panelTop = tester.getRect(panel).top;
+      final g = await tester
+          .startGesture(Offset(tester.getCenter(panel).dx, panelTop - 20));
+      await g.moveBy(const Offset(0, -1000));
+      await tester.pump();
+      await g.up();
+      await tester.pump();
+
+      final after = tester.getSize(panel).height;
+      // grew past the old 0.55 cap, toward the 0.9 cap (800px content area,
+      // no app bar in this harness)
+      expect(before, lessThan(800 * 0.55));
+      expect(after, greaterThan(800 * 0.6));
+      expect(after, lessThanOrEqualTo(800 * 0.9 + 1));
+      // a resize is not a dismiss — the panel is still open
+      expect(panel, findsOneWidget);
+    });
+
     testWidgets('wide: panels dock to the side, not a bottom sheet',
         (tester) async {
       // the default 800x600 test surface is above the compact width
@@ -651,45 +688,93 @@ void main() {
       // the strip's side resize grip is gone in sheet form
       expect(find.byKey(const ValueKey('pdf-thumbnail-resize-grip')),
           findsNothing);
+
+      // the scrollbar sits at the sheet's right edge, not the centered
+      // tile column's right edge
+      final sheet = find.byType(PdfThumbnailSidebar);
+      final bar = find.byKey(const ValueKey('pdf-thumbnail-scrollbar-thumb'));
+      expect(bar, findsOneWidget);
+      expect(tester.getRect(bar).right,
+          closeTo(tester.getRect(sheet).right, 4.0));
     });
 
-    testWidgets('crossing the breakpoint with the thumbnail strip shown '
-        'remounts it instead of reparenting (no overlay mutation)',
-        (tester) async {
-      // Regression: the docked and sheet variants once shared a key, so
-      // flipping the responsive breakpoint reparented the strip — its
-      // reorderable tiles' delete-button Tooltips reactivated their
-      // OverlayPortals during the shell LayoutBuilder's layout pass and
-      // tripped "A RenderObject was mutated ... performLayout".
+    testWidgets('the editable thumbnail strip has no Tooltip OverlayPortal '
+        'in its reorderable tiles', (tester) async {
+      // Regression: the delete-button Tooltip was an OverlayPortal inside a
+      // ReorderableListView item; reactivating the item during a layout
+      // pass (the strip's bottom-sheet LayoutBuilder, or a reorder) mutated
+      // the overlay's RenderObject mid-layout and tripped "A RenderObject
+      // was mutated ... performLayout". The button is now Semantics-labelled
+      // instead. Guard the tile against any Tooltip reappearing.
       final prefs = PdfEditingPreferences();
       await prefs.ready;
       addTearDown(prefs.dispose);
+      prefs.showThumbnailSidebar = true;
 
-      // start wide with the strip docked and visible
+      // compact, so the strip is a bottom sheet (its LayoutBuilder is the
+      // layout-phase context that made the OverlayPortal mutation fatal)
+      // the explicit pref keeps the strip shown on compact (as a sheet)
+      compactScreen(tester);
       await pump(tester,
           PdfEditorView(bytes: buildMultiPagePdf(3), preferences: prefs));
-      if (find
-          .byKey(const ValueKey('pdf-thumbnail-resize-grip'))
-          .evaluate()
-          .isEmpty) {
-        await tester.tap(
-            find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
-            kind: PointerDeviceKind.mouse);
-        await tester.pump();
-      }
-      expect(find.byKey(const ValueKey('pdf-thumbnail-resize-grip')),
-          findsOneWidget);
 
-      // shrink past the compact width: the strip becomes a bottom sheet
-      tester.view.physicalSize = const Size(600, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.reset);
-      await tester.pump();
-
-      expect(tester.takeException(), isNull);
       expect(find.byType(PdfThumbnailSidebar), findsOneWidget);
       expect(find.byKey(const ValueKey('pdf-shell-thumbnails-sheet-close')),
           findsOneWidget);
+      // the editable delete buttons are present...
+      expect(find.widgetWithIcon(IconButton, Icons.delete_outline),
+          findsWidgets);
+      // ...but carry no Tooltip (no OverlayPortal in the reorderable items)
+      expect(
+          find.descendant(
+            of: find.byType(ReorderableListView),
+            matching: find.byType(Tooltip),
+          ),
+          findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('shell header bar', () {
+    Color? iconColorOf(WidgetTester tester, Finder button) {
+      final icon = find.descendant(of: button, matching: find.byType(Icon));
+      return tester.widget<Icon>(icon.first).color ??
+          IconTheme.of(tester.element(icon.first)).color;
+    }
+
+    testWidgets('panel toggles stay on-screen on a phone-width header',
+        (tester) async {
+      // Regression: the whole bar lived in one horizontal scroll view, so a
+      // narrow screen pushed the trailing panel toggles (properties etc.)
+      // off the right edge — and the wide leading search field swallowed the
+      // drag, so it could not be scrolled into view. The toggles now keep
+      // their natural width pinned to the right.
+      tester.view.physicalSize = const Size(360, 740);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await pump(tester,
+          PdfEditorView(bytes: buildMultiPagePdf(2), onSave: (_) {}));
+
+      final props = find.byKey(const ValueKey('pdf-shell-properties-toggle'));
+      expect(props, findsOneWidget);
+      expect(tester.getRect(props).right, lessThanOrEqualTo(360.0));
+    });
+
+    testWidgets('every header icon button shares one colour', (tester) async {
+      await pump(tester,
+          PdfEditorView(bytes: buildMultiPagePdf(2), onSave: (_) {}));
+      // the view-options PopupMenuButton used to render black87 while the
+      // IconButtons rendered onSurfaceVariant
+      final expected = iconColorOf(
+          tester, find.byKey(const ValueKey('pdf-shell-save')));
+      for (final key in const [
+        'pdf-shell-author',
+        'pdf-shell-view-options',
+        'pdf-shell-annotations-toggle',
+      ]) {
+        expect(iconColorOf(tester, find.byKey(ValueKey(key))), expected,
+            reason: '$key icon colour should match the others');
+      }
     });
   });
 }

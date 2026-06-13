@@ -253,89 +253,97 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
     // strip drops the side resize grip; the tile column keeps its preferred
     // width, centered in the wider sheet rather than stretched
     final showGrip = widget.resizable && !widget.bottomSheet;
-    final body = SizedBox(
-      width: width,
-      child: Stack(children: [
-        Positioned.fill(
-          child: Material(
-            color: Theme.of(context).colorScheme.surfaceContainerLow,
-            // only document changes rebuild the list — viewer scrolling
-            // repaints the per-tile indicators alone
-            child: ListenableBuilder(
-              listenable: controller,
-              // the implicit desktop scrollbar is replaced by the
-              // viewer-style bar below
-              builder: (context, _) => Column(
-                children: [
-                  Expanded(
-                    child: ScrollConfiguration(
-                      behavior: ScrollConfiguration.of(context)
-                          .copyWith(scrollbars: false),
-                      child: ReorderableListView.builder(
-                        scrollController: _scroll,
-                        buildDefaultDragHandles: false,
-                        padding:
-                            EdgeInsets.fromLTRB(0, 8, _extraRightPadding, 8),
-                        itemCount: controller.document.pageCount,
-                        onReorderItem: controller.movePage,
-                        itemBuilder: (context, index) {
-                          final tile = _PageTile(
-                            key: _tileKeys[index] ??= GlobalKey(),
-                            controller: controller,
-                            viewerController: widget.viewerController,
-                            pageIndex: index,
-                            pageColor: widget.pageColor,
-                            showAnnotations: widget.showAnnotations,
-                            allowPageEditing: widget.allowPageEditing,
-                            cache: _cache,
-                            tileWidth: _tileWidth,
-                          );
-                          // without the drag listener no reorder can ever start
-                          return widget.allowPageEditing
-                              ? _ReorderDragStartListener(
-                                  key: ValueKey(index),
-                                  index: index,
-                                  child: tile)
-                              : KeyedSubtree(
-                                  key: ValueKey(index), child: tile);
-                        },
-                      ),
-                    ),
-                  ),
-                  // a footer to append a blank page; only when the strip
-                  // is editable (a read-only strip is purely navigational)
-                  if (widget.allowPageEditing)
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(4, 2, _extraRightPadding, 4),
-                      child: TextButton.icon(
-                        key: const ValueKey('pdf-thumbnail-add-page'),
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text('Add page'),
-                        style: TextButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          textStyle: Theme.of(context).textTheme.labelMedium,
-                        ),
-                        onPressed: () => controller.addBlankPage(),
-                      ),
-                    ),
-                ],
+    final list = Material(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      // only document changes rebuild the list — viewer scrolling
+      // repaints the per-tile indicators alone
+      child: ListenableBuilder(
+        listenable: controller,
+        // the implicit desktop scrollbar is replaced by the
+        // viewer-style bar below
+        builder: (context, _) => Column(
+          children: [
+            Expanded(
+              child: ScrollConfiguration(
+                behavior:
+                    ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                child: ReorderableListView.builder(
+                  scrollController: _scroll,
+                  buildDefaultDragHandles: false,
+                  padding: EdgeInsets.fromLTRB(0, 8, _extraRightPadding, 8),
+                  itemCount: controller.document.pageCount,
+                  onReorderItem: controller.movePage,
+                  itemBuilder: (context, index) {
+                    final tile = _PageTile(
+                      key: _tileKeys[index] ??= GlobalKey(),
+                      controller: controller,
+                      viewerController: widget.viewerController,
+                      pageIndex: index,
+                      pageColor: widget.pageColor,
+                      showAnnotations: widget.showAnnotations,
+                      allowPageEditing: widget.allowPageEditing,
+                      cache: _cache,
+                      tileWidth: _tileWidth,
+                    );
+                    // without the drag listener no reorder can ever start
+                    return widget.allowPageEditing
+                        ? _ReorderDragStartListener(
+                            key: ValueKey(index), index: index, child: tile)
+                        : KeyedSubtree(key: ValueKey(index), child: tile);
+                  },
+                ),
               ),
             ),
-          ),
+            // a footer to append a blank page; only when the strip
+            // is editable (a read-only strip is purely navigational)
+            if (widget.allowPageEditing)
+              Padding(
+                padding: EdgeInsets.fromLTRB(4, 2, _extraRightPadding, 4),
+                child: TextButton.icon(
+                  key: const ValueKey('pdf-thumbnail-add-page'),
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Add page'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    textStyle: Theme.of(context).textTheme.labelMedium,
+                  ),
+                  onPressed: () => controller.addBlankPage(),
+                ),
+              ),
+          ],
         ),
-        // the same scrollbar the viewer paints, so every bar in the
-        // chrome looks and behaves alike; stepped off the resize grip
-        // when the grip rides the same (right) edge
+      ),
+    );
+    // the same scrollbar the viewer paints, so every bar in the chrome
+    // looks and behaves alike
+    final scrollbar = PdfScrollbar(
+      scroll: _scroll,
+      thumbKey: const ValueKey('pdf-thumbnail-scrollbar-thumb'),
+    );
+
+    // a bottom sheet spans the full width: keep the tile column at its
+    // preferred width, centered, but pin the scrollbar to the sheet's
+    // right edge rather than the centered column's
+    if (widget.bottomSheet) {
+      return Stack(children: [
+        Center(child: SizedBox(width: width, child: list)),
+        Positioned(top: 0, bottom: 0, right: 0, child: scrollbar),
+      ]);
+    }
+
+    return SizedBox(
+      width: width,
+      child: Stack(children: [
+        Positioned.fill(child: list),
+        // stepped off the resize grip when the grip rides the same
+        // (right) edge
         Positioned(
           top: 0,
           bottom: 0,
           right: showGrip && widget.side == PdfSidebarSide.left
               ? PdfSidebarResizeGrip.width
               : 0,
-          child: PdfScrollbar(
-            scroll: _scroll,
-            thumbKey: const ValueKey('pdf-thumbnail-scrollbar-thumb'),
-          ),
+          child: scrollbar,
         ),
         if (showGrip)
           Positioned(
@@ -352,7 +360,6 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
           ),
       ]),
     );
-    return widget.bottomSheet ? Center(child: body) : body;
   }
 }
 
@@ -488,15 +495,24 @@ class _PageTile extends StatelessWidget {
                       style: Theme.of(context).textTheme.labelMedium),
                 ),
                 if (allowPageEditing && document.pageCount > 1)
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 16),
-                    tooltip: 'Delete page',
-                    style: IconButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: const Size(28, 28),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  // No Tooltip here: a Tooltip is an OverlayPortal, and an
+                  // OverlayPortal inside a ReorderableListView item crashes
+                  // when the item is reactivated during a layout pass (the
+                  // strip's bottom-sheet LayoutBuilder, or a reorder) — it
+                  // mutates the overlay's RenderObject mid-layout. A
+                  // Semantics label keeps the button accessible without one.
+                  Semantics(
+                    label: 'Delete page',
+                    button: true,
+                    child: IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 16),
+                      style: IconButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(28, 28),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: () => controller.removePage(pageIndex),
                     ),
-                    onPressed: () => controller.removePage(pageIndex),
                   ),
               ],
             ),

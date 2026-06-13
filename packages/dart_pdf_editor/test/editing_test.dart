@@ -1024,7 +1024,8 @@ void main() {
       expect(shown(2), 'Page 3');
 
       // the first tile's footer button deletes that page
-      await tester.tap(find.byTooltip('Delete page').first);
+      await tester
+          .tap(find.widgetWithIcon(IconButton, Icons.delete_outline).first);
       await settle(tester);
       expect(editing.document.pageCount, 2);
       expect(shown(0), 'Page 1');

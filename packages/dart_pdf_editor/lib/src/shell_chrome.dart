@@ -21,49 +21,98 @@ const double pdfShellCompactWidth = 700;
 bool pdfShellUseBottomSheets(BoxConstraints constraints) =>
     constraints.maxWidth.isFinite && constraints.maxWidth < pdfShellCompactWidth;
 
-/// Fraction of the content area a single bottom-sheet panel rises to when
-/// it is the only one open; several share the area evenly.
-const double _pdfShellSheetHeightFactor = 0.55;
+/// Height of the bottom-sheet area, as a fraction of the content area, the
+/// first time a sheet opens. The user drags a sheet's handle to resize it
+/// between [_pdfShellSheetMinFactor] and [_pdfShellSheetMaxFactor].
+const double _pdfShellSheetHeightFactor = 0.5;
+const double _pdfShellSheetMinFactor = 0.25;
+const double _pdfShellSheetMaxFactor = 0.9;
 
 /// Lays the active panel [sheets] out as bottom sheets, stacked above one
 /// another and anchored to the bottom of the content area. The space above
 /// the topmost sheet stays clear, so the page underneath keeps scrolling
-/// and taking taps. Returns a [Positioned] — drop it straight into the
-/// content [Stack] (only when [sheets] is non-empty).
-Widget pdfShellBottomSheets(List<Widget> sheets) {
-  return Positioned.fill(
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        // each sheet rises to a fraction of the area; the whole stack is
-        // capped at the area height so two open sheets share it rather than
-        // overflowing off the top
-        final maxSheet = constraints.maxHeight * _pdfShellSheetHeightFactor;
-        return Align(
-          alignment: Alignment.bottomCenter,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: constraints.maxHeight),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final sheet in sheets)
-                  Flexible(
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(maxHeight: maxSheet),
-                      child: sheet,
-                    ),
-                  ),
-              ],
+/// and taking taps. The whole stack is resizable by dragging a sheet's
+/// handle (up to 90% of the area). Returns a [Positioned] — drop it
+/// straight into the content [Stack] (only when [sheets] is non-empty).
+Widget pdfShellBottomSheets(List<Widget> sheets) =>
+    _PdfShellBottomSheetArea(sheets: sheets);
+
+/// Owns the resizable height of the bottom-sheet stack and exposes the
+/// resize callback to the sheets' drag handles via [_BottomSheetResizeScope].
+class _PdfShellBottomSheetArea extends StatefulWidget {
+  const _PdfShellBottomSheetArea({required this.sheets});
+
+  final List<Widget> sheets;
+
+  @override
+  State<_PdfShellBottomSheetArea> createState() =>
+      _PdfShellBottomSheetAreaState();
+}
+
+class _PdfShellBottomSheetAreaState extends State<_PdfShellBottomSheetArea> {
+  double _fraction = _pdfShellSheetHeightFactor;
+  double _maxHeight = 0;
+
+  void _resizeBy(double dy) {
+    if (_maxHeight <= 0) return;
+    // dragging the handle up (negative dy) grows the sheet
+    final next = (_fraction - dy / _maxHeight)
+        .clamp(_pdfShellSheetMinFactor, _pdfShellSheetMaxFactor);
+    if (next != _fraction) setState(() => _fraction = next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          _maxHeight = constraints.maxHeight;
+          return Align(
+            alignment: Alignment.bottomCenter,
+            child: _BottomSheetResizeScope(
+              resizeBy: _resizeBy,
+              child: SizedBox(
+                height: constraints.maxHeight * _fraction,
+                // a bounded height, so Flexible can share it: one sheet
+                // fills it, several split it evenly
+                child: Column(
+                  mainAxisSize: MainAxisSize.max,
+                  children: [
+                    for (final sheet in widget.sheets) Flexible(child: sheet),
+                  ],
+                ),
+              ),
             ),
-          ),
-        );
-      },
-    ),
-  );
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Hands a bottom sheet's drag handle the area's resize callback. Absent
+/// when [PdfPanelBottomSheet] is used outside [pdfShellBottomSheets], in
+/// which case the handle only dismisses.
+class _BottomSheetResizeScope extends InheritedWidget {
+  const _BottomSheetResizeScope({
+    required this.resizeBy,
+    required super.child,
+  });
+
+  /// Grows (negative dy) or shrinks (positive dy) the sheet stack.
+  final void Function(double dy) resizeBy;
+
+  static _BottomSheetResizeScope? maybeOf(BuildContext context) => context
+      .dependOnInheritedWidgetOfExactType<_BottomSheetResizeScope>();
+
+  @override
+  bool updateShouldNotify(_BottomSheetResizeScope oldWidget) => false;
 }
 
 /// The chrome around a side panel presented as a bottom sheet on a small
-/// screen: rounded top, a drag handle that swipes down to dismiss, and a
-/// titled header with a close button. The panel [child] fills the rest.
+/// screen: rounded top, a drag handle that resizes the sheet (and flicks
+/// down to dismiss), and a titled header with a close button. The panel
+/// [child] fills the rest.
 class PdfPanelBottomSheet extends StatelessWidget {
   const PdfPanelBottomSheet({
     super.key,
@@ -90,6 +139,7 @@ class PdfPanelBottomSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final resize = _BottomSheetResizeScope.maybeOf(context);
     return Material(
       color: scheme.surfaceContainerLow,
       elevation: 8,
@@ -100,12 +150,18 @@ class PdfPanelBottomSheet extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // the handle and header swipe down to dismiss, the Material
-          // bottom-sheet idiom
+          // the handle resizes the sheet (drag up to grow, down to shrink)
+          // and dismisses on a fast downward flick — the Material
+          // bottom-sheet idiom. With no resize scope (standalone use) it
+          // only dismisses, on a gentler flick.
           GestureDetector(
             behavior: HitTestBehavior.opaque,
+            onVerticalDragUpdate: resize == null
+                ? null
+                : (details) => resize.resizeBy(details.delta.dy),
             onVerticalDragEnd: (details) {
-              if ((details.primaryVelocity ?? 0) > 200) onClose();
+              final velocity = details.primaryVelocity ?? 0;
+              if (velocity > (resize == null ? 200 : 700)) onClose();
             },
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -243,7 +299,10 @@ bool pdfShellShowThumbnailSidebar(
 
 /// The shells' slim header bar: a leading group (search, page number)
 /// and a trailing group (panel toggles), pushed apart when there is
-/// room and scrolling horizontally when there isn't.
+/// room. On a narrow (mobile) screen the trailing toggles keep their
+/// natural width and stay pinned to the right — so the panel buttons are
+/// always reachable — while the leading group takes the rest and scrolls
+/// horizontally when it no longer fits.
 class PdfShellBar extends StatelessWidget {
   const PdfShellBar({super.key, required this.leading, required this.trailing});
 
@@ -257,27 +316,35 @@ class PdfShellBar extends StatelessWidget {
       shape: Border(
           bottom:
               BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
-      child: SizedBox(
-        height: 48,
-        // a Spacer can't live in an unbounded-width Row, so the gap
-        // comes from spaceBetween over a min-width-constrained Row
-        child: LayoutBuilder(
-          builder: (context, constraints) => SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minWidth: constraints.maxWidth),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
+      // Keep the icon buttons a single, consistent colour: an IconButton
+      // resolves its own foreground, but a PopupMenuButton's icon (the
+      // view-options button) falls back to the ambient IconTheme, which
+      // otherwise reads black87 rather than onSurfaceVariant.
+      child: IconTheme.merge(
+        data: IconThemeData(
+            color: Theme.of(context).colorScheme.onSurfaceVariant),
+        child: SizedBox(
+          height: 48,
+          child: Row(
+            children: [
+              // the leading group fills the remaining space and scrolls
+              // horizontally when it overflows (a wide search field on a
+              // phone) — earlier this was the whole bar, so the search
+              // field swallowed the horizontal drag and nothing scrolled
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
                     children: [const SizedBox(width: 8), ...leading],
                   ),
-                  Row(
-                    children: [...trailing, const SizedBox(width: 8)],
-                  ),
-                ],
+                ),
               ),
-            ),
+              // the panel toggles keep their natural width and stay to the
+              // right, so the rightmost (e.g. properties) is never pushed
+              // off-screen
+              ...trailing,
+              const SizedBox(width: 8),
+            ],
           ),
         ),
       ),
@@ -312,6 +379,9 @@ class PdfShellViewOptionsButton extends StatelessWidget {
       key: const ValueKey('pdf-shell-view-options'),
       tooltip: 'View options',
       icon: const Icon(Icons.display_settings_outlined),
+      // match the bar's IconButtons; a PopupMenuButton icon otherwise
+      // defaults to black87 instead of onSurfaceVariant
+      iconColor: Theme.of(context).colorScheme.onSurfaceVariant,
       style: const ButtonStyle(visualDensity: VisualDensity.compact),
       onSelected: (option) async {
         switch (option) {

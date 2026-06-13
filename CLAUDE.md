@@ -2054,6 +2054,43 @@ asserts the widget MOVED (it used to assert nothing happened). Toolbar
 tooltip is now 'Form fields — tap to select, double-tap to fill, drag to
 add' (pdf_shell/toolbar tests that find it by tooltip updated).
 
+Bold/italic text-box fonts (Ben: font selection + outline/fill in the
+style popup, expand font choices): `PdfStandardFont` grew from 3 to all
+12 base-14 text faces — `PdfStandardFontFamily {sans, serif, mono}` is
+the family axis, orthogonal to `isBold`/`isItalic`; `styled(family,
+{bold, italic})` + `withBold`/`withItalic` pick a variant. New AFM width
+tables (`timesBoldWidths`/`timesItalicWidths`/`timesBoldItalicWidths`;
+Helvetica oblique reuses upright widths, Courier stays flat 600).
+Resource names: existing `Helv`/`TiRo`/`Cour` kept for the regular faces
+(backward-compatible /DA), variants get detectable names (`HelvBold`,
+`TimesBoldItalic`, `CourBoldObl`…) — `tryFromName` now detects family by
+substring AND bold (`bold`) / italic (`italic`/`oblique`/`obl`), so our
+short /DA names and foreign producers' both round-trip with style. The
+Times variants use `Times*` (not `Ti*`) names so `times`-substring family
+detection fires. Rendering was already style-aware: canvas_device's
+`_styleFor` keys FontWeight/FontStyle off `name.contains('Bold')`/
+`'Italic'`/`'Oblique'`, so the variant /BaseFont paints correctly with no
+font-engine change (verified by editing_font_render_test: timesBold lays
+more ink than times, italic renders). UI: shared package-private
+`FontStyleToggles` (editing_font_controls.dart, NOT exported) — a B/I
+toggle pair that flips one axis of the current family; the toolbar
+`_StyleMenu` now has a family SegmentedButton (Sans/Serif/Mono, bound to
+`.family`) + a 'Style' row of toggles, and the properties panel's font
+dropdown switched to a family dropdown + the same toggles. The font chip
+label shows the suffix (' B'/' I'/' BI'). Properties panel also gained
+the missing 'Outline' swatch for FreeText (`pdf-prop-text-border` →
+`restyleSelectedText(border:)`; the toolbar already had 'Text border').
+The two inline-editor `_uiFamily` switches (overlay + form layer) map by
+`.family` now and set fontWeight/fontStyle so the live editor previews
+bold/italic. Toggle keys 'pdf-font-bold'/'-italic' (toolbar) and
+'pdf-prop-font-bold'/'-italic' (panel). Tests: annotation_editor_test
+(12-variant coverage, name round-trips with style, bold-italic /BaseFont
++ /Widths), editing_text_edit_test (toolbar B/I toggles + family keeps
+style), editing_properties_test (panel B/I toggles + the outline row),
+editing_font_render_test (end-to-end raster). The existing 'Serif'/'Mono'
+tap tests still pass — tapping a family with no B/I set yields the base
+variant.
+
 Insert image (Ben: "allow inserting an image into the PDF"): a new
 `PdfEditTool.image` inserts a PNG/JPEG as a /Stamp annotation, so it
 inherits select/move/resize/rotate/delete for free. pdf_document:

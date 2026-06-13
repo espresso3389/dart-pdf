@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../page_range_dialog.dart';
 import '../pdf_viewer.dart';
 import '../renderer.dart';
 import '../scrollbar.dart';
+import '../toast.dart';
 import 'editing_controller.dart';
 import 'editing_panel.dart';
 import 'editing_preferences.dart';
@@ -56,6 +59,8 @@ class PdfThumbnailSidebar extends StatefulWidget {
     this.followsViewer = true,
     this.allowPageEditing = true,
     this.bottomSheet = false,
+    this.onPickPdfToInsert,
+    this.onExportPages,
   });
 
   final PdfEditingController controller;
@@ -99,6 +104,17 @@ class PdfThumbnailSidebar extends StatefulWidget {
   /// grip) for hosting inside a bottom sheet on a small screen, rather
   /// than as a fixed-width docked column.
   final bool bottomSheet;
+
+  /// Picks a PDF to insert and returns its bytes (null = cancelled). When
+  /// given, a "Insert PDF…" entry appears in the strip's page-actions
+  /// footer menu and merges all of the picked file's pages in after the
+  /// current page. Needs the host for file I/O.
+  final Future<Uint8List?> Function()? onPickPdfToInsert;
+
+  /// Receives the bytes of an exported page range, for the host to save.
+  /// When given, an "Export pages…" entry appears in the page-actions
+  /// footer menu.
+  final void Function(Uint8List bytes)? onExportPages;
 
   /// How many thumbnails have actually been rasterized — cache misses
   /// only, across all sidebars. Tests assert on the deltas.
@@ -263,6 +279,31 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
         // viewer-style bar below
         builder: (context, _) => Column(
           children: [
+            // page-level file actions sit in a slim header at the top so
+            // they never collide with the floating editing toolbar (or a
+            // snackbar) that hugs the bottom of the viewport
+            if (widget.onPickPdfToInsert != null ||
+                widget.onExportPages != null)
+              Padding(
+                padding: EdgeInsets.fromLTRB(8, 2, _extraRightPadding, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Pages',
+                        style: Theme.of(context).textTheme.labelMedium,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    _PageActionsButton(
+                      controller: controller,
+                      viewerController: widget.viewerController,
+                      onPickPdfToInsert: widget.onPickPdfToInsert,
+                      onExportPages: widget.onExportPages,
+                    ),
+                  ],
+                ),
+              ),
             Expanded(
               child: ScrollConfiguration(
                 behavior:
@@ -359,6 +400,96 @@ class _PdfThumbnailSidebarState extends State<PdfThumbnailSidebar> {
             ),
           ),
       ]),
+    );
+  }
+}
+
+enum _PageAction { insert, export }
+
+/// The thumbnail strip's page-document actions: insert the pages of
+/// another PDF (after the current page) and export a page range to a
+/// standalone PDF. Both need the host for file I/O — [onPickPdfToInsert]
+/// supplies the bytes to merge in, [onExportPages] receives the exported
+/// bytes — so a menu item only appears when its callback is given.
+class _PageActionsButton extends StatelessWidget {
+  const _PageActionsButton({
+    required this.controller,
+    required this.viewerController,
+    this.onPickPdfToInsert,
+    this.onExportPages,
+  });
+
+  final PdfEditingController controller;
+  final PdfViewerController viewerController;
+  final Future<Uint8List?> Function()? onPickPdfToInsert;
+  final void Function(Uint8List bytes)? onExportPages;
+
+  Future<void> _insert(BuildContext context) async {
+    final pick = onPickPdfToInsert;
+    if (pick == null) return;
+    // read everything off the context BEFORE the async gap
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final margin = pdfFloatingToastMargin(context);
+    final bytes = await pick();
+    if (bytes == null) return;
+    try {
+      controller.insertPagesFromBytes(bytes,
+          at: viewerController.currentPage + 1);
+    } catch (_) {
+      // a non-PDF, corrupt, or password-protected file can't be opened —
+      // tell the user rather than failing silently
+      messenger?.showSnackBar(
+        SnackBar(
+          content: const Text("Couldn't insert that file."),
+          behavior: SnackBarBehavior.floating,
+          margin: margin,
+        ),
+      );
+    }
+  }
+
+  Future<void> _export(BuildContext context) async {
+    final onExport = onExportPages;
+    if (onExport == null) return;
+    final range = await showPdfPageRangeDialog(
+      context,
+      pageCount: controller.document.pageCount,
+    );
+    if (range == null) return;
+    onExport(controller.exportPageRange(range.start, range.end));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canInsert = onPickPdfToInsert != null;
+    final canExport = onExportPages != null;
+    return PopupMenuButton<_PageAction>(
+      key: const ValueKey('pdf-thumbnail-page-actions'),
+      tooltip: 'Page actions',
+      icon: const Icon(Icons.file_copy_outlined, size: 18),
+      style: const ButtonStyle(visualDensity: VisualDensity.compact),
+      onSelected: (action) {
+        switch (action) {
+          case _PageAction.insert:
+            _insert(context);
+          case _PageAction.export:
+            _export(context);
+        }
+      },
+      itemBuilder: (context) => [
+        if (canInsert)
+          const PopupMenuItem(
+            key: ValueKey('pdf-thumbnail-insert-pdf'),
+            value: _PageAction.insert,
+            child: Text('Insert PDF…'),
+          ),
+        if (canExport)
+          const PopupMenuItem(
+            key: ValueKey('pdf-thumbnail-export-pages'),
+            value: _PageAction.export,
+            child: Text('Export pages…'),
+          ),
+      ],
     );
   }
 }

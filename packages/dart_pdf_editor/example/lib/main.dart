@@ -167,20 +167,16 @@ class _ViewerScreenState extends State<ViewerScreen> {
   }
 
   void _toast(String message) {
-    // Floating in the bottom-right corner (lifted clear of the editing
-    // toolbar) on desktop, so toasts stay a compact pill off to the side and
-    // never cover the chrome; a near-full-width pill on narrow windows.
-    final width = MediaQuery.of(context).size.width;
-    const bottom = 68.0;
-    final margin = width >= 600
-        ? EdgeInsets.only(left: width - 360 - 24, right: 24, bottom: bottom)
-        : const EdgeInsets.fromLTRB(16, 0, 16, bottom);
+    // Floating in the bottom-right corner on desktop, so toasts stay a
+    // compact pill off to the side and never cover the chrome; a
+    // near-full-width pill on narrow windows. pdfFloatingToastMargin lifts
+    // it clear of the editing toolbar dock and the device safe-area inset.
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(SnackBar(
         content: Text(message),
         behavior: SnackBarBehavior.floating,
-        margin: margin,
+        margin: pdfFloatingToastMargin(context),
         duration: const Duration(seconds: 2),
       ));
   }

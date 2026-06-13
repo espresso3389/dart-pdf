@@ -6,6 +6,7 @@ import 'package:pdf_document/pdf_document.dart'
     show PdfLineEnding, PdfStandardFont, PdfStandardFontFamily;
 
 import '../pdf_viewer.dart';
+import '../toast.dart';
 import 'editing_color_picker.dart';
 import 'editing_controller.dart';
 import 'editing_font_controls.dart';
@@ -437,25 +438,12 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
       ..showSnackBar(SnackBar(
         content: Text(message),
         behavior: SnackBarBehavior.floating,
-        margin: _toastMargin(context),
+        margin: pdfFloatingToastMargin(context),
         duration: const Duration(seconds: 4),
         action: undoable && controller.canUndo
             ? SnackBarAction(label: 'Undo', onPressed: controller.undo)
             : null,
       ));
-  }
-
-  /// Margin that floats a SnackBar clear of the dock.
-  static EdgeInsets _toastMargin(BuildContext context) {
-    final width = MediaQuery.of(context).size.width;
-    // the dock is taller than the old 56px bar; lift the toast above it
-    const bottom = 84.0;
-    if (width >= 600) {
-      const pill = 360.0;
-      return EdgeInsets.only(
-          left: width - pill - 24, right: 24, bottom: bottom);
-    }
-    return const EdgeInsets.fromLTRB(16, 0, 16, bottom);
   }
 
   Future<void> _applyRedactions(BuildContext context) async {

@@ -35,3 +35,4 @@ export 'src/renderer.dart';
 export 'src/search_panel.dart';
 export 'src/scrollbar.dart';
 export 'src/theme.dart';
+export 'src/toast.dart';

@@ -213,13 +213,13 @@ class PdfEditorView extends StatefulWidget {
 
   /// Picks a PDF whose pages are inserted after the current page (the
   /// host shows a file picker and returns the bytes, or null to cancel).
-  /// When null the header's "Insert PDF…" action is hidden. Needs
+  /// When null the thumbnail strip's "Insert PDF…" action is hidden. Needs
   /// [PdfEditorFeatures.pageEditing].
   final Future<Uint8List?> Function()? onPickPdfToInsert;
 
   /// Receives a standalone PDF of a user-chosen page range to save (the
-  /// header's "Export pages…" action asks for the range, then hands the
-  /// bytes here). When null the action is hidden.
+  /// thumbnail strip's "Export pages…" action asks for the range, then
+  /// hands the bytes here). When null the action is hidden.
   final void Function(Uint8List bytes)? onExportPages;
 
   /// See [PdfViewer.onAction].
@@ -416,6 +416,11 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                 showAnnotations: prefs.showAnnotations,
                 allowPageEditing: features.pageEditing,
                 bottomSheet: bottomSheet,
+                // page-level file actions live in the strip's footer; insert
+                // needs page editing on, export stands on its own
+                onPickPdfToInsert:
+                    features.pageEditing ? widget.onPickPdfToInsert : null,
+                onExportPages: widget.onExportPages,
               );
           PdfSearchResultsPanel searchResults({required bool bottomSheet}) =>
               PdfSearchResultsPanel(
@@ -527,17 +532,8 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                       tooltip: 'Save… (⌘S / Ctrl+S)',
                       onPressed: _save,
                     ),
-                  // insert/export of pages: only the actions the host
-                  // wired file I/O for, and insert needs page editing on
-                  if ((features.pageEditing && widget.onPickPdfToInsert != null) ||
-                      widget.onExportPages != null)
-                    PdfShellPageActionsButton(
-                      controller: session,
-                      viewerController: _viewer,
-                      onPickPdfToInsert:
-                          features.pageEditing ? widget.onPickPdfToInsert : null,
-                      onExportPages: widget.onExportPages,
-                    ),
+                  // insert/export of pages now live in the thumbnail
+                  // strip's footer (see thumbnails() above)
                   if (features.author)
                     IconButton(
                       key: const ValueKey('pdf-shell-author'),

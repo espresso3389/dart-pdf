@@ -489,7 +489,8 @@ void main() {
     testWidgets('the page-actions menu is hidden without insert/export',
         (tester) async {
       await pump(tester, PdfEditorView(bytes: buildMultiPagePdf(1)));
-      expect(find.byKey(const ValueKey('pdf-shell-page-actions')), findsNothing);
+      expect(find.byKey(const ValueKey('pdf-thumbnail-page-actions')),
+          findsNothing);
     });
 
     testWidgets('Insert PDF… merges the picked file after the current page',
@@ -507,10 +508,10 @@ void main() {
         ),
       );
 
-      await tester.tap(find.byKey(const ValueKey('pdf-shell-page-actions')),
+      await tester.tap(find.byKey(const ValueKey('pdf-thumbnail-page-actions')),
           kind: PointerDeviceKind.mouse);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('pdf-shell-insert-pdf')));
+      await tester.tap(find.byKey(const ValueKey('pdf-thumbnail-insert-pdf')));
       await tester.pumpAndSettle();
       // current page is 0, so the 3 pages land at index 1
       expect(editing.document.pageCount, 5);
@@ -528,10 +529,10 @@ void main() {
         ),
       );
 
-      await tester.tap(find.byKey(const ValueKey('pdf-shell-page-actions')),
+      await tester.tap(find.byKey(const ValueKey('pdf-thumbnail-page-actions')),
           kind: PointerDeviceKind.mouse);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('pdf-shell-export-pages')));
+      await tester.tap(find.byKey(const ValueKey('pdf-thumbnail-export-pages')));
       await tester.pumpAndSettle();
       // default range covers the whole document; narrow it to pages 2–3
       await tester.enterText(
@@ -559,13 +560,67 @@ void main() {
           onExportPages: (_) {},
         ),
       );
-      await tester.tap(find.byKey(const ValueKey('pdf-shell-page-actions')),
+      await tester.tap(find.byKey(const ValueKey('pdf-thumbnail-page-actions')),
           kind: PointerDeviceKind.mouse);
       await tester.pumpAndSettle();
       // insert needs page editing — hidden; export stands alone
-      expect(find.byKey(const ValueKey('pdf-shell-insert-pdf')), findsNothing);
       expect(
-          find.byKey(const ValueKey('pdf-shell-export-pages')), findsOneWidget);
+          find.byKey(const ValueKey('pdf-thumbnail-insert-pdf')), findsNothing);
+      expect(find.byKey(const ValueKey('pdf-thumbnail-export-pages')),
+          findsOneWidget);
+    });
+
+    testWidgets('the page-actions menu lives inside the thumbnail strip',
+        (tester) async {
+      await pump(
+        tester,
+        PdfEditorView(
+          bytes: buildMultiPagePdf(2),
+          onPickPdfToInsert: () async => buildMultiPagePdf(1),
+          onExportPages: (_) {},
+        ),
+      );
+      // it moved out of the header and into the strip's header row
+      expect(
+        find.descendant(
+          of: find.byType(PdfThumbnailSidebar),
+          matching: find.byKey(const ValueKey('pdf-thumbnail-page-actions')),
+        ),
+        findsOneWidget,
+      );
+    });
+  });
+
+  group('floating toast margin', () {
+    testWidgets('lifts the toast above the dock and the safe-area inset',
+        (tester) async {
+      late EdgeInsets withoutInset;
+      late EdgeInsets withInset;
+      await tester.pumpWidget(MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(size: Size(800, 600)),
+          child: Builder(builder: (context) {
+            withoutInset = pdfFloatingToastMargin(context);
+            return const SizedBox();
+          }),
+        ),
+      ));
+      await tester.pumpWidget(MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(
+            size: Size(800, 600),
+            padding: EdgeInsets.only(bottom: 34),
+          ),
+          child: Builder(builder: (context) {
+            withInset = pdfFloatingToastMargin(context);
+            return const SizedBox();
+          }),
+        ),
+      ));
+      // clears the floating editing toolbar dock…
+      expect(withoutInset.bottom, greaterThanOrEqualTo(84));
+      // …and adds the device's bottom safe-area inset on top
+      expect(withInset.bottom, withoutInset.bottom + 34);
     });
   });
 

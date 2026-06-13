@@ -220,10 +220,29 @@ class PdfEditingToolbar extends StatelessWidget {
       ..showSnackBar(SnackBar(
         content: Text(message),
         behavior: SnackBarBehavior.floating,
+        // Tuck the toast into the bottom-right corner, lifted clear of this
+        // 56px toolbar, so it never covers the chrome on desktop. Always
+        // auto-dismisses (the default would linger for several seconds).
+        margin: _toastMargin(context),
+        duration: const Duration(seconds: 4),
         action: undoable && controller.canUndo
             ? SnackBarAction(label: 'Undo', onPressed: controller.undo)
             : null,
       ));
+  }
+
+  /// Margin that floats a SnackBar in the bottom-right corner, above the
+  /// toolbar, on wide (desktop) windows, and as a near-full-width pill lifted
+  /// off the toolbar on narrow ones.
+  static EdgeInsets _toastMargin(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    // 56px BottomAppBar + a gap, so the toast clears it.
+    const bottom = 68.0;
+    if (width >= 600) {
+      const pill = 360.0;
+      return EdgeInsets.only(left: width - pill - 24, right: 24, bottom: bottom);
+    }
+    return const EdgeInsets.fromLTRB(16, 0, 16, bottom);
   }
 
   /// Confirms, then burns the marked redactions. Irreversible — the

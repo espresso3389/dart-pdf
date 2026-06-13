@@ -161,10 +161,20 @@ class _ViewerScreenState extends State<ViewerScreen> {
   }
 
   void _toast(String message) {
+    // Floating in the bottom-right corner (lifted clear of the editing
+    // toolbar) on desktop, so toasts stay a compact pill off to the side and
+    // never cover the chrome; a near-full-width pill on narrow windows.
+    final width = MediaQuery.of(context).size.width;
+    const bottom = 68.0;
+    final margin = width >= 600
+        ? EdgeInsets.only(left: width - 360 - 24, right: 24, bottom: bottom)
+        : const EdgeInsets.fromLTRB(16, 0, 16, bottom);
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(SnackBar(
         content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        margin: margin,
         duration: const Duration(seconds: 2),
       ));
   }
@@ -404,12 +414,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
                       onPressed: () async {
                         await tab.viewer!.copySelection();
                         if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Copied to clipboard'),
-                            duration: Duration(seconds: 1),
-                          ),
-                        );
+                        _toast('Copied to clipboard');
                       },
                     ),
             ),

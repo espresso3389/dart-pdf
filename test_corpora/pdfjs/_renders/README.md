@@ -108,7 +108,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | issue1293r.pdf | 1 | 200x50 | 4.900% |
 | issue14802.pdf | 1 | 260x50 | 9.431% |
 | issue15893_reduced.pdf | 1 | 200x50 | 10.750% |
-| issue269_1.pdf | 1 | 100x100 | 22.870% |
+| issue269_1.pdf | 1 | 100x100 | 14.550% |
 | issue2761.pdf | 1 | 612x792 | 0.582% |
 | issue3061.pdf | 1 | 596x842 | 0.173% |
 | issue3371.pdf | 1 | 596x842 | 0.318% |
@@ -1000,7 +1000,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### issue269_1.pdf page 1
 
-100x100; diff: 22.870%
+100x100; diff: 14.550%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

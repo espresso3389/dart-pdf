@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:pdf_cos/pdf_cos.dart';
@@ -134,6 +135,17 @@ void main() {
     final device = interpret('0 0 5 5 re W n 0 0 10 10 re f');
     expect(device.calls, ['clip', 'fill']);
     expect(device.clips.single.$2, PdfFillRule.nonzero);
+  });
+
+  test('hidden optional content groups do not paint', () {
+    final doc = PdfDocument.open(
+        File('../../test_corpora/pdfjs/issue269_1.pdf').readAsBytesSync());
+    final device = RecordingDevice();
+    PdfInterpreter(cos: doc.cos, device: device).drawPage(doc.page(0));
+
+    // Two black paths plus the visible blue path. The green /MC2 path is
+    // mapped to an OCG in the document's default /OFF list.
+    expect(device.fills, hasLength(3));
   });
 
   test('CMYK and gray color operators convert to RGB', () {

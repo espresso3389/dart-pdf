@@ -156,6 +156,10 @@ class PdfInterpreter {
   final Map<CosDictionary, PdfFontInfo> _fontCache = {};
   final Map<CosStream, List<ContentOperation>> _patternOpsCache = {};
   final Map<CosStream, IccProfile?> _iccCache = {};
+  final List<bool> _visibilityStack = [];
+  Set<CosReference>? _optionalContentOn;
+  Set<CosReference>? _optionalContentOff;
+  String? _optionalContentBaseState;
   int _currentFormDepth = 0;
   PdfRect? _pageBox;
 
@@ -171,6 +175,7 @@ class PdfInterpreter {
 
   void drawPage(PdfPage page) {
     _state = _GraphicsState();
+    _visibilityStack.clear();
     _pageBox = page.mediaBox;
     device.save();
     try {
@@ -583,6 +588,7 @@ class PdfInterpreter {
 
     final savedState = _state;
     final savedStackDepth = _stateStack.length;
+    final savedVisibilityDepth = _visibilityStack.length;
     device.save();
     try {
       _state = _GraphicsState()..ctm = ctm;
@@ -599,6 +605,9 @@ class PdfInterpreter {
       while (_stateStack.length > savedStackDepth) {
         _stateStack.removeLast();
       }
+      while (_visibilityStack.length > savedVisibilityDepth) {
+        _visibilityStack.removeLast();
+      }
       _state = savedState;
       device.restore();
     }
@@ -607,10 +616,14 @@ class PdfInterpreter {
   void _run(
       List<ContentOperation> ops, CosDictionary resources, int formDepth) {
     final previousDepth = _currentFormDepth;
+    final previousVisibilityDepth = _visibilityStack.length;
     _currentFormDepth = formDepth;
     try {
       _runOps(ops, resources, formDepth);
     } finally {
+      while (_visibilityStack.length > previousVisibilityDepth) {
+        _visibilityStack.removeLast();
+      }
       _currentFormDepth = previousDepth;
     }
   }
@@ -832,15 +845,21 @@ class PdfInterpreter {
 
         // --- XObjects and inline images ---
         case 'Do':
-          _doXObject(resources, o, formDepth);
+          if (_contentVisible) _doXObject(resources, o, formDepth);
         case 'BI':
-          _drawInlineImage(o);
+          if (_contentVisible) _drawInlineImage(o);
 
         case 'sh':
-          _applyShading(resources, o);
+          if (_contentVisible) _applyShading(resources, o);
 
-        // --- marked content, compatibility, Type3 metrics: no-ops ---
-        case 'BMC' || 'BDC' || 'EMC' || 'MP' || 'DP':
+        // --- marked content, compatibility, Type3 metrics ---
+        case 'BDC':
+          _visibilityStack.add(_markedContentVisible(resources, o));
+        case 'BMC':
+          _visibilityStack.add(true);
+        case 'EMC':
+          if (_visibilityStack.isNotEmpty) _visibilityStack.removeLast();
+        case 'MP' || 'DP':
         case 'BX' || 'EX':
         case 'd0' || 'd1':
           break;
@@ -850,6 +869,99 @@ class PdfInterpreter {
           // we ignore everywhere and rely on corpus testing to find gaps
           break;
       }
+    }
+  }
+
+  bool get _contentVisible => _visibilityStack.every((visible) => visible);
+
+  bool _markedContentVisible(
+      CosDictionary resources, List<CosObject> operands) {
+    if (operands.length < 2 ||
+        operands[0] is! CosName ||
+        (operands[0] as CosName).value != 'OC') {
+      return true;
+    }
+
+    CosObject? property = operands[1];
+    if (property is CosName) {
+      final properties = cos.resolve(resources['Properties']);
+      property =
+          properties is CosDictionary ? properties[property.value] : null;
+    }
+    return _optionalContentVisible(property);
+  }
+
+  bool _optionalContentVisible(CosObject? object) {
+    if (object == null) return true;
+    final resolved = cos.resolve(object);
+    if (resolved is! CosDictionary) return true;
+    final type = cos.resolve(resolved['Type']);
+    if (type is CosName && type.value == 'OCMD') {
+      return _optionalContentMembershipVisible(resolved);
+    }
+    if (type is CosName && type.value != 'OCG') return true;
+    final ref = object is CosReference ? object : cos.referenceTo(resolved);
+    return ref == null ? true : _optionalContentGroupVisible(ref);
+  }
+
+  bool _optionalContentMembershipVisible(CosDictionary dict) {
+    final policy = cos.resolve(dict['P']);
+    final policyName = policy is CosName ? policy.value : 'AnyOn';
+    final groups = _optionalContentReferences(dict['OCGs']);
+    if (groups.isEmpty) return true;
+    final values = [
+      for (final ref in groups) _optionalContentGroupVisible(ref)
+    ];
+    return switch (policyName) {
+      'AllOn' => values.every((visible) => visible),
+      'AnyOff' => values.any((visible) => !visible),
+      'AllOff' => values.every((visible) => !visible),
+      _ => values.any((visible) => visible),
+    };
+  }
+
+  Iterable<CosReference> _optionalContentReferences(CosObject? object) sync* {
+    final resolved = cos.resolve(object);
+    if (object is CosReference && resolved is CosDictionary) {
+      yield object;
+      return;
+    }
+    if (resolved is CosArray) {
+      for (final item in resolved.items) {
+        yield* _optionalContentReferences(item);
+      }
+    } else if (resolved is CosDictionary) {
+      final ref = cos.referenceTo(resolved);
+      if (ref != null) yield ref;
+    }
+  }
+
+  bool _optionalContentGroupVisible(CosReference ref) {
+    _ensureOptionalContentConfig();
+    if (_optionalContentOff?.contains(ref) == true) return false;
+    if (_optionalContentOn?.contains(ref) == true) return true;
+    return _optionalContentBaseState != 'OFF';
+  }
+
+  void _ensureOptionalContentConfig() {
+    if (_optionalContentOn != null) return;
+    _optionalContentOn = <CosReference>{};
+    _optionalContentOff = <CosReference>{};
+    _optionalContentBaseState = 'ON';
+    try {
+      final properties = cos.resolve(cos.catalog['OCProperties']);
+      if (properties is! CosDictionary) return;
+      final config = cos.resolve(properties['D']);
+      if (config is! CosDictionary) return;
+      final base = cos.resolve(config['BaseState']);
+      if (base is CosName) _optionalContentBaseState = base.value;
+      _optionalContentOn!.addAll(_optionalContentReferences(config['ON']));
+      _optionalContentOff!.addAll(_optionalContentReferences(config['OFF']));
+    } on Object {
+      // Broken optional-content config: default to visible content.
+      _optionalContentOn = <CosReference>{};
+      _optionalContentOff = <CosReference>{};
+      _optionalContentBaseState = 'ON';
     }
   }
 
@@ -894,7 +1006,7 @@ class PdfInterpreter {
 
   void _paint({PdfFillRule? fill, bool stroke = false}) {
     final path = PdfPath(_segments);
-    if (!path.isEmpty) {
+    if (!path.isEmpty && _contentVisible) {
       if (fill != null) {
         final pattern = _state.fillPattern;
         if (pattern != null) {
@@ -1261,7 +1373,7 @@ class PdfInterpreter {
       advance += tx * _state.horizontalScale;
     }
 
-    if (size != 0) {
+    if (size != 0 && _contentVisible) {
       // text rendering matrix: em space → page space (§9.4.4).
       // Mode 3 (invisible) still emits the run — flagged, so painting
       // devices skip it — because it IS the text of OCR'd scans, and
@@ -1297,6 +1409,7 @@ class PdfInterpreter {
   /// Executes a Type3 glyph procedure: a tiny content stream in glyph space,
   /// mapped through /FontMatrix and the text rendering matrix (§9.6.5).
   void _drawType3Glyph(PdfFontInfo font, int code, double penAdvance) {
+    if (!_contentVisible) return;
     final proc = font.type3ProcFor(code);
     if (proc == null || _currentFormDepth >= _maxFormDepth) return;
     final List<ContentOperation> ops;

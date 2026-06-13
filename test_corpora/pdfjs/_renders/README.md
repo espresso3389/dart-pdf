@@ -162,7 +162,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | operator_list_cycle.pdf | 1 | 612x792 | 0.249% | ❌ fail |
 | pattern_text_embedded_font.pdf | 1 | 596x842 | 5.019% | ❌ fail |
 | pdfjsbad1586.pdf | 1 | 612x792 | 0.003% | ✅ pass |
-| pdfkit_compressed.pdf | 1 | 612x792 | 0.849% | ❌ fail |
+| pdfkit_compressed.pdf | 1 | 612x792 | 0.045% | ✅ pass |
 | poppler-67295-0.pdf | 1 | 612x792 | 0.282% | ❌ fail |
 | poppler-91414-0-53.pdf | 1 | 795x842 | 0.146% | ❌ fail |
 | poppler-91414-0-54.pdf | 1 | 795x842 | 0.146% | ❌ fail |
@@ -215,7 +215,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | xref_command_missing.pdf | 1 | 200x50 | 8.480% | ❌ fail |
 | zerowidthline.pdf | 1 | 596x842 | 0.935% | ❌ fail |
 
-67 of 200 compared pages pass (≤ 0.050% of pixels differing); 133 fail.
+68 of 200 compared pages pass (≤ 0.050% of pixels differing); 132 fail.
 
 ## Visual Comparisons
 
@@ -1437,7 +1437,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### pdfkit_compressed.pdf page 1
 
-612x792; diff: 0.849%
+612x792; diff: 0.045%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

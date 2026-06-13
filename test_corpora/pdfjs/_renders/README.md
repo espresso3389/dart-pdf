@@ -79,7 +79,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | close-path-bug.pdf | 1 | 612x792 | 0.001% |
 | cmykjpeg.pdf | 1 | 612x792 | 5.996% |
 | colorkeymask.pdf | 1 | 596x842 | 0.000% |
-| colorspace_atan.pdf | 1 | 276x276 | 83.903% |
+| colorspace_atan.pdf | 1 | 276x276 | 0.068% |
 | complex_ttf_font.pdf | 1 | 595x842 | 3.207% |
 | coons-allflags-withfunction.pdf | 1 | 612x792 | 0.436% |
 | decodeACSuccessive.pdf | 1 | 400x400 | 2.978% |
@@ -768,7 +768,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### colorspace_atan.pdf page 1
 
-276x276; diff: 83.903%
+276x276; diff: 0.068%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

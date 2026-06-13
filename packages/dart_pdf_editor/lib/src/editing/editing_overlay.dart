@@ -1669,7 +1669,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         setState(() {
           _moveStart = position;
           _moveCurrent = position;
-          _cursor = SystemMouseCursors.grabbing; // closed hand while dragging
+          _cursor = SystemMouseCursors.move; // 4-arrow while dragging
         });
         return;
       }
@@ -1681,7 +1681,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       setState(() {
         _moveStart = position;
         _moveCurrent = position;
-        _cursor = SystemMouseCursors.grabbing;
+        _cursor = SystemMouseCursors.move;
       });
       return;
     }
@@ -2448,8 +2448,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         cursor = SystemMouseCursors.none;
       } else if (_selectedViewRects
           .any((rect) => rect.contains(event.localPosition))) {
-        // hovering a selected annotation: the grab hand reads as "drag me"
-        cursor = SystemMouseCursors.grab;
+        // hovering a selected annotation: the 4-arrow reads as "drag me"
+        cursor = SystemMouseCursors.move;
       } else {
         final (x, y) = _geometry.toPagePoint(event.localPosition);
         // a pointer over a selectable annotation, a crosshair-ish basic

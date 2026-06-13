@@ -157,15 +157,15 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | non-embedded-NuptialScript.pdf | 1 | 350x50 | 21.069% | ❌ fail |
 | openoffice.pdf | 1 | 200x50 | 1.340% | ❌ fail |
 | operator-in-TJ-array.pdf | 1 | 595x839 | 0.244% | ❌ fail |
-| operator_list_cycle.pdf | 1 | 612x792 | 8.229% | ❌ fail |
+| operator_list_cycle.pdf | 1 | 612x792 | 0.249% | ❌ fail |
 | pattern_text_embedded_font.pdf | 1 | 596x842 | 5.011% | ❌ fail |
 | pdfjsbad1586.pdf | 1 | 612x792 | 0.003% | ✅ pass |
 | pdfkit_compressed.pdf | 1 | 612x792 | 0.849% | ❌ fail |
 | poppler-67295-0.pdf | 1 | 612x792 | 0.282% | ❌ fail |
 | poppler-91414-0-53.pdf | 1 | 795x842 | 0.146% | ❌ fail |
 | poppler-91414-0-54.pdf | 1 | 795x842 | 0.146% | ❌ fail |
-| pr4922.pdf | 1 | 400x50 | 14.005% | ❌ fail |
-| pr4922.pdf | 2 | 400x50 | 14.090% | ❌ fail |
+| pr4922.pdf | 1 | 400x50 | 7.975% | ❌ fail |
+| pr4922.pdf | 2 | 400x50 | 8.030% | ❌ fail |
 | quadpoints.pdf | 1 | 596x842 | 0.553% | ❌ fail |
 | radial_gradients.pdf | 1 | 595x842 | 4.358% | ❌ fail |
 | radial_gradients.pdf | 2 | 595x842 | 2.898% | ❌ fail |
@@ -201,8 +201,8 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | text_rise_eol_bug.pdf | 1 | 612x792 | 0.220% | ❌ fail |
 | textfields.pdf | 1 | 612x792 | 1.172% | ❌ fail |
 | tiling-pattern-box.pdf | 1 | 596x842 | 0.997% | ❌ fail |
-| tiling-pattern-large-steps.pdf | 1 | 4000x400 | 85.901% | ❌ fail |
-| tiling_patterns_variations.pdf | 1 | 600x800 | 11.976% | ❌ fail |
+| tiling-pattern-large-steps.pdf | 1 | 4000x400 | 72.620% | ❌ fail |
+| tiling_patterns_variations.pdf | 1 | 600x800 | 4.001% | ❌ fail |
 | transparent.pdf | 1 | 200x200 | 11.063% | ❌ fail |
 | type4psfunc.pdf | 1 | 612x792 | 5.527% | ❌ fail |
 | vertical.pdf | 1 | 250x322 | 1.511% | ❌ fail |
@@ -1395,7 +1395,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### operator_list_cycle.pdf page 1
 
-612x792; diff: 8.229%
+612x792; diff: 0.249%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1451,7 +1451,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### pr4922.pdf page 1
 
-400x50; diff: 14.005%
+400x50; diff: 7.975%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1459,7 +1459,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### pr4922.pdf page 2
 
-400x50; diff: 14.090%
+400x50; diff: 8.030%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1747,7 +1747,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### tiling-pattern-large-steps.pdf page 1
 
-4000x400; diff: 85.901%
+4000x400; diff: 72.620%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1755,7 +1755,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### tiling_patterns_variations.pdf page 1
 
-600x800; diff: 11.976%
+600x800; diff: 4.001%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

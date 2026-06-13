@@ -155,6 +155,9 @@ class CountingDevice implements PdfDevice {
     required bool luminosity,
     required PdfRect backdrop,
     required void Function() drawMask,
+    double backdropLuminance = 0,
+    double transferScale = 1,
+    double transferOffset = 0,
   }) {
     drawMask();
   }

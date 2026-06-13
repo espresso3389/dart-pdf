@@ -465,6 +465,18 @@ class PdfFontInfo {
       final gid = font.gidForSymbolCode(code);
       if (gid != 0) return gid;
     }
+    // Glyph selection goes through the font's /Encoding, not /ToUnicode
+    // (§9.6.6.4). Subset fonts (pdfkit, many producers) key their Unicode
+    // cmap on the original code points reached via the encoding's glyph
+    // names, while /ToUnicode remaps to semantic Unicode (e.g. code 33 →
+    // "exclam" → U+0021 in the cmap, but /ToUnicode says U+0053 'S').
+    final encUnicode = _encodingUnicode(code);
+    if (encUnicode != null) {
+      final gid = font.gidForUnicode(encUnicode);
+      if (gid != 0) return gid;
+    }
+    // Fall back to /ToUnicode-derived Unicode for fonts whose cmap really is
+    // keyed by semantic Unicode and that carry no usable encoding.
     final unicode = charFor(code);
     if (unicode.isNotEmpty) {
       final gid = font.gidForUnicode(unicode.runes.first);
@@ -475,6 +487,21 @@ class PdfFontInfo {
     // subset fonts without a cmap index glyphs directly by code
     if (!font.hasCmap && code < font.numGlyphs) return code;
     return 0;
+  }
+
+  /// Unicode for one code via the font's /Encoding (glyph name → Unicode),
+  /// independent of /ToUnicode. Used for glyph selection; returns null for
+  /// CID fonts and codes with no encoding entry.
+  int? _encodingUnicode(int code) {
+    if (isCid) return null;
+    final name = _encodingNames[code] ?? _type1?.builtinEncoding[code];
+    if (name != null) {
+      final mapped = glyphNameUnicode(name);
+      if (mapped != null) return mapped;
+    }
+    // No encoding entry: Standard/WinAnsi ≈ Latin-1 over 0x20–0xFF.
+    if (code >= 0x20 && code <= 0xFF) return code;
+    return null;
   }
 
   /// Splits show-text string bytes into character codes.

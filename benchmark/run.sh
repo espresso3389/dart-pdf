@@ -12,6 +12,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CORPUS="${1:-$ROOT/test_corpora/pdfjs}"
 SCALE="${2:-2}"
 MAX_PAGES="${3:-10}"
+# Per-file wall-clock budget for PDFium (seconds). The pdfjs corpus has
+# deliberately-malformed PDFs that send PDFium into a multi-minute native spin;
+# without this the sweep hangs on them. dart-pdf has its own per-page timeout.
+PDFIUM_TIMEOUT="${PDFIUM_TIMEOUT:-30}"
 OUT="$ROOT/benchmark/out"
 mkdir -p "$OUT"
 
@@ -22,7 +26,8 @@ echo "== Corpus: $CORPUS  (scale $SCALE, $MAX_PAGES pages/file) =="
 
 echo "== 1/3  PDFium (pypdfium2) =="
 python3 "$ROOT/benchmark/pdfium_benchmark.py" "$CORPUS" \
-  --scale "$SCALE" --max-pages "$MAX_PAGES" --out "$OUT/pdfium.json"
+  --scale "$SCALE" --max-pages "$MAX_PAGES" --timeout "$PDFIUM_TIMEOUT" \
+  --out "$OUT/pdfium.json"
 
 echo "== 2/3  dart-pdf interpret (pure Dart, no raster) =="
 ( cd "$ROOT/packages/pdf_graphics" && \

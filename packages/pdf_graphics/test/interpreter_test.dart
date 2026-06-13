@@ -573,11 +573,13 @@ void main() {
       expect(device.texts[2].strokeColor, isNull);
     });
 
-    test('substituted fill+stroke text drops an unrenderable tiling fill', () {
+    test('substituted fill+stroke text fills a tiling pattern with its '
+        'representative colour', () {
       // /Pattern cs /P1 scn sets a tiling-pattern fill that can't be clipped
-      // through a substituted font's (absent) outlines. In fill+stroke mode
-      // the bogus solid fallback is dropped so the stroke reads as an outline
-      // instead of a solid block.
+      // through a substituted font's (absent) outlines. We fall back to the
+      // cell's fill colour (magenta) as a solid approximation rather than
+      // dropping the fill, so the glyphs read in the pattern's colour with the
+      // stroke on top.
       final doc = CosDocument.open(buildClassicPdf());
       final device = RecordingDevice();
       const cell = '1 0 1 rg 0 0 1 1 re f';
@@ -610,7 +612,8 @@ void main() {
         resources,
       );
       final run = device.texts.single;
-      expect(run.fill, isFalse, reason: 'unrenderable tiling fill dropped');
+      expect(run.fill, isTrue, reason: 'tiling fill approximated as a solid');
+      expect(run.color, const PdfColor(1, 0, 1), reason: 'the cell fill colour');
       expect(run.strokeColor, const PdfColor(0, 0, 1));
     });
 

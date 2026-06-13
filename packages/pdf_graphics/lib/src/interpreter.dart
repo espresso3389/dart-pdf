@@ -1615,14 +1615,20 @@ class PdfInterpreter {
         // honours stroke modes, so outlined display text actually outlines.
         final embedded = glyphs != null;
         // On a substituted font we have no outlines to clip a tiling pattern
-        // through, so the fill would otherwise collapse to a bogus solid
-        // colour. When the mode also strokes, drop that fill and let the
-        // outline read instead (what conforming viewers show — the sparse
-        // pattern barely fills); keep the solid fallback when there's no
-        // stroke so fill-only text never vanishes.
+        // through, so the device can't tile the cell over the glyphs. Fall back
+        // to a representative solid colour for the pattern (what conforming
+        // viewers approximate when the cell is dense) instead of dropping the
+        // fill — otherwise the glyphs read black, or vanish entirely when the
+        // mode also strokes. Only drop the fill if we can't derive a colour.
         var doFill = fillText && !paintedAsTiling;
-        if (!embedded && doFill && strokeText && _isTilingPattern(pattern)) {
-          doFill = false;
+        var textFill = _state.fillColor;
+        if (!embedded && doFill && _isTilingPattern(pattern)) {
+          final tilingColor = _tilingPatternColor(pattern as CosStream);
+          if (tilingColor != null) {
+            textFill = tilingColor;
+          } else if (strokeText) {
+            doFill = false;
+          }
         }
         final k = _state.ctm.scaleFactor;
         device.drawText(PdfTextRun(
@@ -1630,7 +1636,7 @@ class PdfInterpreter {
           transform: transform,
           color: embedded && (mode == 1 || mode == 5)
               ? _state.strokeColor
-              : _state.fillColor,
+              : textFill,
           fill: embedded ? true : doFill,
           strokeColor: !embedded && strokeText ? _state.strokeColor : null,
           strokeWidth: _state.stroke.width <= 0 ? k : _state.stroke.width * k,
@@ -1738,11 +1744,50 @@ class PdfInterpreter {
   PdfColor? _patternAverageColor(CosObject? pattern) {
     final dict = _patternDict(pattern);
     if (dict == null) return null;
+    final type = cos.resolve(dict['PatternType']);
+    if (type is CosInteger && type.value == 1 && pattern is CosStream) {
+      return _tilingPatternColor(pattern);
+    }
     final shading = PdfShading.parse(cos, dict['Shading']);
     if (shading == null) return null;
     return shading.toGradient(PdfMatrix.identity)?.averageColor ??
         shading.toMesh(PdfMatrix.identity)?.averageColor ??
         shading.toFunctionMesh(PdfMatrix.identity)?.averageColor;
+  }
+
+  /// A representative solid colour for a tiling pattern, used where the cell
+  /// can't be tiled through the fill shape (a substituted font's text has no
+  /// outlines to clip against — §8.7.3.1). PaintType 2 (uncolored) carries the
+  /// colour in the `scn` operands; for a colored pattern we take the last fill
+  /// colour the cell content sets (the colour the tiles are painted in).
+  PdfColor? _tilingPatternColor(CosStream pattern) {
+    final dict = pattern.dictionary;
+    final paintType = cos.resolve(dict['PaintType']);
+    if (paintType is CosInteger && paintType.value == 2) {
+      return _state.fillPatternComponents.isNotEmpty
+          ? colorFromComponents(_state.fillPatternComponents)
+          : null;
+    }
+    final List<ContentOperation> ops;
+    try {
+      ops = _patternOpsCache.putIfAbsent(pattern,
+          () => ContentStreamParser.parse(cos.decodeStreamData(pattern)));
+    } on Exception {
+      return null;
+    }
+    PdfColor? color;
+    for (final op in ops) {
+      final o = op.operands;
+      switch (op.operator) {
+        case 'g':
+          color = PdfColor.gray(_num(o, 0));
+        case 'rg':
+          color = PdfColor(_num(o, 0), _num(o, 1), _num(o, 2));
+        case 'k':
+          color = PdfColor.cmyk(_num(o, 0), _num(o, 1), _num(o, 2), _num(o, 3));
+      }
+    }
+    return color;
   }
 
   PdfGradient? _gradientOfPattern(CosObject? pattern) {

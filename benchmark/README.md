@@ -41,6 +41,14 @@ excludes Flutter's GPU raster + readback.
   to render the sweep several times and keep each file's fastest pass.
 - **Page cap.** Default 10 pages/file keeps long documents from dominating;
   raise with `--max-pages 0` (all pages).
+- **Malformed PDFs.** Some corpora (notably `test_corpora/pdfjs`) hold
+  deliberately-corrupted files that send PDFium into a multi-minute native
+  spin. PDFium renders the whole sweep in one process, and a long native call
+  ignores signals, so `pdfium_benchmark.py --timeout N` renders each file in a
+  killable fork child and records anything over `N` seconds as a `timeout`
+  error instead of hanging the run. `run.sh` passes `--timeout 30` by default
+  (override with `PDFIUM_TIMEOUT`). The dart-pdf render harness has its own
+  per-page 60 s timeout.
 - **Fonts.** `benchmark_render_test.dart` reuses the test suite's
   `loadSystemFonts` (macOS font paths); on other platforms dart-pdf falls back,
   which is fine for timing.
@@ -62,9 +70,9 @@ benchmark/run.sh /path/to/pdfs 2 20
 ## Running a harness on its own
 
 ```bash
-# PDFium
+# PDFium (--timeout kills any file that spins past N seconds)
 python3 benchmark/pdfium_benchmark.py test_corpora/pdfjs \
-    --scale 2 --max-pages 10 --repeat 3 --out benchmark/out/pdfium.json
+    --scale 2 --max-pages 10 --repeat 3 --timeout 30 --out benchmark/out/pdfium.json
 
 # dart-pdf full render (Flutter)
 cd packages/dart_pdf_editor

@@ -23,6 +23,7 @@ parse/load time. Both exclude file I/O (bytes are read up front).
 """
 import argparse
 import json
+import multiprocessing as mp
 import os
 import sys
 import time
@@ -80,6 +81,34 @@ def bench_file(path, scale, max_pages):
     return (n, rendered, open_ms, render_ms, error)
 
 
+def _bench_child(path, scale, max_pages, q):
+    q.put(bench_file(path, scale, max_pages))
+
+
+def bench_with_timeout(path, scale, max_pages, timeout, ctx):
+    """bench_file, but render in a killable fork child so a single malformed
+    PDF can't stall the sweep. A long native PDFium render ignores signals, so
+    nothing short of killing the process works — hence a child, not SIGALRM.
+
+    The child is forked AFTER pypdfium2 is imported in the parent, so it
+    inherits the loaded native lib (no per-file re-import cost) and the timing
+    brackets stay inside bench_file (fork/IPC overhead is excluded)."""
+    if timeout <= 0:
+        return bench_file(path, scale, max_pages)
+    q = ctx.Queue()
+    p = ctx.Process(target=_bench_child, args=(path, scale, max_pages, q))
+    p.start()
+    p.join(timeout)
+    if p.is_alive():
+        p.terminate()
+        p.join()
+        return (0, 0, 0.0, 0.0, f"timeout>{timeout}s")
+    try:
+        return q.get_nowait()
+    except Exception:  # noqa: BLE001 — child crashed (e.g. native abort)
+        return (0, 0, 0.0, 0.0, "child died (native crash?)")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("corpus", help="PDF file or directory (searched recursively)")
@@ -89,6 +118,11 @@ def main():
                     help="cap pages rendered per file (<=0 = all)")
     ap.add_argument("--repeat", type=int, default=1,
                     help="render the whole sweep N times; keep the fastest")
+    ap.add_argument("--timeout", type=float, default=0.0,
+                    help="per-file wall-clock budget in seconds (0 = none); a "
+                         "file exceeding it is killed and recorded as a timeout "
+                         "error. Needed for corpora with malformed PDFs that send "
+                         "PDFium into a long native spin.")
     ap.add_argument("--out", default=None, help="write JSON here (else stdout)")
     args = ap.parse_args()
 
@@ -96,12 +130,19 @@ def main():
     if not files:
         sys.exit(f"no PDFs under {args.corpus}")
 
+    # fork (not the macOS default 'spawn') so the child inherits the imported
+    # pypdfium2 — no per-file re-import, and no re-running this script's argv.
+    ctx = mp.get_context("fork") if args.timeout > 0 else None
+
     # Per file, keep the fastest render time across repeats (warm-cache best).
     best = {}
     for r in range(args.repeat):
         for path in files:
-            pages, rendered, open_ms, render_ms, error = bench_file(
-                path, args.scale, args.max_pages)
+            pages, rendered, open_ms, render_ms, error = bench_with_timeout(
+                path, args.scale, args.max_pages, args.timeout, ctx)
+            if error and str(error).startswith("timeout"):
+                print(f"  TIMEOUT >{args.timeout}s  {os.path.basename(path)}",
+                      file=sys.stderr, flush=True)
             prev = best.get(path)
             better = prev is None or (error is None and (
                 prev["error"] is not None or render_ms < prev["renderMs"]))

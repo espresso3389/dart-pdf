@@ -266,6 +266,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   Rect? _resizeFrom;
   Rect? _resizeRect;
   double _resizeAngle = 0;
+  // a resize drag that pulled a handle past the opposite edge mirrors the
+  // annotation; _resizeRect stays normalized (positive) so the chrome and
+  // ghost layout are unaffected, and these carry the flip to the commit
+  bool _resizeFlipX = false;
+  bool _resizeFlipY = false;
   int? _vertexHandle;
   List<Offset>? _vertexPoints;
 
@@ -310,6 +315,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   Rect? _afterGhostSourceRect;
   double _afterGhostRotation = 0;
   double _afterGhostLocalAngle = 0;
+  bool _afterGhostFlipX = false;
+  bool _afterGhostFlipY = false;
   ({Rect rect, PdfEditTool tool, Color color, double strokeWidth})? _afterShape;
   // a just-committed Square/Circle resize, held (constant stroke width)
   // until the new revision's raster lands — see [_shapeResizeStyle]
@@ -532,6 +539,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       _resizeFrom = null;
       _resizeRect = null;
       _resizeAngle = 0;
+      _resizeFlipX = false;
+      _resizeFlipY = false;
       _rotateStartAngle = null;
       _rotateDelta = 0;
       _marqueeStart = null;
@@ -795,6 +804,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterGhostSourceRect = null;
     _afterGhostRotation = 0;
     _afterGhostLocalAngle = 0;
+    _afterGhostFlipX = false;
+    _afterGhostFlipY = false;
     _afterShape = null;
     _afterShapeResize = null;
     _afterPath = null;
@@ -815,8 +826,15 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   /// For a rotated selection's resize, [localAngle] is its resting
   /// rotation and [to] the dragged *local* box — the afterimage then
   /// scales along the local axes, exactly like the live preview did.
+  ///
+  /// [flipX]/[flipY] mirror the afterimage so a resize that inverted the
+  /// annotation stays inverted while the page re-renders.
   void _commitWithGhost(VoidCallback commit,
-      {Rect? to, double rotation = 0, double localAngle = 0}) {
+      {Rect? to,
+      double rotation = 0,
+      double localAngle = 0,
+      bool flipX = false,
+      bool flipY = false}) {
     final from = localAngle == 0 ? _selectedViewRect : _selectionChrome?.$1;
     final source = _selectedViewRect;
     final ghost = _ghost;
@@ -833,6 +851,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterGhostSourceRect = source;
     _afterGhostRotation = rotation;
     _afterGhostLocalAngle = localAngle;
+    _afterGhostFlipX = flipX;
+    _afterGhostFlipY = flipY;
     _afterDocument = _controller.document;
   }
 
@@ -1075,7 +1095,14 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         .shift(_rotatePoint(delta, Offset.zero, _resizeAngle) - delta);
   }
 
-  Rect _resizedRect(Rect from, _Handle handle, Offset delta,
+  /// The resized box, plus whether the drag inverted it horizontally /
+  /// vertically. The returned rect is always normalized (positive
+  /// width/height); a flip rides the booleans, so chrome and ghost layout
+  /// stay simple. A handle dragged past the opposite edge crosses the 0
+  /// point and the box flips out the other side (with the minimum size
+  /// kept on the far side); aspect-locked drags (Shift) keep the old
+  /// clamp-at-minimum and never flip.
+  (Rect, bool, bool) _resizedRect(Rect from, _Handle handle, Offset delta,
       {double? aspectRatio}) {
     final minSize = _minSizeView * _chromeScale;
     var left = from.left, top = from.top;
@@ -1084,22 +1111,23 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     if (handle.dx > 0) right += delta.dx;
     if (handle.dy < 0) top += delta.dy;
     if (handle.dy > 0) bottom += delta.dy;
-    // never collapse or invert: the dragged side stops at the minimum
-    if (right - left < minSize) {
-      if (handle.dx < 0) {
-        left = right - minSize;
-      } else {
-        right = left + minSize;
-      }
-    }
-    if (bottom - top < minSize) {
-      if (handle.dy < 0) {
-        top = bottom - minSize;
-      } else {
-        bottom = top + minSize;
-      }
-    }
+
     if (aspectRatio != null && aspectRatio > 0) {
+      // aspect-locked: keep the original clamp-at-minimum, never invert
+      if (right - left < minSize) {
+        if (handle.dx < 0) {
+          left = right - minSize;
+        } else {
+          right = left + minSize;
+        }
+      }
+      if (bottom - top < minSize) {
+        if (handle.dy < 0) {
+          top = bottom - minSize;
+        } else {
+          bottom = top + minSize;
+        }
+      }
       var width = right - left;
       var height = bottom - top;
       if (handle.dx != 0 && handle.dy != 0) {
@@ -1142,8 +1170,47 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         left = cx - width / 2;
         right = cx + width / 2;
       }
+      return (Rect.fromLTRB(left, top, right, bottom), false, false);
     }
-    return Rect.fromLTRB(left, top, right, bottom);
+
+    // free resize: let the dragged edge cross its anchor and invert the
+    // box. Keep |size| ≥ minSize on whichever side of 0 it currently sits
+    // so it never collapses to a line.
+    var flipX = false, flipY = false;
+    if (handle.dx != 0) {
+      var width = right - left;
+      if (width.abs() < minSize) {
+        width = width < 0 ? -minSize : minSize;
+        if (handle.dx < 0) {
+          left = right - width;
+        } else {
+          right = left + width;
+        }
+      }
+      flipX = width < 0;
+    }
+    if (handle.dy != 0) {
+      var height = bottom - top;
+      if (height.abs() < minSize) {
+        height = height < 0 ? -minSize : minSize;
+        if (handle.dy < 0) {
+          top = bottom - height;
+        } else {
+          bottom = top + height;
+        }
+      }
+      flipY = height < 0;
+    }
+    return (
+      Rect.fromLTRB(
+        math.min(left, right),
+        math.min(top, bottom),
+        math.max(left, right),
+        math.max(top, bottom),
+      ),
+      flipX,
+      flipY,
+    );
   }
 
   // -----------------------------------------------------------------
@@ -1412,6 +1479,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           _resizeFrom = resting == 0 ? selected : chrome!.$1;
           _resizeRect = _resizeFrom;
           _resizeAngle = resting;
+          _resizeFlipX = false;
+          _resizeFlipY = false;
           _moveStart = position;
           _moveCurrent = position;
         });
@@ -1547,13 +1616,16 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                 _resizeFrom!.height > 0
             ? _resizeFrom!.width / _resizeFrom!.height
             : null;
-        _resizeRect = _anchorResized(_resizedRect(
+        final (resized, flipX, flipY) = _resizedRect(
             _resizeFrom!,
             _resizeHandle!,
             _resizeAngle == 0
                 ? delta
                 : _rotatePoint(delta, Offset.zero, -_resizeAngle),
-            aspectRatio: aspectRatio));
+            aspectRatio: aspectRatio);
+        _resizeFlipX = flipX;
+        _resizeFlipY = flipY;
+        _resizeRect = _anchorResized(resized);
       });
     } else if (_moveStart != null) {
       setState(() => _moveCurrent = position);
@@ -1583,6 +1655,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     final moveCurrent = _moveCurrent;
     final resizeRect = _resizeHandle != null ? _resizeRect : null;
     final resizeAngle = _resizeAngle;
+    final resizeFlipX = _resizeFlipX;
+    final resizeFlipY = _resizeFlipY;
     final vertexPoints = _vertexHandle != null ? _vertexPoints : null;
     final rotating = _rotateStartAngle != null;
     final rotateDelta = _rotateDelta;
@@ -1603,6 +1677,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       _resizeFrom = null;
       _resizeRect = null;
       _resizeAngle = 0;
+      _resizeFlipX = false;
+      _resizeFlipY = false;
       _vertexHandle = null;
       _vertexPoints = null;
       _rotateStartAngle = null;
@@ -1650,8 +1726,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       // ghost would thicken the line until the raster lands)
       final shapeStyle = _shapeResizeStyle(resizeRect, resizeAngle);
       void commit() => resizeAngle == 0
-          ? _controller.resizeSelected(_geometry.toPageRect(resizeRect))
-          : _controller.resizeSelectedLocal(_geometry.toPageRect(resizeRect));
+          ? _controller.resizeSelected(_geometry.toPageRect(resizeRect),
+              flipX: resizeFlipX, flipY: resizeFlipY)
+          : _controller.resizeSelectedLocal(_geometry.toPageRect(resizeRect),
+              flipX: resizeFlipX, flipY: resizeFlipY);
       if (wrapStyle != null) {
         // the commit re-wraps the text at constant size — a stretched
         // ghost afterimage would show scaled glyphs, so freeze the same
@@ -1683,11 +1761,16 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           _afterDocument = _controller.document;
         }
       } else if (resizeAngle == 0) {
-        _commitWithGhost(commit, to: resizeRect);
+        _commitWithGhost(commit,
+            to: resizeRect, flipX: resizeFlipX, flipY: resizeFlipY);
       } else {
         // the dragged rect is the local box; the editor re-applies the
         // resting rotation about its center
-        _commitWithGhost(commit, to: resizeRect, localAngle: resizeAngle);
+        _commitWithGhost(commit,
+            to: resizeRect,
+            localAngle: resizeAngle,
+            flipX: resizeFlipX,
+            flipY: resizeFlipY);
       }
     } else if (moveStart != null && moveCurrent != null) {
       if ((moveCurrent - moveStart).distance < 2) return; // a click
@@ -2608,6 +2691,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                     rotation: restingRotation + (rotating ? _rotateDelta : 0),
                     ghostRotation: rotating ? _rotateDelta : 0,
                     ghostLocalAngle: _resizeHandle != null ? _resizeAngle : 0,
+                    ghostFlipX: _resizeHandle != null && _resizeFlipX,
+                    ghostFlipY: _resizeHandle != null && _resizeFlipY,
                     // free-text resize lift: hide the original box's
                     // footprint with the page rendered without it (or an
                     // opaque-paper wash until that lands)
@@ -2638,6 +2723,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                             source: _afterGhostSourceRect,
                             rotation: _afterGhostRotation,
                             localAngle: _afterGhostLocalAngle,
+                            flipX: _afterGhostFlipX,
+                            flipY: _afterGhostFlipY,
                           )
                         : null,
                     afterShape: _afterShape,
@@ -2999,6 +3086,8 @@ class _EditingPreviewPainter extends CustomPainter {
     required this.rotation,
     required this.ghostRotation,
     this.ghostLocalAngle = 0,
+    this.ghostFlipX = false,
+    this.ghostFlipY = false,
     this.resizeClean,
     this.resizeHideRect,
     this.resizeHideAngle = 0,
@@ -3078,6 +3167,12 @@ class _EditingPreviewPainter extends CustomPainter {
   /// along the rotated axes instead of stretching page-axis rects.
   final double ghostLocalAngle;
 
+  /// A resize drag that crossed the 0 point: the ghost mirrors along the
+  /// flipped axis (about [ghostTo]'s center / local axes) so the live
+  /// preview matches the inverted artwork the commit produces.
+  final bool ghostFlipX;
+  final bool ghostFlipY;
+
   /// The free-text resize "lift": the page rendered without the dragged
   /// box ([resizeClean], page raster space at 1 unit = 1 point), clipped
   /// to that box's original footprint [resizeHideRect] (a view rect, spun
@@ -3125,6 +3220,8 @@ class _EditingPreviewPainter extends CustomPainter {
     Rect? source,
     double rotation,
     double localAngle,
+    bool flipX,
+    bool flipY,
   })? afterGhost;
 
   /// A just-committed shape's drag preview, same deal.
@@ -3442,6 +3539,8 @@ class _EditingPreviewPainter extends CustomPainter {
           scale: geometry.scale,
           rotation: committed.rotation,
           localAngle: committed.localAngle,
+          flipX: committed.flipX,
+          flipY: committed.flipY,
           opacity: 1);
     }
 
@@ -3456,7 +3555,9 @@ class _EditingPreviewPainter extends CustomPainter {
           to: ghostTo,
           scale: geometry.scale,
           rotation: ghostRotation,
-          localAngle: ghostLocalAngle);
+          localAngle: ghostLocalAngle,
+          flipX: ghostFlipX,
+          flipY: ghostFlipY);
     }
     final shapeResize = this.shapeResize;
     if (shapeResize != null) _paintShapeResize(canvas, shapeResize);
@@ -3613,6 +3714,8 @@ class _EditingPreviewPainter extends CustomPainter {
       oldDelegate.rotation != rotation ||
       oldDelegate.ghostRotation != ghostRotation ||
       oldDelegate.ghostLocalAngle != ghostLocalAngle ||
+      oldDelegate.ghostFlipX != ghostFlipX ||
+      oldDelegate.ghostFlipY != ghostFlipY ||
       oldDelegate.resizeClean != resizeClean ||
       oldDelegate.resizeHideRect != resizeHideRect ||
       oldDelegate.resizeHideAngle != resizeHideAngle ||
@@ -3664,6 +3767,8 @@ void paintAnnotationDragPreview(
   required double scale,
   double rotation = 0,
   double localAngle = 0,
+  bool flipX = false,
+  bool flipY = false,
   double opacity = 0.75,
 }) {
   if (from.width <= 0 || from.height <= 0) return;
@@ -3682,15 +3787,20 @@ void paintAnnotationDragPreview(
     canvas.rotate(rotation);
     canvas.translate(-to.center.dx, -to.center.dy);
   }
+  // a flip is a negative scale along the axis; about the box center for
+  // the rotated path (the scale already sits there) and about the
+  // appropriate edge for the page-axis path so it mirrors within [to]
+  final sx = (to.width / from.width) * (flipX ? -1 : 1);
+  final sy = (to.height / from.height) * (flipY ? -1 : 1);
   if (localAngle != 0) {
     canvas.translate(to.center.dx, to.center.dy);
     canvas.rotate(localAngle);
-    canvas.scale(to.width / from.width, to.height / from.height);
+    canvas.scale(sx, sy);
     canvas.rotate(-localAngle);
     canvas.translate(-from.center.dx, -from.center.dy);
   } else {
-    canvas.translate(to.left, to.top);
-    canvas.scale(to.width / from.width, to.height / from.height);
+    canvas.translate(flipX ? to.right : to.left, flipY ? to.bottom : to.top);
+    canvas.scale(sx, sy);
     canvas.translate(-from.left, -from.top);
   }
   canvas.scale(scale, scale);

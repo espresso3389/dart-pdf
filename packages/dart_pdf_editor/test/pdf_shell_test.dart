@@ -246,6 +246,7 @@ void main() {
             tools: {PdfEditTool.ink, PdfEditTool.select},
             markup: false,
             flatten: false,
+            colorControls: false,
             styleControls: false,
             undoRedo: false,
           ),
@@ -261,6 +262,53 @@ void main() {
       expect(find.byIcon(Icons.undo), findsNothing);
       expect(find.byIcon(Icons.layers), findsNothing);
       expect(find.byIcon(Icons.palette), findsNothing);
+    });
+
+    testWidgets('colorControls hides the color changer, keeps the style popup',
+        (tester) async {
+      await pump(
+        tester,
+        PdfEditorView(
+          bytes: buildMultiPagePdf(1),
+          features: const PdfEditorFeatures(
+            colorControls: false,
+            // styleControls stays true: stroke/opacity/font remain
+          ),
+        ),
+      );
+      // color changer gone: "More colors…" picker and eyedropper
+      expect(find.byIcon(Icons.palette), findsNothing);
+      expect(find.byIcon(Icons.colorize), findsNothing);
+      // the style popup (stroke/opacity/font) still shows
+      expect(find.byTooltip('Stroke, opacity, font'), findsOneWidget);
+      // its text-box color rows are gone with color controls off
+      await tester.scrollUntilVisible(
+          find.byTooltip('Stroke, opacity, font'), 100,
+          scrollable: find.descendant(
+              of: find.byType(PdfEditingToolbar),
+              matching: find.byType(Scrollable)));
+      await tester.tap(find.byTooltip('Stroke, opacity, font'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('pdf-text-fill-none')), findsNothing);
+      expect(find.byKey(const ValueKey('pdf-text-border-none')), findsNothing);
+      // but the sliders survive
+      expect(find.byType(Slider), findsWidgets);
+    });
+
+    testWidgets('color controls are present by default', (tester) async {
+      await pump(tester, PdfEditorView(bytes: buildMultiPagePdf(1)));
+      expect(find.byIcon(Icons.palette), findsOneWidget);
+      expect(find.byIcon(Icons.colorize), findsOneWidget);
+      await tester.scrollUntilVisible(
+          find.byTooltip('Stroke, opacity, font'), 100,
+          scrollable: find.descendant(
+              of: find.byType(PdfEditingToolbar),
+              matching: find.byType(Scrollable)));
+      await tester.tap(find.byTooltip('Stroke, opacity, font'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('pdf-text-fill-none')), findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('pdf-text-border-none')), findsOneWidget);
     });
 
     testWidgets('toolbar buttons drive the owned session', (tester) async {

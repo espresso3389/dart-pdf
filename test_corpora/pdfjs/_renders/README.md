@@ -14,7 +14,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | ContentStreamCycleType3insideType3.pdf | 1 | 600x840 | 1.477% | ❌ fail |
 | ContentStreamNoCycleType3insideType3.pdf | 1 | 600x840 | 1.602% | ❌ fail |
 | IdentityToUnicodeMap_charCodeOf.pdf | 1 | 200x50 | 4.170% | ❌ fail |
-| IndexedCS_negative_and_high.pdf | 1 | 500x100 | 9.600% | ❌ fail |
+| IndexedCS_negative_and_high.pdf | 1 | 500x100 | 1.600% | ❌ fail |
 | PDFBOX-3148-2-fuzzed.pdf | 1 | 612x792 | 0.000% | ✅ pass |
 | PDFBOX-4352-0.pdf | 1 | 200x50 | 0.000% | ✅ pass |
 | PDFJS-7562-reduced.pdf | 1 | 596x842 | 0.004% | ✅ pass |
@@ -208,7 +208,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | vertical.pdf | 1 | 250x322 | 1.511% | ❌ fail |
 | vertical.pdf | 2 | 250x322 | 0.932% | ❌ fail |
 | vertical.pdf | 3 | 250x322 | 0.932% | ❌ fail |
-| visibility_expressions.pdf | 1 | 341x341 | 8.299% | ❌ fail |
+| visibility_expressions.pdf | 1 | 341x341 | 7.555% | ❌ fail |
 | xobject-image.pdf | 1 | 200x100 | 0.000% | ✅ pass |
 | xref_command_missing.pdf | 1 | 200x50 | 8.480% | ❌ fail |
 | zerowidthline.pdf | 1 | 596x842 | 1.629% | ❌ fail |
@@ -251,7 +251,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### IndexedCS_negative_and_high.pdf page 1
 
-500x100; diff: 9.600%
+500x100; diff: 1.600%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1803,7 +1803,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### visibility_expressions.pdf page 1
 
-341x341; diff: 8.299%
+341x341; diff: 7.555%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

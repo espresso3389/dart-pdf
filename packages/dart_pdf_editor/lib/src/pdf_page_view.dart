@@ -371,9 +371,16 @@ class _PdfPageViewState extends State<PdfPageView> {
                 if (_image == null)
                   // before the first render lands: the low-res preview if
                   // the cache has one (fast scroll past a known page), else
-                  // a placeholder matching the paper so nothing flashes
+                  // a placeholder matching the paper so nothing flashes. A
+                  // translucent paper color washes over white, matching the
+                  // renderer's white-backed raster.
                   _preview == null
-                      ? ColoredBox(color: widget.pageColor)
+                      ? (widget.pageColor.a < 1.0
+                          ? ColoredBox(
+                              color: const Color(0xFFFFFFFF),
+                              child: ColoredBox(color: widget.pageColor),
+                            )
+                          : ColoredBox(color: widget.pageColor))
                       : RawImage(
                           image: _preview,
                           fit: BoxFit.contain,

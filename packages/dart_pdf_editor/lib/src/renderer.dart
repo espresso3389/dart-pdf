@@ -44,6 +44,17 @@ class PdfPageRenderer {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
 
+    // The paper is opaque white; [pageColor] washes over it. A
+    // translucent page color (e.g. a copy-type tint) thus reads as a
+    // wash on white rather than compositing onto the viewer canvas
+    // behind the page. A fully opaque color makes the white backing a
+    // no-op, so this is free in the common case.
+    if (pageColor.a < 1.0) {
+      canvas.drawRect(
+        Offset.zero & size,
+        Paint()..color = const Color(0xFFFFFFFF),
+      );
+    }
     canvas.drawRect(
       Offset.zero & size,
       Paint()..color = pageColor,

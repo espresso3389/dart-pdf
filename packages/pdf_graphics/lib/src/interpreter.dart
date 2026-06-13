@@ -942,6 +942,12 @@ class PdfInterpreter {
   }
 
   bool _optionalContentMembershipVisible(CosDictionary dict) {
+    // §8.11.4.3: a /VE visibility expression, when present, takes precedence
+    // over /OCGs + /P.
+    final ve = cos.resolve(dict['VE']);
+    if (ve is CosArray && ve.length > 0) {
+      return _evaluateVisibilityExpression(ve);
+    }
     final policy = cos.resolve(dict['P']);
     final policyName = policy is CosName ? policy.value : 'AnyOn';
     final groups = _optionalContentReferences(dict['OCGs']);
@@ -955,6 +961,37 @@ class PdfInterpreter {
       'AllOff' => values.every((visible) => !visible),
       _ => values.any((visible) => visible),
     };
+  }
+
+  /// Evaluates a /VE visibility expression (§8.11.4.3): an array led by /And,
+  /// /Or, or /Not whose operands are nested expressions or OCG references; a
+  /// leaf OCG is true when its group is visible. Malformed nodes default to
+  /// visible so content is never lost.
+  bool _evaluateVisibilityExpression(CosObject? object) {
+    final resolved = cos.resolve(object);
+    if (object is CosReference && resolved is CosDictionary) {
+      // A leaf operand: an OCG (or nested OCMD) reference.
+      final type = cos.resolve(resolved['Type']);
+      if (type is CosName && type.value == 'OCMD') {
+        return _optionalContentMembershipVisible(resolved);
+      }
+      return _optionalContentGroupVisible(object);
+    }
+    if (resolved is! CosArray || resolved.length == 0) return true;
+    final op = cos.resolve(resolved[0]);
+    final name = op is CosName ? op.value : '';
+    final operands = resolved.items.skip(1);
+    switch (name) {
+      case 'Not':
+        final first = operands.isEmpty ? null : operands.first;
+        return !_evaluateVisibilityExpression(first);
+      case 'And':
+        return operands.every(_evaluateVisibilityExpression);
+      case 'Or':
+        return operands.any(_evaluateVisibilityExpression);
+      default:
+        return true;
+    }
   }
 
   Iterable<CosReference> _optionalContentReferences(CosObject? object) sync* {
@@ -1173,6 +1210,9 @@ class PdfInterpreter {
     final space = cos.resolve(spaces[(o[0] as CosName).value]);
     if (space is! CosArray || space.length < 4) return null;
     final family = cos.resolve(space[0]);
+    if (family is CosName && family.value == 'Indexed') {
+      return _indexedTransform(space);
+    }
     if (family is! CosName ||
         (family.value != 'Separation' && family.value != 'DeviceN')) {
       return null;
@@ -1185,6 +1225,45 @@ class PdfInterpreter {
     if (fn == null) return null;
     final alternate = _alternateColorConverter(cos.resolve(space[2]));
     return (tint) => alternate(fn.evaluate(tint));
+  }
+
+  /// An /Indexed (palette) space `[/Indexed base hival lookup]` (§8.6.6.3):
+  /// `sc <index>` rounds to the nearest integer, clamps to `[0, hival]`, and
+  /// reads `n` bytes from the lookup table (n = base component count), each a
+  /// raw 0–255 sample of the base space, then converts through the base.
+  PdfColor Function(double)? _indexedTransform(CosArray space) {
+    if (space.length < 4) return null;
+    final base = cos.resolve(space[1]);
+    final hivalObj = cos.resolve(space[2]);
+    if (hivalObj is! CosInteger && hivalObj is! CosReal) return null;
+    final hival = _numOf(hivalObj).round();
+    if (hival < 0) return null;
+
+    final lookupObj = cos.resolve(space[3]);
+    final List<int> table;
+    if (lookupObj is CosString) {
+      table = lookupObj.bytes;
+    } else if (lookupObj is CosStream) {
+      try {
+        table = cos.decodeStreamData(lookupObj);
+      } on Exception {
+        return null;
+      }
+    } else {
+      return null;
+    }
+
+    final n = _alternateComponents(base);
+    if (n <= 0) return null;
+    final convert = _alternateColorConverter(base);
+    return (rawIndex) {
+      var index = rawIndex.round();
+      if (index < 0) index = 0;
+      if (index > hival) index = hival;
+      final offset = index * n;
+      if (offset + n > table.length) return PdfColor.black;
+      return convert([for (var i = 0; i < n; i++) table[offset + i] / 255.0]);
+    };
   }
 
   PdfColor Function(List<double>) _alternateColorConverter(CosObject space) {

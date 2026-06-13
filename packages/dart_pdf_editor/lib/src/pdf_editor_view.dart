@@ -32,6 +32,7 @@ class PdfEditorFeatures {
     this.toolbar = true,
     this.markup = true,
     this.undoRedo = true,
+    this.colorControls = true,
     this.styleControls = true,
     this.flatten = true,
     this.tools,
@@ -80,8 +81,16 @@ class PdfEditorFeatures {
   /// The toolbar's undo/redo buttons (⌘Z works regardless).
   final bool undoRedo;
 
-  /// The toolbar's style controls (palette, color picker, eyedropper,
-  /// stroke/opacity/font popup).
+  /// The toolbar's color controls: the palette swatches, the "More
+  /// colors…" picker, the eyedropper, and the text-box fill/border color
+  /// rows in the style popup. Split from [styleControls] so a
+  /// color-locked session can hide the color changer while keeping
+  /// stroke/opacity/font editable — pass `colorControls: false,
+  /// styleControls: true`.
+  final bool colorControls;
+
+  /// The toolbar's style popup (stroke width, opacity, and font
+  /// controls). Independent of [colorControls].
   final bool styleControls;
 
   /// The toolbar's flatten-annotations button.
@@ -450,6 +459,7 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                 tools: features.tools,
                 showMarkup: features.markup,
                 showUndoRedo: features.undoRedo,
+                showColor: features.colorControls,
                 showStyle: features.styleControls,
                 showFlatten: features.flatten,
                 leading: widget.toolbarLeading,

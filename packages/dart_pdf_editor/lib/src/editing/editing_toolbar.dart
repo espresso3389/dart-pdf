@@ -37,6 +37,7 @@ class PdfEditingToolbar extends StatelessWidget {
     this.tools,
     this.showMarkup = true,
     this.showUndoRedo = true,
+    this.showColor = true,
     this.showStyle = true,
     this.showFlatten = true,
     this.leading = const [],
@@ -73,8 +74,16 @@ class PdfEditingToolbar extends StatelessWidget {
   /// shortcuts work either way.
   final bool showUndoRedo;
 
-  /// Whether the style controls (color palette, color picker,
-  /// eyedropper, and the stroke/opacity/font popup) are shown.
+  /// Whether the color controls — the palette swatches, the "More
+  /// colors…" picker, the eyedropper, and the text-box fill/border color
+  /// rows in the style popup — are shown. Split from [showStyle] so a
+  /// color-locked session can hide the color changer while leaving
+  /// stroke/opacity/font editable.
+  final bool showColor;
+
+  /// Whether the style popup (the stroke/opacity/font controls) is
+  /// shown. Independent of [showColor]: the popup can show its sliders
+  /// and font controls with its color rows hidden.
   final bool showStyle;
 
   /// Whether the flatten-annotations button is shown.
@@ -379,8 +388,9 @@ class PdfEditingToolbar extends StatelessWidget {
                       onPressed: () => _editElementText(context),
                     ),
                 ],
-                if (showStyle) ...[
+                if (showColor || showStyle)
                   const VerticalDivider(width: 16),
+                if (showColor) ...[
                   for (final color in palette)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 2),
@@ -425,8 +435,13 @@ class PdfEditingToolbar extends StatelessWidget {
                         ? controller.cancelColorPick()
                         : controller.startColorPick(),
                   ),
-                  _StyleMenu(controller: controller, palette: palette),
                 ],
+                if (showStyle)
+                  _StyleMenu(
+                    controller: controller,
+                    palette: palette,
+                    showColor: showColor,
+                  ),
                 if (showFlatten || onSave != null)
                   const VerticalDivider(width: 16),
                 if (showFlatten)
@@ -461,12 +476,21 @@ class PdfEditingToolbar extends StatelessWidget {
 /// — and change — that annotation's style; otherwise they set the style
 /// new text is created with.
 class _StyleMenu extends StatefulWidget {
-  const _StyleMenu({required this.controller, required this.palette});
+  const _StyleMenu({
+    required this.controller,
+    required this.palette,
+    this.showColor = true,
+  });
 
   final PdfEditingController controller;
 
   /// The colors offered as fill/border swatches (the toolbar's palette).
   final List<Color> palette;
+
+  /// Whether the text-box fill/border color rows are shown. The
+  /// stroke/opacity/font controls show regardless — this only hides the
+  /// color rows so a color-locked session keeps the sliders.
+  final bool showColor;
 
   @override
   State<_StyleMenu> createState() => _StyleMenuState();
@@ -741,20 +765,22 @@ class _StyleMenuState extends State<_StyleMenu> {
                       ),
                     ]),
                   ),
-                  _boxColorRow(
-                    context: context,
-                    label: 'Text fill',
-                    keyPrefix: 'pdf-text-fill',
-                    value: fillValue,
-                    onChanged: _setTextFill,
-                  ),
-                  _boxColorRow(
-                    context: context,
-                    label: 'Text border',
-                    keyPrefix: 'pdf-text-border',
-                    value: borderValue,
-                    onChanged: _setTextBorder,
-                  ),
+                  if (widget.showColor) ...[
+                    _boxColorRow(
+                      context: context,
+                      label: 'Text fill',
+                      keyPrefix: 'pdf-text-fill',
+                      value: fillValue,
+                      onChanged: _setTextFill,
+                    ),
+                    _boxColorRow(
+                      context: context,
+                      label: 'Text border',
+                      keyPrefix: 'pdf-text-border',
+                      value: borderValue,
+                      onChanged: _setTextBorder,
+                    ),
+                  ],
                 ],
               ),
             );

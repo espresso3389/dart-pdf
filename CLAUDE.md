@@ -1684,3 +1684,33 @@ keeps its name (the entry's export URI was reverted by hand). Class
 names (PdfEditorView, PdfEditorFeatures) are unchanged. Residual-check
 pattern: `git grep -P '(?<!dart_)pdf_editor'`. Publish order is
 unchanged with dart_pdf_editor last; its dry-run re-verified.
+
+Colour-lock split + translucent paper (trax feat/pspdfkit handoff):
+two fork changes for trax's copy-type colour lock. (1) Colour controls
+split from style controls so a colour-locked markup session can HIDE
+the colour changer while keeping stroke/opacity/font editable — the
+single `styleControls`/`showStyle` flag bundled them. New
+`PdfEditorFeatures.colorControls` (default true) →
+`PdfEditingToolbar.showColor` (default true): gates the palette
+swatches + 'More colors…' picker + eyedropper, and (threaded into
+`_StyleMenu.showColor`) the text-box fill/border colour ROWS only —
+the stroke/opacity/font sliders + font segmented button stay ungated.
+The leading VerticalDivider shows if `showColor || showStyle`, and
+`_StyleMenu` itself now mounts on `showStyle` alone. trax passes
+`colorControls: !colourLocked, styleControls: true`. Migration note:
+`styleControls: false` no longer hides the palette/picker/eyedropper
+— set `colorControls: false` too (pdf_shell_test's "tool subset"
+test updated). (2) Translucent `pageColor` now washes over white
+paper: `renderPicture` paints an opaque white rect under the page
+colour when `pageColor.a < 1.0` (opaque stays a no-op — no extra
+draw), so a copy-type tint reads as a wash on paper, not composited
+onto the (dark) viewer canvas; `PdfPageView`'s placeholder ColoredBox
+gets the same white backing when translucent so it matches the
+raster. Eyedropper/sampler inherit the wash for free (they rasterize
+through the same path). Tests: pdf_shell_test (colorControls hides
+changer / present by default), page_color_test ("a translucent paper
+colour washes over white" — 0x80FF0000 reads ~(255,127,127) not
+(255,0,0), the clean discriminator vs the old un-backed raster).
+The rest of the handoff (PdfMarkupStore `colourLocked` computed,
+TraxProjectSettings/`toHexWithAlpha`, copy-type opacity-slider UI) is
+trax-repo work, not here.

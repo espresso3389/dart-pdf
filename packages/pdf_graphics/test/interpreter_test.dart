@@ -184,6 +184,67 @@ void main() {
     expect(device.fills[1].$2, const PdfColor(1, 1, 1));
   });
 
+  test('Separation colors convert a Lab alternate space', () {
+    final doc = CosDocument.open(buildClassicPdf());
+    final device = RecordingDevice();
+    final resources = CosDictionary({
+      'ColorSpace': CosDictionary({
+        'Black': CosArray([
+          const CosName('Separation'),
+          const CosName('Black'),
+          CosArray([
+            const CosName('Lab'),
+            CosDictionary({
+              'WhitePoint': CosArray([
+                const CosReal(0.9505),
+                const CosInteger(1),
+                const CosReal(1.089),
+              ]),
+              'Range': CosArray([
+                const CosInteger(-128),
+                const CosInteger(127),
+                const CosInteger(-128),
+                const CosInteger(127),
+              ]),
+            }),
+          ]),
+          CosDictionary({
+            'FunctionType': const CosInteger(2),
+            'Domain': CosArray([const CosInteger(0), const CosInteger(1)]),
+            'Range': CosArray([
+              const CosInteger(0),
+              const CosInteger(100),
+              const CosInteger(-128),
+              const CosInteger(127),
+              const CosInteger(-128),
+              const CosInteger(127),
+            ]),
+            'C0': CosArray([
+              const CosInteger(100),
+              const CosInteger(0),
+              const CosInteger(0),
+            ]),
+            'C1': CosArray([
+              const CosReal(26.869612),
+              const CosReal(2.070039),
+              const CosReal(-4.385214),
+            ]),
+            'N': const CosInteger(1),
+          }),
+        ]),
+      }),
+    });
+    PdfInterpreter(cos: doc, device: device).run(
+      ContentStreamParser.parse(
+          Uint8List.fromList('/Black CS 1 SCN 0 0 1 1 re S'.codeUnits)),
+      resources,
+    );
+    final color = device.strokes.single.$2;
+    expect(color.red, lessThan(0.35));
+    expect(color.green, lessThan(0.35));
+    expect(color.blue, lessThan(0.35));
+  });
+
   test('CalGray colors are converted to sRGB', () {
     final doc = CosDocument.open(buildClassicPdf());
     final device = RecordingDevice();

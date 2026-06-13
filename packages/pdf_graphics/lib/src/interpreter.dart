@@ -1034,8 +1034,15 @@ class PdfInterpreter {
     }
     final fn = PdfFunction.parse(cos, space[3]);
     if (fn == null) return null;
-    final altComponents = _alternateComponents(cos.resolve(space[2]));
-    return (tint) => colorFromComponents(fn.evaluate(tint), altComponents);
+    final alternate = _alternateColorConverter(cos.resolve(space[2]));
+    return (tint) => alternate(fn.evaluate(tint));
+  }
+
+  PdfColor Function(List<double>) _alternateColorConverter(CosObject space) {
+    final calibrated = PdfCalibratedColorSpace.parse(cos, space);
+    if (calibrated != null) return calibrated.toSrgb;
+    final components = _alternateComponents(space);
+    return (values) => colorFromComponents(values, components);
   }
 
   int _alternateComponents(CosObject space) {

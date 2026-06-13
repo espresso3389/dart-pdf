@@ -24,6 +24,7 @@ abstract class PdfCalibratedColorSpace {
     return switch (family.value) {
       'CalGray' => _CalGrayColorSpace._parse(cos, params),
       'CalRGB' => _CalRgbColorSpace._parse(cos, params),
+      'Lab' => _LabColorSpace._parse(cos, params),
       _ => null,
     };
   }
@@ -226,6 +227,62 @@ class _CalRgbColorSpace extends PdfCalibratedColorSpace {
     final lms = _matrixProduct(_bradford, xyz);
     final lmsD65 = _toD65(sourceWhitePoint, lms);
     return _matrixProduct(_bradfordInverse, lmsD65);
+  }
+}
+
+class _LabColorSpace extends PdfCalibratedColorSpace {
+  const _LabColorSpace(this.whitePoint, this.range) : super._(3);
+
+  final List<double> whitePoint;
+  final List<double> range;
+
+  static _LabColorSpace? _parse(CosDocument cos, CosDictionary params) {
+    final whitePoint = _numbers(cos, params['WhitePoint']);
+    if (whitePoint.length < 3 || whitePoint[0] < 0 || whitePoint[2] < 0) {
+      return null;
+    }
+    var range = _numbers(cos, params['Range']);
+    if (range.length < 4) range = const [-100.0, 100.0, -100.0, 100.0];
+    return _LabColorSpace(whitePoint, range);
+  }
+
+  @override
+  PdfColor toSrgb(List<double> values) {
+    final l = (values.isNotEmpty ? values[0] : 0.0).clamp(0.0, 100.0);
+    final a = (values.length > 1 ? values[1] : 0.0)
+        .clamp(range[0], range[1])
+        .toDouble();
+    final b = (values.length > 2 ? values[2] : 0.0)
+        .clamp(range[2], range[3])
+        .toDouble();
+    final fy = (l + 16) / 116;
+    final fx = fy + a / 500;
+    final fz = fy - b / 200;
+    final xyz = [
+      whitePoint[0] * _labInverse(fx),
+      whitePoint[1] * _labInverse(fy),
+      whitePoint[2] * _labInverse(fz),
+    ];
+    final xyzD65 = _CalRgbColorSpace._normalizeWhitePointToD65(
+      whitePoint,
+      xyz,
+    );
+    final srgb = _CalRgbColorSpace._matrixProduct(
+      _CalRgbColorSpace._srgbD65XyzToRgb,
+      xyzD65,
+    );
+    return PdfColor(
+      _CalRgbColorSpace._srgbTransfer(srgb[0]),
+      _CalRgbColorSpace._srgbTransfer(srgb[1]),
+      _CalRgbColorSpace._srgbTransfer(srgb[2]),
+    );
+  }
+
+  static double _labInverse(double v) {
+    const e = 216 / 24389;
+    const k = 24389 / 27;
+    final cube = v * v * v;
+    return cube > e ? cube : (116 * v - 16) / k;
   }
 }
 

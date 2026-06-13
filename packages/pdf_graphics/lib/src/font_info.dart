@@ -7,6 +7,7 @@ import 'package:pdf_document/pdf_document.dart'
 import 'fonts/cff.dart';
 import 'fonts/encodings.dart';
 import 'fonts/truetype.dart';
+import 'fonts/type1.dart';
 import 'path.dart';
 
 /// Metrics, text decoding, and (for embedded TrueType fonts) real glyph
@@ -21,6 +22,7 @@ class PdfFontInfo {
     required Map<int, String> toUnicode,
     TrueTypeFont? trueType,
     CffFont? cff,
+    Type1Font? type1,
     Uint8List? cidToGid,
     bool symbolic = false,
     bool legacyGbk = false,
@@ -34,6 +36,7 @@ class PdfFontInfo {
         _toUnicode = toUnicode,
         _trueType = trueType,
         _cff = cff,
+        _type1 = type1,
         _cidToGid = cidToGid,
         _symbolic = symbolic,
         _legacyGbk = legacyGbk,
@@ -54,6 +57,7 @@ class PdfFontInfo {
   final Map<int, String> _toUnicode;
   final TrueTypeFont? _trueType;
   final CffFont? _cff;
+  final Type1Font? _type1;
   final Uint8List? _cidToGid;
   final bool _symbolic;
   final bool _legacyGbk;
@@ -80,7 +84,8 @@ class PdfFontInfo {
   CosStream? type3ProcFor(int code) => _type3Procs[code];
 
   /// True when embedded glyph outlines are available.
-  bool get hasOutlines => _trueType != null || _cff != null;
+  bool get hasOutlines =>
+      _trueType != null || _cff != null || _type1 != null;
 
   static PdfFontInfo load(CosDocument cos, CosDictionary font) {
     final subtype = font['Subtype'];
@@ -115,6 +120,7 @@ class PdfFontInfo {
     final toUnicode = _parseToUnicode(cos, font['ToUnicode']);
     TrueTypeFont? trueType;
     CffFont? cff;
+    Type1Font? type1;
     Uint8List? cidToGid;
     var symbolic = false;
     var encodingNames = const <int, String>{};
@@ -166,6 +172,9 @@ class PdfFontInfo {
         }
         trueType = _loadTrueType(cos, descriptor);
         if (trueType == null) cff = _loadCff(cos, descriptor);
+        if (trueType == null && cff == null) {
+          type1 = _loadType1(cos, descriptor);
+        }
         symbolic = _isSymbolic(cos, descriptor);
       }
       // base-14 fonts may omit /Widths entirely (§9.6.2.2) — the viewer
@@ -190,6 +199,7 @@ class PdfFontInfo {
       toUnicode: toUnicode,
       trueType: trueType,
       cff: cff,
+      type1: type1,
       cidToGid: cidToGid,
       symbolic: symbolic,
       legacyGbk: !isCid && toUnicode.isEmpty && _isLegacyGbkFont(baseFont),
@@ -356,6 +366,19 @@ class PdfFontInfo {
     return null;
   }
 
+  /// Type 1 outlines: the raw PostScript /FontFile (eexec-encrypted
+  /// charstrings). Tried only after TrueType and CFF, since those are far
+  /// more common in modern PDFs.
+  static Type1Font? _loadType1(CosDocument cos, CosDictionary descriptor) {
+    final file = cos.resolve(descriptor['FontFile']);
+    if (file is! CosStream) return null;
+    try {
+      return Type1Font.parse(cos.decodeStreamData(file));
+    } on Exception {
+      return null;
+    }
+  }
+
   static bool _isSymbolic(CosDocument cos, CosDictionary descriptor) {
     final flags = cos.resolve(descriptor['Flags']);
     return flags is CosInteger && (flags.value & 4) != 0;
@@ -383,8 +406,18 @@ class PdfFontInfo {
     if (trueType != null) return trueType.outlineForGlyph(_gidFor(code));
     final cff = _cff;
     if (cff != null) return cff.outlineForGlyph(_cffGidFor(code));
+    final type1 = _type1;
+    if (type1 != null) {
+      final name = _type1NameFor(code);
+      return name == null ? null : type1.outlineForName(name);
+    }
     return null;
   }
+
+  /// Code → glyph name for a Type 1 font: the PDF /Encoding wins, falling
+  /// back to the font's built-in /Encoding (§9.6.6.2).
+  String? _type1NameFor(int code) =>
+      _encodingNames[code] ?? _type1?.builtinEncoding[code];
 
   int _cffGidFor(int code) {
     final cff = _cff!;
@@ -455,6 +488,12 @@ class PdfFontInfo {
       final advance = cff.advanceForGlyph(_cffGidFor(code));
       if (advance != null && advance > 0) return advance;
     }
+    final type1 = _type1;
+    if (type1 != null) {
+      final name = _type1NameFor(code);
+      final advance = name == null ? null : type1.advanceForName(name);
+      if (advance != null && advance > 0) return advance;
+    }
     return _defaultWidth;
   }
 
@@ -471,7 +510,7 @@ class PdfFontInfo {
       if (mapped != null) return String.fromCharCode(mapped);
     }
     if (!isCid) {
-      final name = _encodingNames[code];
+      final name = _encodingNames[code] ?? _type1?.builtinEncoding[code];
       if (name != null) {
         final mapped = glyphNameUnicode(name);
         if (mapped != null) return String.fromCharCode(mapped);

@@ -19,6 +19,8 @@ class CffFont {
     required Map<int, int>? cidToGid,
     required Map<int, int> codeToGid,
     required List<double> fontMatrix,
+    required List<List<double>?> fdMatrices,
+    required bool topMatrixExplicit,
     required Map<int, int> gidToSid,
     required List<(int, int)> strings,
   })  : _bytes = bytes,
@@ -29,6 +31,8 @@ class CffFont {
         _cidToGid = cidToGid,
         _codeToGid = codeToGid,
         _fontMatrix = fontMatrix,
+        _fdMatrices = fdMatrices,
+        _topMatrixExplicit = topMatrixExplicit,
         _gidToSid = gidToSid,
         _strings = strings;
 
@@ -40,6 +44,15 @@ class CffFont {
   final Map<int, int>? _cidToGid;
   final Map<int, int> _codeToGid;
   final List<double> _fontMatrix;
+
+  /// Per-FD FontMatrices for CID-keyed fonts (null entry = the FD declared
+  /// none). Combined with the top matrix per the CFF spec (§ FontMatrix).
+  final List<List<double>?> _fdMatrices;
+
+  /// Whether the top dict carried an explicit FontMatrix. When it didn't but
+  /// an FD did, the FD matrix stands alone (top is treated as identity, not
+  /// the 0.001 default — that default only applies when *no* matrix exists).
+  final bool _topMatrixExplicit;
   final Map<int, int> _gidToSid;
   final List<(int, int)> _strings;
 
@@ -103,20 +116,29 @@ class CffFont {
     final charStrings = _readIndex(_Reader(bytes)..seek(charStringsOffset));
     if (charStrings.isEmpty) return null;
 
+    final topMatrixExplicit = top.containsKey(0x0C07);
     final fontMatrix = [
       for (final v in top[0x0C07] ?? const <num>[0.001, 0, 0, 0.001, 0, 0])
         v.toDouble(),
     ];
 
-    // private dict(s): one for plain fonts, one per FD for CID-keyed fonts
+    // private dict(s): one for plain fonts, one per FD for CID-keyed fonts.
+    // Each FD may also carry its own FontMatrix (§ CFF FontMatrix), which the
+    // glyph runner combines with the top matrix.
     final privates = <_PrivateDict>[];
+    final fdMatrices = <List<double>?>[];
     Uint8List? fdSelect;
     final isCid = top.containsKey(0x0C1E); // ROS
     if (isCid) {
       final fdArrayOffset = _firstInt(top[0x0C24]);
       if (fdArrayOffset != null) {
         for (final range in _readIndex(_Reader(bytes)..seek(fdArrayOffset))) {
-          privates.add(_PrivateDict.parse(bytes, _parseDict(bytes, range)[18]));
+          final fdDict = _parseDict(bytes, range);
+          privates.add(_PrivateDict.parse(bytes, fdDict[18]));
+          final m = fdDict[0x0C07];
+          fdMatrices.add(m == null || m.length < 6
+              ? null
+              : [for (final v in m) v.toDouble()]);
         }
       }
       final fdSelectOffset = _firstInt(top[0x0C25]);
@@ -163,10 +185,31 @@ class CffFont {
       cidToGid: cidToGid,
       codeToGid: codeToGid,
       fontMatrix: fontMatrix,
+      fdMatrices: fdMatrices,
+      topMatrixExplicit: topMatrixExplicit,
       gidToSid: gidToSid,
       strings: strings,
     );
   }
+
+  /// Effective glyph-space → text-space matrix for [fd], combining the top
+  /// dict and FD FontMatrices per the CFF spec.
+  List<double> _effectiveMatrix(int fd) {
+    final fdM = fd >= 0 && fd < _fdMatrices.length ? _fdMatrices[fd] : null;
+    if (fdM == null) return _fontMatrix;
+    if (!_topMatrixExplicit) return fdM; // FD matrix stands alone
+    return _multiplyMatrix(_fontMatrix, fdM); // top ∘ FD
+  }
+
+  /// 3×2 affine product `a ∘ b` (apply b first, then a).
+  static List<double> _multiplyMatrix(List<double> a, List<double> b) => [
+        a[0] * b[0] + a[2] * b[1],
+        a[1] * b[0] + a[3] * b[1],
+        a[0] * b[2] + a[2] * b[3],
+        a[1] * b[2] + a[3] * b[3],
+        a[0] * b[4] + a[2] * b[5] + a[4],
+        a[1] * b[4] + a[3] * b[5] + a[5],
+      ];
 
   int gidForCid(int cid) => _cidToGid == null ? cid : (_cidToGid[cid] ?? 0);
 
@@ -202,12 +245,19 @@ class CffFont {
       try {
         final builder = _run(gid);
         if (builder == null) return null;
-        _advanceCache[gid] = builder.width * _fontMatrix[0].abs();
+        _advanceCache[gid] =
+            builder.width * _effectiveMatrix(_fdFor(gid))[0].abs();
         return builder.segments.isEmpty ? null : PdfPath(builder.segments);
       } on Object {
         return null;
       }
     });
+  }
+
+  int _fdFor(int gid) {
+    final select = _fdSelect;
+    if (select != null && gid >= 0 && gid < select.length) return select[gid];
+    return 0;
   }
 
   /// Advance width in em units, known after the charstring runs.
@@ -218,10 +268,9 @@ class CffFont {
 
   _CharstringRunner? _run(int gid) {
     if (gid < 0 || gid >= _charStrings.length) return null;
-    var fd = 0;
-    final select = _fdSelect;
-    if (select != null && gid < select.length) fd = select[gid];
+    final fd = _fdFor(gid);
     final private = _privates[fd < _privates.length ? fd : 0];
+    final matrix = _effectiveMatrix(fd);
     late final _CharstringRunner runner;
     runner = _CharstringRunner(
       bytes: _bytes,
@@ -229,10 +278,10 @@ class CffFont {
       localSubrs: private.subrs,
       defaultWidthX: private.defaultWidthX,
       nominalWidthX: private.nominalWidthX,
-      scaleX: _fontMatrix[0],
-      skewX: _fontMatrix.length > 2 ? _fontMatrix[2] : 0,
-      skewY: _fontMatrix.length > 1 ? _fontMatrix[1] : 0,
-      scaleY: _fontMatrix.length > 3 ? _fontMatrix[3] : 0.001,
+      scaleX: matrix[0],
+      skewX: matrix.length > 2 ? matrix[2] : 0,
+      skewY: matrix.length > 1 ? matrix[1] : 0,
+      scaleY: matrix.length > 3 ? matrix[3] : 0.001,
       seac: (adx, ady, bchar, achar) {
         final base = _outlineForStandardCode(bchar);
         final accent = _outlineForStandardCode(achar);

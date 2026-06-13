@@ -344,9 +344,7 @@ class PdfInterpreter {
   }
 
   double _annotationStrokeAlpha(PdfAnnotation annotation) =>
-      _annotationNumber(annotation, 'CA') ??
-      _annotationNumber(annotation, 'CA') ??
-      1;
+      _annotationNumber(annotation, 'CA') ?? 1;
 
   double _annotationFillAlpha(PdfAnnotation annotation,
           {double fallback = 1}) =>

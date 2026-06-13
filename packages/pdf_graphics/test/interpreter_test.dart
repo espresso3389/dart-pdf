@@ -184,6 +184,79 @@ void main() {
     expect(device.fills[1].$2, const PdfColor(1, 1, 1));
   });
 
+  test('CalGray colors are converted to sRGB', () {
+    final doc = CosDocument.open(buildClassicPdf());
+    final device = RecordingDevice();
+    final resources = CosDictionary({
+      'ColorSpace': CosDictionary({
+        'CG': CosArray([
+          const CosName('CalGray'),
+          CosDictionary({
+            'WhitePoint': CosArray([
+              const CosInteger(1),
+              const CosInteger(1),
+              const CosInteger(1),
+            ]),
+            'Gamma': const CosInteger(1),
+          }),
+        ]),
+      }),
+    });
+    PdfInterpreter(cos: doc, device: device).run(
+      ContentStreamParser.parse(
+          Uint8List.fromList('/CG cs 0.5 sc 0 0 1 1 re f'.codeUnits)),
+      resources,
+    );
+    final color = device.fills.single.$2;
+    expect(color.red, closeTo(194 / 255, 0.002));
+    expect(color.green, closeTo(194 / 255, 0.002));
+    expect(color.blue, closeTo(194 / 255, 0.002));
+  });
+
+  test('CalRGB colors are converted to sRGB', () {
+    final doc = CosDocument.open(buildClassicPdf());
+    final device = RecordingDevice();
+    final resources = CosDictionary({
+      'ColorSpace': CosDictionary({
+        'CR': CosArray([
+          const CosName('CalRGB'),
+          CosDictionary({
+            'WhitePoint': CosArray([
+              const CosInteger(1),
+              const CosInteger(1),
+              const CosInteger(1),
+            ]),
+            'Gamma': CosArray([
+              const CosInteger(1),
+              const CosInteger(1),
+              const CosInteger(1),
+            ]),
+            'Matrix': CosArray([
+              const CosInteger(1),
+              const CosInteger(0),
+              const CosInteger(0),
+              const CosInteger(0),
+              const CosInteger(1),
+              const CosInteger(0),
+              const CosInteger(0),
+              const CosInteger(0),
+              const CosInteger(1),
+            ]),
+          }),
+        ]),
+      }),
+    });
+    PdfInterpreter(cos: doc, device: device).run(
+      ContentStreamParser.parse(
+          Uint8List.fromList('/CR cs 0.75 0 0 sc 0 0 1 1 re f'.codeUnits)),
+      resources,
+    );
+    final color = device.fills.single.$2;
+    expect(color.red, 1);
+    expect(color.green, 0);
+    expect(color.blue, closeTo(60 / 255, 0.01));
+  });
+
   test('ExtGState alpha applies to fills', () {
     final doc = CosDocument.open(buildClassicPdf());
     final device = RecordingDevice();

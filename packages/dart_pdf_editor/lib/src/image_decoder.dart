@@ -503,12 +503,14 @@ Uint8List? _toRgba(CosDocument cos, CosDictionary dict, Uint8List data,
   final out = Uint8List(count * 4);
 
   final space = _colorSpaceOf(cos, dict);
-  final components = switch (space) {
-    'DeviceRGB' => 3,
-    'DeviceGray' => 1,
-    'DeviceCMYK' => 4,
-    _ => 0,
-  };
+  final alternate = _alternateColorSpaceFor(cos, dict);
+  final components = alternate?.components ??
+      switch (space) {
+        'DeviceRGB' => 3,
+        'DeviceGray' => 1,
+        'DeviceCMYK' => 4,
+        _ => 0,
+      };
   final ranges = components > 0 ? _decodeRanges(cos, dict, components) : null;
   final colorKey = components > 0
       ? _colorKeyRanges(cos, dict, components)
@@ -549,6 +551,17 @@ Uint8List? _toRgba(CosDocument cos, CosDictionary dict, Uint8List data,
         colorKey: colorKey);
   }
   if (bits != 8) return null;
+  if (alternate != null) {
+    return _alternateToRgba(
+      data,
+      width,
+      height,
+      out,
+      alternate,
+      ranges,
+      colorKey,
+    );
+  }
 
   switch (space) {
     case 'DeviceRGB':
@@ -610,6 +623,45 @@ Uint8List? _toRgba(CosDocument cos, CosDictionary dict, Uint8List data,
       return out;
   }
   return null;
+}
+
+Uint8List? _alternateToRgba(
+  Uint8List data,
+  int width,
+  int height,
+  Uint8List out,
+  _AlternateColorSpace alternate,
+  List<(double, double)>? ranges,
+  List<(int, int)>? colorKey,
+) {
+  final count = width * height;
+  final components = alternate.components;
+  if (data.length < count * components) return null;
+  final luts = [for (var c = 0; c < components; c++) _lutFor(ranges, c)];
+  for (var i = 0; i < count; i++) {
+    final samples = [
+      for (var c = 0; c < components; c++) data[i * components + c]
+    ];
+    final values = [
+      for (var c = 0; c < components; c++) luts[c][samples[c]] / 255
+    ];
+    final color = alternate.colorFor(values);
+    out[i * 4] = (color.red * 255).round().clamp(0, 255);
+    out[i * 4 + 1] = (color.green * 255).round().clamp(0, 255);
+    out[i * 4 + 2] = (color.blue * 255).round().clamp(0, 255);
+    var masked = false;
+    if (colorKey != null) {
+      masked = true;
+      for (var c = 0; c < components; c++) {
+        if (samples[c] < colorKey[c].$1 || samples[c] > colorKey[c].$2) {
+          masked = false;
+          break;
+        }
+      }
+    }
+    out[i * 4 + 3] = masked ? 0 : 255;
+  }
+  return out;
 }
 
 final Uint8List _identityLut =
@@ -728,10 +780,108 @@ String _familyOf(CosDocument cos, CosObject? raw) {
             }
           }
           return 'DeviceRGB';
+        case 'DeviceN':
+          return 'DeviceN';
+        case 'Separation':
+          return 'Separation';
       }
     }
   }
   return 'DeviceGray';
+}
+
+class _AlternateColorSpace {
+  const _AlternateColorSpace({
+    required this.components,
+    required this.baseComponents,
+    required this.function,
+    this.calibrated,
+  });
+
+  final int components;
+  final int baseComponents;
+  final PdfFunction function;
+  final PdfCalibratedColorSpace? calibrated;
+
+  PdfColor colorFor(List<double> values) {
+    final transformed = function.evaluateAt(values);
+    return calibrated?.toSrgb(transformed) ??
+        colorFromComponents(transformed, baseComponents);
+  }
+}
+
+_AlternateColorSpace? _alternateColorSpaceFor(
+    CosDocument cos, CosDictionary dict) {
+  final space = cos.resolve(dict['ColorSpace']);
+  if (space is! CosArray || space.length < 4) return null;
+  final family = cos.resolve(space[0]);
+  if (family is! CosName) return null;
+
+  final int components;
+  final CosObject alternateSpace;
+  final CosObject functionObject;
+  switch (family.value) {
+    case 'Separation':
+      components = 1;
+      alternateSpace = space[2];
+      functionObject = space[3];
+    case 'DeviceN':
+      final names = cos.resolve(space[1]);
+      if (names is! CosArray || names.length == 0) return null;
+      components = names.length;
+      alternateSpace = space[2];
+      functionObject = space[3];
+    default:
+      return null;
+  }
+
+  final function = PdfFunction.parse(cos, functionObject);
+  if (function == null) return null;
+  final baseComponents = _alternateComponents(cos, alternateSpace);
+  if (baseComponents == 0) return null;
+  return _AlternateColorSpace(
+    components: components,
+    baseComponents: baseComponents,
+    function: function,
+    calibrated: PdfCalibratedColorSpace.parse(cos, alternateSpace),
+  );
+}
+
+int _alternateComponents(CosDocument cos, CosObject object) {
+  final space = cos.resolve(object);
+  if (space is CosName) {
+    return switch (space.value) {
+      'DeviceGray' || 'CalGray' || 'G' => 1,
+      'DeviceRGB' || 'CalRGB' || 'Lab' || 'RGB' => 3,
+      'DeviceCMYK' || 'CMYK' => 4,
+      _ => 0,
+    };
+  }
+  if (space is CosArray && space.length > 0) {
+    final family = cos.resolve(space[0]);
+    if (family is CosName) {
+      switch (family.value) {
+        case 'CalGray':
+          return 1;
+        case 'CalRGB':
+        case 'Lab':
+          return 3;
+        case 'ICCBased':
+          if (space.length > 1) {
+            final profile = cos.resolve(space[1]);
+            if (profile is CosStream) {
+              return switch (_intOf(cos.resolve(profile.dictionary['N']))) {
+                1 => 1,
+                4 => 4,
+                _ => 3,
+              };
+            }
+          }
+          return 3;
+      }
+    }
+  }
+  return 0;
 }
 
 List<String> _filterNames(CosDocument cos, CosDictionary dict) {

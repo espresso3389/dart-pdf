@@ -394,6 +394,56 @@ void main() {
     });
   });
 
+  testWidgets('DeviceN images evaluate the tint transform', (tester) async {
+    await tester.runAsync(() async {
+      final tint = CosStream(
+        CosDictionary({
+          'FunctionType': const CosInteger(4),
+          'Domain': CosArray([
+            const CosInteger(0),
+            const CosInteger(1),
+            const CosInteger(0),
+            const CosInteger(1),
+            const CosInteger(0),
+            const CosInteger(1),
+          ]),
+          'Range': CosArray([
+            const CosInteger(0),
+            const CosInteger(1),
+            const CosInteger(0),
+            const CosInteger(1),
+            const CosInteger(0),
+            const CosInteger(1),
+          ]),
+          'Length': const CosInteger(2),
+        }),
+        Uint8List.fromList('{}'.codeUnits),
+      );
+      final image = CosStream(
+        CosDictionary({
+          'Width': const CosInteger(2),
+          'Height': const CosInteger(1),
+          'BitsPerComponent': const CosInteger(8),
+          'ColorSpace': CosArray([
+            const CosName('DeviceN'),
+            CosArray([
+              const CosName('X'),
+              const CosName('Y'),
+              const CosName('Z'),
+            ]),
+            const CosName('DeviceRGB'),
+            tint,
+          ]),
+        }),
+        Uint8List.fromList([255, 128, 0, 0, 64, 255]),
+      );
+      final images = await decodeImages(cos, [req(image)]);
+      final pixels = await pixelsOf(images[image]!);
+      expect(pixels.sublist(0, 4), [255, 128, 0, 255]);
+      expect(pixels.sublist(4, 8), [0, 64, 255, 255]);
+    });
+  });
+
   testWidgets('CCITT Group 4 images decode to 1-bit gray', (tester) async {
     await tester.runAsync(() async {
       // a libtiff-encoded 64x24 G4 strip (same data as the pdf_cos KAT):

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
 
+import 'calibrated_color.dart';
 import 'color.dart';
 import 'device.dart';
 import 'font_info.dart';
@@ -29,6 +30,8 @@ class _GraphicsState {
         fillPatternComponents = const [],
         fillTintTransform = null,
         strokeTintTransform = null,
+        fillCalibrated = null,
+        strokeCalibrated = null,
         fillIcc = null,
         strokeIcc = null,
         font = null,
@@ -54,6 +57,8 @@ class _GraphicsState {
         fillPatternComponents = other.fillPatternComponents,
         fillTintTransform = other.fillTintTransform,
         strokeTintTransform = other.strokeTintTransform,
+        fillCalibrated = other.fillCalibrated,
+        strokeCalibrated = other.strokeCalibrated,
         fillIcc = other.fillIcc,
         strokeIcc = other.strokeIcc,
         softMask = other.softMask,
@@ -83,6 +88,10 @@ class _GraphicsState {
   /// current space carries raw device components.
   PdfColor Function(double)? fillTintTransform;
   PdfColor Function(double)? strokeTintTransform;
+
+  /// CIE-based CalGray/CalRGB conversions for fill/stroke spaces.
+  PdfCalibratedColorSpace? fillCalibrated;
+  PdfCalibratedColorSpace? strokeCalibrated;
 
   /// Real ICC conversions for ICCBased fill/stroke spaces; null falls
   /// back to component-count heuristics.
@@ -627,11 +636,13 @@ class PdfInterpreter {
         case 'cs':
           _state.fillComponents = _componentsOf(resources, o);
           _state.fillTintTransform = _tintTransformOf(resources, o);
+          _state.fillCalibrated = _calibratedColorSpaceOf(resources, o);
           _state.fillIcc = _iccProfileOf(resources, o);
           _state.fillPattern = null;
         case 'CS':
           _state.strokeComponents = _componentsOf(resources, o);
           _state.strokeTintTransform = _tintTransformOf(resources, o);
+          _state.strokeCalibrated = _calibratedColorSpaceOf(resources, o);
           _state.strokeIcc = _iccProfileOf(resources, o);
         case 'sc' || 'scn':
           _state.fillPattern = null;
@@ -643,8 +654,8 @@ class PdfInterpreter {
                 if (v is CosInteger || v is CosReal) _numOf(v),
             ];
           } else {
-            _state.fillColor = _tintedColor(
-                _state.fillTintTransform, _state.fillIcc, o, _state.fillColor);
+            _state.fillColor = _tintedColor(_state.fillTintTransform,
+                _state.fillCalibrated, _state.fillIcc, o, _state.fillColor);
           }
         case 'SC' || 'SCN':
           if (o.isNotEmpty && o.last is CosName) {
@@ -653,8 +664,12 @@ class PdfInterpreter {
                 _resource(resources, 'Pattern', o.last as CosName));
             if (color != null) _state.strokeColor = color;
           } else {
-            _state.strokeColor = _tintedColor(_state.strokeTintTransform,
-                _state.strokeIcc, o, _state.strokeColor);
+            _state.strokeColor = _tintedColor(
+                _state.strokeTintTransform,
+                _state.strokeCalibrated,
+                _state.strokeIcc,
+                o,
+                _state.strokeColor);
           }
 
         // --- text ---
@@ -850,17 +865,34 @@ class PdfInterpreter {
 
   /// sc/scn through the active tint transform or ICC profile when one
   /// is set, else by raw component count.
-  PdfColor _tintedColor(PdfColor Function(double)? transform, IccProfile? icc,
-      List<CosObject> o, PdfColor current) {
+  PdfColor _tintedColor(
+      PdfColor Function(double)? transform,
+      PdfCalibratedColorSpace? calibrated,
+      IccProfile? icc,
+      List<CosObject> o,
+      PdfColor current) {
     final values = [
       for (final item in o)
         if (item is CosInteger || item is CosReal) _numOf(item),
     ];
     if (transform != null && values.length == 1) return transform(values[0]);
+    if (calibrated != null && values.length == calibrated.components) {
+      return calibrated.toSrgb(values);
+    }
     if (icc != null && values.length == icc.channels) {
       return icc.toSrgb(values);
     }
     return _colorFromComponents(o, current);
+  }
+
+  PdfCalibratedColorSpace? _calibratedColorSpaceOf(
+      CosDictionary resources, List<CosObject> o) {
+    if (o.isEmpty || o[0] is! CosName) return null;
+    final name = (o[0] as CosName).value;
+    if (name == 'CalGray' || name == 'CalRGB') return null;
+    final spaces = cos.resolve(resources['ColorSpace']);
+    if (spaces is! CosDictionary) return null;
+    return PdfCalibratedColorSpace.parse(cos, spaces[name]);
   }
 
   /// Parses (and caches) the ICC profile of a named ICCBased space.

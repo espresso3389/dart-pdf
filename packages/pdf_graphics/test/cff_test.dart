@@ -49,19 +49,8 @@ void main() {
   });
 
   test('endchar seac composes accented glyphs', () {
-    final doc = PdfDocument.open(
-        File('../../test_corpora/pdfjs/endchar.pdf').readAsBytesSync());
-    final cos = doc.cos;
-    final page = doc.page(0);
-    final xobjects = cos.resolve(page.resources['XObject']) as CosDictionary;
-    final form = cos.resolve(xobjects['Fm0']) as CosStream;
-    final resources =
-        cos.resolve(form.dictionary['Resources']) as CosDictionary;
-    final fonts = cos.resolve(resources['Font']) as CosDictionary;
-    final pdfFont = cos.resolve(fonts['T1_0']) as CosDictionary;
-    final descriptor = cos.resolve(pdfFont['FontDescriptor']) as CosDictionary;
-    final fontFile = cos.resolve(descriptor['FontFile3']) as CosStream;
-    final cff = CffFont.parse(cos.decodeStreamData(fontFile))!;
+    final cff = _cffFromFormFont('../../test_corpora/pdfjs/endchar.pdf',
+        formName: 'Fm0', fontName: 'T1_0');
 
     final e = cff.outlineForGlyph(cff.gidForName('E'))!;
     final acute = cff.outlineForGlyph(cff.gidForName('acute'))!;
@@ -71,7 +60,48 @@ void main() {
         greaterThan(e.segments.length + acute.segments.length - 2));
   });
 
+  test('endchar seac composes tilde accents', () {
+    final cff = _cffFromPageFont('../../test_corpora/pdfjs/glyph_accent.pdf',
+        fontName: 'F1');
+
+    final a = cff.outlineForGlyph(cff.gidForName('a'))!;
+    final tilde = cff.outlineForGlyph(cff.gidForName('tilde'))!;
+    final atilde = cff.outlineForGlyph(cff.gidForName('atilde'));
+    expect(atilde, isNotNull);
+    expect(atilde!.segments.length,
+        greaterThan(a.segments.length + tilde.segments.length - 2));
+  });
+
   test('garbage input parses to null', () {
     expect(CffFont.parse(ascii('not a font')), isNull);
   });
+}
+
+CffFont _cffFromPageFont(String path, {required String fontName}) {
+  final doc = PdfDocument.open(File(path).readAsBytesSync());
+  final cos = doc.cos;
+  return _cffFromResources(cos, doc.page(0).resources, fontName);
+}
+
+CffFont _cffFromFormFont(
+  String path, {
+  required String formName,
+  required String fontName,
+}) {
+  final doc = PdfDocument.open(File(path).readAsBytesSync());
+  final cos = doc.cos;
+  final xobjects =
+      cos.resolve(doc.page(0).resources['XObject']) as CosDictionary;
+  final form = cos.resolve(xobjects[formName]) as CosStream;
+  final resources = cos.resolve(form.dictionary['Resources']) as CosDictionary;
+  return _cffFromResources(cos, resources, fontName);
+}
+
+CffFont _cffFromResources(
+    CosDocument cos, CosDictionary resources, String fontName) {
+  final fonts = cos.resolve(resources['Font']) as CosDictionary;
+  final pdfFont = cos.resolve(fonts[fontName]) as CosDictionary;
+  final descriptor = cos.resolve(pdfFont['FontDescriptor']) as CosDictionary;
+  final fontFile = cos.resolve(descriptor['FontFile3']) as CosStream;
+  return CffFont.parse(cos.decodeStreamData(fontFile))!;
 }

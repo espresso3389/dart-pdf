@@ -95,7 +95,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | franz_2.pdf | 1 | 200x50 | 98.170% |
 | freetext_no_appearance.pdf | 1 | 612x792 | 0.000% |
 | function_based_shading.pdf | 1 | 612x792 | 5.768% |
-| glyph_accent.pdf | 1 | 200x50 | 1.020% |
+| glyph_accent.pdf | 1 | 200x50 | 0.000% |
 | gradientfill.pdf | 1 | 596x842 | 0.169% |
 | hello_world_rotated.pdf | 1 | 792x612 | 0.551% |
 | hello_world_rotated.pdf | 2 | 792x612 | 0.551% |
@@ -896,7 +896,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### glyph_accent.pdf page 1
 
-200x50; diff: 1.020%
+200x50; diff: 0.000%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

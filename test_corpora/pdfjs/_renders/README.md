@@ -204,7 +204,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | tiling-pattern-large-steps.pdf | 1 | 4000x400 | 72.620% | ❌ fail |
 | tiling_patterns_variations.pdf | 1 | 600x800 | 4.001% | ❌ fail |
 | transparent.pdf | 1 | 200x200 | 11.063% | ❌ fail |
-| type4psfunc.pdf | 1 | 612x792 | 5.527% | ❌ fail |
+| type4psfunc.pdf | 1 | 612x792 | 4.618% | ❌ fail |
 | vertical.pdf | 1 | 250x322 | 1.511% | ❌ fail |
 | vertical.pdf | 2 | 250x322 | 0.932% | ❌ fail |
 | vertical.pdf | 3 | 250x322 | 0.932% | ❌ fail |
@@ -1771,7 +1771,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### type4psfunc.pdf page 1
 
-612x792; diff: 5.527%
+612x792; diff: 4.618%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

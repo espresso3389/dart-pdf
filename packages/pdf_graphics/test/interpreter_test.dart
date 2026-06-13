@@ -153,16 +153,21 @@ void main() {
 
   test('CMYK and gray color operators convert to RGB', () {
     final device = interpret('0 0 0 1 k 0 0 1 1 re f 0.5 g 0 0 1 1 re f');
-    expect(device.fills[0].$2, PdfColor.black);
+    // DeviceCMYK uses pdf.js's SWOP-class polynomial, so pure K is not a
+    // perfect black but the profile's dark grey (≈ RGB 44,46,53).
+    expect(device.fills[0].$2.red, closeTo(0.171, 0.01));
+    expect(device.fills[0].$2.green, closeTo(0.182, 0.01));
+    expect(device.fills[0].$2.blue, closeTo(0.206, 0.01));
     expect(device.fills[1].$2, const PdfColor.gray(0.5));
   });
 
-  test('pure process cyan converts as ink, not monitor cyan', () {
+  test('pure process cyan converts through the SWOP polynomial', () {
     final device = interpret('1 0 0 0 k 0 0 1 1 re f');
     final color = device.fills.single.$2;
+    // pdf.js DeviceCmykCS for (1,0,0,0) ≈ RGB(0, 184, 242).
     expect(color.red, 0);
-    expect(color.green, closeTo(0.62, 0.01));
-    expect(color.blue, closeTo(0.878, 0.01));
+    expect(color.green, closeTo(0.724, 0.01));
+    expect(color.blue, closeTo(0.948, 0.01));
   });
 
   test('Separation colors evaluate the tint transform', () {

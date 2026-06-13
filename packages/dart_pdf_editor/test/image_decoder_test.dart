@@ -289,9 +289,10 @@ void main() {
       );
       final images = await decodeImages(cos, [req(image)]);
       final pixels = await pixelsOf(images[image]!);
-      // pure cyan converts as process ink, not monitor cyan
-      expect(pixels.sublist(0, 4), [0, 158, 224, 255]);
-      expect(pixels.sublist(4, 8), [0, 0, 0, 255]); // black
+      // pure cyan through pdf.js's DeviceCMYK polynomial ≈ (0, 185, 242)
+      expect(pixels.sublist(0, 4), [0, 185, 242, 255]);
+      // pure K is the SWOP profile's dark grey, not a perfect black
+      expect(pixels.sublist(4, 8), [44, 46, 53, 255]);
     });
   });
 

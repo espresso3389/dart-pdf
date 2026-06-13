@@ -377,15 +377,18 @@ class PdfInterpreter {
         // --- color ---
         case 'g':
           _state.fillColor = PdfColor.gray(_num(o, 0));
+          _state.fillPattern = null;
         case 'G':
           _state.strokeColor = PdfColor.gray(_num(o, 0));
         case 'rg':
           _state.fillColor = PdfColor(_num(o, 0), _num(o, 1), _num(o, 2));
+          _state.fillPattern = null;
         case 'RG':
           _state.strokeColor = PdfColor(_num(o, 0), _num(o, 1), _num(o, 2));
         case 'k':
           _state.fillColor =
               PdfColor.cmyk(_num(o, 0), _num(o, 1), _num(o, 2), _num(o, 3));
+          _state.fillPattern = null;
         case 'K':
           _state.strokeColor =
               PdfColor.cmyk(_num(o, 0), _num(o, 1), _num(o, 2), _num(o, 3));
@@ -408,14 +411,14 @@ class PdfInterpreter {
                 if (v is CosInteger || v is CosReal) _numOf(v),
             ];
           } else {
-            _state.fillColor = _tintedColor(_state.fillTintTransform,
-                _state.fillIcc, o, _state.fillColor);
+            _state.fillColor = _tintedColor(
+                _state.fillTintTransform, _state.fillIcc, o, _state.fillColor);
           }
         case 'SC' || 'SCN':
           if (o.isNotEmpty && o.last is CosName) {
             // stroke patterns: approximate with the pattern's average color
-            final color =
-                _patternAverageColor(_resource(resources, 'Pattern', o.last as CosName));
+            final color = _patternAverageColor(
+                _resource(resources, 'Pattern', o.last as CosName));
             if (color != null) _state.strokeColor = color;
           } else {
             _state.strokeColor = _tintedColor(_state.strokeTintTransform,
@@ -529,9 +532,12 @@ class PdfInterpreter {
       double x1, double y1, double x2, double y2, double x3, double y3) {
     final m = _state.ctm;
     _segments.add(PdfCubicTo(
-      m.transformX(x1, y1), m.transformY(x1, y1),
-      m.transformX(x2, y2), m.transformY(x2, y2),
-      m.transformX(x3, y3), m.transformY(x3, y3),
+      m.transformX(x1, y1),
+      m.transformY(x1, y1),
+      m.transformX(x2, y2),
+      m.transformY(x2, y2),
+      m.transformX(x3, y3),
+      m.transformY(x3, y3),
     ));
     _currentX = x3;
     _currentY = y3;
@@ -594,7 +600,8 @@ class PdfInterpreter {
       final space = cos.resolve(spaces[name]);
       if (space is CosArray && space.length > 0) {
         final family = cos.resolve(space[0]);
-        if (family is CosName && family.value == 'ICCBased' &&
+        if (family is CosName &&
+            family.value == 'ICCBased' &&
             space.length > 1) {
           final profile = cos.resolve(space[1]);
           if (profile is CosStream) {
@@ -611,8 +618,8 @@ class PdfInterpreter {
 
   /// sc/scn through the active tint transform or ICC profile when one
   /// is set, else by raw component count.
-  PdfColor _tintedColor(PdfColor Function(double)? transform,
-      IccProfile? icc, List<CosObject> o, PdfColor current) {
+  PdfColor _tintedColor(PdfColor Function(double)? transform, IccProfile? icc,
+      List<CosObject> o, PdfColor current) {
     final values = [
       for (final item in o)
         if (item is CosInteger || item is CosReal) _numOf(item),
@@ -899,12 +906,16 @@ class PdfInterpreter {
       ).concat(_textMatrix).concat(_state.ctm);
       final text = buffer.toString();
       if (text.trim().isNotEmpty || glyphs != null) {
+        final fillText = _state.renderMode != 1 &&
+            _state.renderMode != 3 &&
+            _state.renderMode != 5;
         device.drawText(PdfTextRun(
           text: text,
           transform: transform,
           color: _state.renderMode == 1 || _state.renderMode == 5
               ? _state.strokeColor
               : _state.fillColor,
+          gradient: fillText ? _gradientOfPattern(_state.fillPattern) : null,
           width: advance / emScale,
           fontName: font.baseFont,
           fontSize: size,
@@ -961,8 +972,7 @@ class PdfInterpreter {
   // ---------- patterns and shadings ----------
 
   /// Looks up a named resource and resolves it (dictionary or stream).
-  CosObject? _resource(
-      CosDictionary resources, String category, CosName name) {
+  CosObject? _resource(CosDictionary resources, String category, CosName name) {
     final group = cos.resolve(resources[category]);
     if (group is! CosDictionary) return null;
     final value = cos.resolve(group[name.value]);
@@ -990,6 +1000,16 @@ class PdfInterpreter {
     return shading.toGradient(PdfMatrix.identity)?.averageColor ??
         shading.toMesh(PdfMatrix.identity)?.averageColor ??
         shading.toFunctionMesh(PdfMatrix.identity)?.averageColor;
+  }
+
+  PdfGradient? _gradientOfPattern(CosObject? pattern) {
+    final dict = _patternDict(pattern);
+    if (dict == null) return null;
+    final type = cos.resolve(dict['PatternType']);
+    if (type is! CosInteger || type.value != 2) return null;
+    return PdfShading.parse(cos, dict['Shading'])?.toGradient(
+      _patternMatrix(dict),
+    );
   }
 
   void _fillWithPattern(PdfPath path, PdfFillRule rule, CosObject pattern) {
@@ -1080,15 +1100,13 @@ class PdfInterpreter {
     device.clipPath(path, rule);
     final savedState = _state;
     final savedStackDepth = _stateStack.length;
-    final patternColor = uncolored
-        ? colorFromComponents(_state.fillPatternComponents)
-        : null;
+    final patternColor =
+        uncolored ? colorFromComponents(_state.fillPatternComponents) : null;
     try {
       for (var j = j0; j <= j1; j++) {
         for (var i = i0; i <= i1; i++) {
           _state = _GraphicsState()
-            ..ctm =
-                PdfMatrix.translation(i * xStep, j * yStep).concat(matrix);
+            ..ctm = PdfMatrix.translation(i * xStep, j * yStep).concat(matrix);
           if (patternColor != null) {
             _state.fillColor = patternColor;
             _state.strokeColor = patternColor;
@@ -1135,8 +1153,8 @@ class PdfInterpreter {
       PdfLineTo(box.left, box.top),
       const PdfClosePath(),
     ]);
-    device.fillPathGradient(area, PdfFillRule.nonzero, gradient,
-        _state.fillAlpha);
+    device.fillPathGradient(
+        area, PdfFillRule.nonzero, gradient, _state.fillAlpha);
   }
 
   List<double> _numbersOf(CosObject? object) {
@@ -1196,8 +1214,7 @@ class PdfInterpreter {
     // at Do applies to the group's result, and resets inside (§11.6.6) —
     // otherwise an inner `gs` back to ca 1.0 would erase the group alpha
     final groupAlpha = _state.fillAlpha;
-    final isGroup =
-        cos.resolve(xobject.dictionary['Group']) is CosDictionary;
+    final isGroup = cos.resolve(xobject.dictionary['Group']) is CosDictionary;
     final groupLayer = isGroup && groupAlpha < 1;
 
     final outerMask = _state.softMask;

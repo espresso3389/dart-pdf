@@ -47,6 +47,7 @@ class PdfTextRun {
     required this.transform,
     required this.color,
     required this.width,
+    this.gradient,
     this.fontName,
     this.fontSize = 0,
     this.glyphs,
@@ -66,6 +67,12 @@ class PdfTextRun {
   final PdfMatrix transform;
 
   final PdfColor color;
+
+  /// Shading-pattern fill for this run, already resolved into page space.
+  ///
+  /// When present, painting devices should use this instead of [color] for
+  /// the filled glyph shape. Non-painting consumers can ignore it.
+  final PdfGradient? gradient;
 
   /// Advance width in em units, from the PDF's font metrics. Devices should
   /// scale their substituted font's output to match, so columns line up.

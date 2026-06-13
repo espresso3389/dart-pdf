@@ -116,30 +116,10 @@ class CanvasPdfDevice implements PdfDevice {
   @override
   void fillPathGradient(
       PdfPath path, PdfFillRule rule, PdfGradient gradient, double alpha) {
-    final colors = [for (final c in gradient.colors) _toColor(c, 1)];
-    final stops = List<double>.of(gradient.stops);
-    // /Extend false paints nothing beyond that end: a zero-width
-    // transparent stop makes TileMode.clamp continue with transparency
-    // instead of the terminal color
-    if (!gradient.extendStart && colors.isNotEmpty) {
-      colors.insert(0, colors.first.withAlpha(0));
-      stops.insert(0, stops.first);
-    }
-    if (!gradient.extendEnd && colors.isNotEmpty) {
-      colors.add(colors.last.withAlpha(0));
-      stops.add(stops.last);
-    }
-    final matrix = _toFloat64(gradient.transform);
-    final c = gradient.coords;
-    final ui.Shader shader = gradient.isRadial
-        ? ui.Gradient.radial(Offset(c[3], c[4]), c[5], colors, stops,
-            TileMode.clamp, matrix, Offset(c[0], c[1]), c[2])
-        : ui.Gradient.linear(Offset(c[0], c[1]), Offset(c[2], c[3]), colors,
-            stops, TileMode.clamp, matrix);
     canvas.drawPath(
       _toUiPath(path, rule),
       Paint()
-        ..shader = shader
+        ..shader = _shaderFor(gradient)
         ..blendMode = _blend
         ..color =
             Color.from(alpha: alpha.clamp(0, 1), red: 0, green: 0, blue: 0),
@@ -338,8 +318,8 @@ class CanvasPdfDevice implements PdfDevice {
     // and scaled down 100x (TextPainter quality degrades at tiny sizes; the
     // run transform already encodes the real size).
     const renderSize = 100.0;
-    final painter = TextPainter(
-      text: TextSpan(text: run.text, style: _styleFor(run)),
+    var painter = TextPainter(
+      text: TextSpan(text: run.text, style: _styleFor(run, foreground: null)),
       textDirection: TextDirection.ltr,
     )..layout();
     final baseline =
@@ -351,6 +331,29 @@ class CanvasPdfDevice implements PdfDevice {
     final targetWidth = run.width * renderSize;
     final scaleX =
         run.width > 0 && painter.width > 0 ? targetWidth / painter.width : 1.0;
+    final gradient = run.gradient;
+    if (gradient != null) {
+      final localToPage = PdfMatrix.scaled(scaleX / renderSize, -1 / renderSize)
+          .concat(run.transform);
+      final pageToLocal = localToPage.inverted();
+      final localGradientTransform =
+          pageToLocal == null ? null : gradient.transform.concat(pageToLocal);
+      if (localGradientTransform != null) {
+        painter = TextPainter(
+          text: TextSpan(
+            text: run.text,
+            style: _styleFor(
+              run,
+              foreground: Paint()
+                ..shader =
+                    _shaderFor(gradient, transform: localGradientTransform)
+                ..blendMode = _blend,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+      }
+    }
     canvas.scale(scaleX / renderSize, -1 / renderSize);
     painter.paint(canvas, Offset(0, -baseline));
     canvas.restore();
@@ -359,20 +362,26 @@ class CanvasPdfDevice implements PdfDevice {
   /// Draws real glyph outlines from the embedded font. The run transform
   /// maps em space (y-up) to page space, so no unflip is needed.
   void _drawGlyphOutlines(PdfTextRun run) {
-    final paint = Paint()
-      ..color = _toColor(run.color, 1)
-      ..blendMode = _blend;
-    canvas.save();
-    canvas.transform(_toFloat64(run.transform));
+    final paint = Paint()..blendMode = _blend;
+    final gradient = run.gradient;
+    if (gradient != null) {
+      paint.shader = _shaderFor(gradient);
+    } else {
+      paint.color = _toColor(run.color, 1);
+    }
+    final path = ui.Path();
     for (final glyph in run.glyphs!) {
       final outline = glyph.outline;
       if (outline == null) continue;
-      canvas.save();
-      canvas.translate(glyph.offset, 0);
-      canvas.drawPath(_toUiPath(outline, PdfFillRule.nonzero), paint);
-      canvas.restore();
+      path.addPath(
+        _toUiPath(outline, PdfFillRule.nonzero).transform(
+          _toFloat64(
+              PdfMatrix.translation(glyph.offset, 0).concat(run.transform)),
+        ),
+        Offset.zero,
+      );
     }
-    canvas.restore();
+    canvas.drawPath(path, paint);
   }
 
   @override
@@ -406,11 +415,12 @@ class CanvasPdfDevice implements PdfDevice {
     canvas.restore();
   }
 
-  TextStyle _styleFor(PdfTextRun run) {
+  TextStyle _styleFor(PdfTextRun run, {Paint? foreground}) {
     final name = run.fontName ?? '';
     final cjk = _cjkPrimaryFontFor(name);
     return TextStyle(
-      color: _toColor(run.color, 1),
+      color: foreground == null ? _toColor(run.color, 1) : null,
+      foreground: foreground,
       fontSize: 100,
       fontFamily: cjk ??
           switch (name) {
@@ -472,6 +482,29 @@ class CanvasPdfDevice implements PdfDevice {
         green: color.green.clamp(0, 1),
         blue: color.blue.clamp(0, 1),
       );
+
+  static ui.Shader _shaderFor(PdfGradient gradient, {PdfMatrix? transform}) {
+    final colors = [for (final c in gradient.colors) _toColor(c, 1)];
+    final stops = List<double>.of(gradient.stops);
+    // /Extend false paints nothing beyond that end: a zero-width
+    // transparent stop makes TileMode.clamp continue with transparency
+    // instead of the terminal color.
+    if (!gradient.extendStart && colors.isNotEmpty) {
+      colors.insert(0, colors.first.withAlpha(0));
+      stops.insert(0, stops.first);
+    }
+    if (!gradient.extendEnd && colors.isNotEmpty) {
+      colors.add(colors.last.withAlpha(0));
+      stops.add(stops.last);
+    }
+    final matrix = _toFloat64(transform ?? gradient.transform);
+    final c = gradient.coords;
+    return gradient.isRadial
+        ? ui.Gradient.radial(Offset(c[3], c[4]), c[5], colors, stops,
+            TileMode.clamp, matrix, Offset(c[0], c[1]), c[2])
+        : ui.Gradient.linear(Offset(c[0], c[1]), Offset(c[2], c[3]), colors,
+            stops, TileMode.clamp, matrix);
+  }
 
   static ui.Path _toUiPath(PdfPath path, PdfFillRule rule) {
     final out = ui.Path()

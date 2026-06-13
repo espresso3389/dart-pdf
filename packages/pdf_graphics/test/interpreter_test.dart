@@ -106,8 +106,7 @@ RecordingDevice interpret(String content) {
 
 void main() {
   test('fills a rectangle transformed by cm', () {
-    final device =
-        interpret('q 2 0 0 2 10 10 cm 0 0 1 rg 5 5 20 30 re f Q');
+    final device = interpret('q 2 0 0 2 10 10 cm 0 0 1 rg 5 5 20 30 re f Q');
     final (path, color, rule, alpha) = device.fills.single;
     expect(color, const PdfColor(0, 0, 1));
     expect(rule, PdfFillRule.nonzero);
@@ -223,8 +222,8 @@ void main() {
       final device = RecordingDevice();
       final page = doc.page(0);
       PdfInterpreter(cos: doc.cos, device: device).run(
-        ContentStreamParser.parse(Uint8List.fromList(
-            'BT /F1 10 Tf [(A) -500 (B)] TJ ET'.codeUnits)),
+        ContentStreamParser.parse(
+            Uint8List.fromList('BT /F1 10 Tf [(A) -500 (B)] TJ ET'.codeUnits)),
         page.resources,
       );
       expect(device.texts, hasLength(2));
@@ -257,7 +256,8 @@ void main() {
   });
 
   group('lenient real-world behavior (pdf.js corpus classes)', () {
-    test('an unresolvable font substitutes Helvetica instead of dropping '
+    test(
+        'an unresolvable font substitutes Helvetica instead of dropping '
         'the text', () {
       // pdf.js issue4461 class: a page with no /Resources still shows
       // its text — and keeps it selectable
@@ -306,8 +306,7 @@ void main() {
       final doc = CosDocument.open(buildClassicPdf());
       final device = RecordingDevice();
       PdfInterpreter(cos: doc, device: device).run(
-        ContentStreamParser.parse(
-            Uint8List.fromList('/S1 sh'.codeUnits)),
+        ContentStreamParser.parse(Uint8List.fromList('/S1 sh'.codeUnits)),
         resources,
       );
       expect(device.meshes, hasLength(1));
@@ -363,6 +362,35 @@ void main() {
       expect(gradient.colors.first, const PdfColor(1, 0, 0));
     });
 
+    test('shading pattern text carries the resolved gradient', () {
+      final doc = CosDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc, device: device).run(
+        ContentStreamParser.parse(Uint8List.fromList(
+            '/Pattern cs /P0 scn BT /Missing 12 Tf (gradient) Tj ET'
+                .codeUnits)),
+        shadingPatternResources(),
+      );
+      final gradient = device.texts.single.gradient;
+      expect(gradient, isNotNull);
+      expect(gradient!.colors.first, const PdfColor(1, 0, 0));
+    });
+
+    test('direct fill color clears the active pattern for text', () {
+      final doc = CosDocument.open(buildClassicPdf());
+      final device = RecordingDevice();
+      PdfInterpreter(cos: doc, device: device).run(
+        ContentStreamParser.parse(Uint8List.fromList(
+            '/Pattern cs /P0 scn BT /Missing 12 Tf (gradient) Tj ET '
+                    '0 0 0 rg BT /Missing 12 Tf (black) Tj ET'
+                .codeUnits)),
+        shadingPatternResources(),
+      );
+      expect(device.texts[0].gradient, isNotNull);
+      expect(device.texts[1].gradient, isNull);
+      expect(device.texts[1].color, PdfColor.black);
+    });
+
     test('tiling patterns run their cell content per tile, clipped', () {
       final doc = CosDocument.open(buildClassicPdf());
       final device = RecordingDevice();
@@ -388,8 +416,8 @@ void main() {
         }),
       });
       PdfInterpreter(cos: doc, device: device).run(
-        ContentStreamParser.parse(Uint8List.fromList(
-            '/Pattern cs /P1 scn 0 0 8 8 re f'.codeUnits)),
+        ContentStreamParser.parse(
+            Uint8List.fromList('/Pattern cs /P1 scn 0 0 8 8 re f'.codeUnits)),
         resources,
       );
       expect(device.clips, isNotEmpty);
@@ -489,8 +517,7 @@ void main() {
             'q /GS1 gs 0 0 9 9 re f Q 0 0 9 9 re f'.codeUnits)),
         resources,
       );
-      expect(device.blendModes,
-          [PdfBlendMode.multiply, PdfBlendMode.normal]);
+      expect(device.blendModes, [PdfBlendMode.multiply, PdfBlendMode.normal]);
     });
   });
 
@@ -567,8 +594,9 @@ void main() {
       var minX = double.infinity, minY = double.infinity;
       var maxX = double.negativeInfinity, maxY = double.negativeInfinity;
       for (final segment in path.segments) {
-        if (segment case PdfMoveTo(:final x, :final y) ||
-            PdfLineTo(:final x, :final y)) {
+        if (segment
+            case PdfMoveTo(:final x, :final y) ||
+                PdfLineTo(:final x, :final y)) {
           if (x < minX) minX = x;
           if (y < minY) minY = y;
           if (x > maxX) maxX = x;
@@ -623,8 +651,7 @@ void main() {
     test('each appearance clips to its BBox', () {
       final doc = PdfDocument.open(buildAppearanceAnnotationsPdf());
       final device = RecordingDevice();
-      PdfInterpreter(cos: doc.cos, device: device)
-          .drawAnnotations(doc.page(0));
+      PdfInterpreter(cos: doc.cos, device: device).drawAnnotations(doc.page(0));
       // three drawn appearances, one BBox clip each
       expect(device.clips, hasLength(3));
       expect(boundsOf(device.clips.first.$1), (100, 100, 200, 150));

@@ -408,15 +408,20 @@ class CanvasPdfDevice implements PdfDevice {
 
   TextStyle _styleFor(PdfTextRun run) {
     final name = run.fontName ?? '';
+    final cjk = _cjkPrimaryFontFor(name);
     return TextStyle(
       color: _toColor(run.color, 1),
       fontSize: 100,
-      fontFamily: switch (name) {
-        _ when name.contains('Courier') || name.contains('Mono') => 'Courier',
-        _ when name.contains('Times') || name.contains('Serif') =>
-          'Times New Roman',
-        _ => 'Helvetica',
-      },
+      fontFamily: cjk ??
+          switch (name) {
+            _ when name.contains('Courier') || name.contains('Mono') =>
+              'Courier',
+            _ when name.contains('Times') || name.contains('Serif') =>
+              'Times New Roman',
+            _ => 'Helvetica',
+          },
+      fontFamilyFallback:
+          cjk == null ? _defaultFontFallbacks : _cjkFontFallbacks,
       fontWeight: name.contains('Bold') ? FontWeight.bold : FontWeight.normal,
       fontStyle: name.contains('Italic') || name.contains('Oblique')
           ? FontStyle.italic
@@ -425,6 +430,40 @@ class CanvasPdfDevice implements PdfDevice {
       letterSpacing: 0,
       height: 1,
     );
+  }
+
+  static const _cjkFontFallbacks = [
+    // Apple platforms.
+    'PingFang SC',
+    'Songti SC',
+    'Heiti SC',
+    'Hiragino Sans GB',
+    // Android/Linux distributions.
+    'Noto Sans CJK SC',
+    'Noto Serif CJK SC',
+    'Source Han Sans SC',
+    'Source Han Serif SC',
+    // Windows.
+    'Microsoft YaHei',
+    'SimSun',
+    'SimHei',
+  ];
+
+  static const _defaultFontFallbacks = [
+    'PingFang SC',
+    'Noto Sans CJK SC',
+    'Source Han Sans SC',
+    'Microsoft YaHei',
+  ];
+
+  static String? _cjkPrimaryFontFor(String name) {
+    if (name.contains('ºÚÌå')) return 'Heiti SC'; // 黑体
+    if (name.contains('ËÎÌå') ||
+        name.contains('·ÂËÎ') ||
+        name.contains('Ð¡±êËÎ')) {
+      return 'STSong'; // 宋体 / 仿宋 / 小标宋
+    }
+    return null;
   }
 
   static Color _toColor(PdfColor color, double alpha) => Color.from(

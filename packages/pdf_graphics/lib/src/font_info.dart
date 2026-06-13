@@ -23,6 +23,7 @@ class PdfFontInfo {
     CffFont? cff,
     Uint8List? cidToGid,
     bool symbolic = false,
+    bool legacyGbk = false,
     Map<int, int>? cffCodeToGid,
     Map<int, CosStream> type3Procs = const {},
     this.type3Resources,
@@ -34,6 +35,7 @@ class PdfFontInfo {
         _cff = cff,
         _cidToGid = cidToGid,
         _symbolic = symbolic,
+        _legacyGbk = legacyGbk,
         _cffCodeToGid = cffCodeToGid,
         _type3Procs = type3Procs,
         _type3Matrix = type3Matrix;
@@ -52,6 +54,7 @@ class PdfFontInfo {
   final CffFont? _cff;
   final Uint8List? _cidToGid;
   final bool _symbolic;
+  final bool _legacyGbk;
 
   /// PDF /Encoding (base + Differences) resolved against the CFF charset;
   /// overrides the font's built-in encoding when present.
@@ -183,6 +186,7 @@ class PdfFontInfo {
       cff: cff,
       cidToGid: cidToGid,
       symbolic: symbolic,
+      legacyGbk: !isCid && toUnicode.isEmpty && _isLegacyGbkFont(baseFont),
       cffCodeToGid: cffCodeToGid,
       type3Procs: type3Procs,
       type3Resources: type3Resources,
@@ -200,8 +204,8 @@ class PdfFontInfo {
     if (baseFont == null) return;
     // strip any ABCDEF+ subset prefix
     final plus = baseFont.indexOf('+');
-    final name = (plus >= 0 ? baseFont.substring(plus + 1) : baseFont)
-        .toLowerCase();
+    final name =
+        (plus >= 0 ? baseFont.substring(plus + 1) : baseFont).toLowerCase();
     List<int>? table;
     if (name.startsWith('helvetica') || name.startsWith('arial')) {
       table = name.contains('bold') ? helveticaBoldWidths : helveticaWidths;
@@ -362,6 +366,7 @@ class PdfFontInfo {
 
   /// Splits show-text string bytes into character codes.
   List<int> codesOf(Uint8List bytes) {
+    if (_legacyGbk) return _legacyGbkCodesOf(bytes);
     if (!isCid) return bytes;
     final codes = <int>[];
     for (var i = 0; i + 1 < bytes.length; i += 2) {
@@ -373,6 +378,11 @@ class PdfFontInfo {
   /// Glyph advance in em units (1.0 = the font size). Falls back to the
   /// embedded font's hmtx metrics before the default width.
   double widthOf(int code) {
+    if (_legacyGbk && code > 0xFF) {
+      final high = _widths[code >> 8] ?? _defaultWidth;
+      final low = _widths[code & 0xFF] ?? _defaultWidth;
+      return high + low;
+    }
     final declared = _widths[code];
     if (declared != null) return declared;
     final trueType = _trueType;
@@ -392,6 +402,10 @@ class PdfFontInfo {
   String charFor(int code) {
     final mapped = _toUnicode[code];
     if (mapped != null) return mapped;
+    if (_legacyGbk && code > 0xFF) {
+      final mapped = _legacyGbkUnicode[code];
+      if (mapped != null) return String.fromCharCode(mapped);
+    }
     if (!isCid && code >= 0x20 && code <= 0xFF) {
       return String.fromCharCode(code); // Latin-1 ≈ Standard/WinAnsi enough
     }
@@ -430,6 +444,147 @@ class PdfFontInfo {
       }
     }
   }
+
+  static bool _isLegacyGbkFont(String? baseFont) {
+    if (baseFont == null) return false;
+    return baseFont.contains('ËÎÌå') || // 宋体
+        baseFont.contains('ºÚÌå') || // 黑体
+        baseFont.contains('¿¬Ìå') || // 楷体
+        baseFont.contains('·ÂËÎ') || // 仿宋
+        baseFont.contains('Ð¡±êËÎ'); // 小标宋
+  }
+
+  static List<int> _legacyGbkCodesOf(Uint8List bytes) {
+    final codes = <int>[];
+    for (var i = 0; i < bytes.length; i++) {
+      final high = bytes[i];
+      if (high >= 0x81 &&
+          high <= 0xFE &&
+          i + 1 < bytes.length &&
+          bytes[i + 1] >= 0x40 &&
+          bytes[i + 1] <= 0xFE &&
+          bytes[i + 1] != 0x7F) {
+        codes.add((high << 8) | bytes[++i]);
+        if (i + 1 < bytes.length && bytes[i + 1] == 0x20) i++;
+      } else {
+        codes.add(high);
+      }
+    }
+    return codes;
+  }
+
+  // Targeted GBK repair table for malformed non-embedded Chinese simple
+  // fonts that declare WinAnsiEncoding but store GBK byte pairs. Keep this
+  // small and corpus-driven until a full charset dependency is warranted.
+  static const Map<int, int> _legacyGbkUnicode = {
+    0xA1A1: 0x3000, //
+    0xA1AD: 0x2026, // …
+    0xA3A8: 0xFF08, // （
+    0xA3A9: 0xFF09, // ）
+    0xA3AC: 0xFF0C, // ，
+    0xA3B1: 0xFF11, // １
+    0xA3B2: 0xFF12, // ２
+    0xA3B3: 0xFF13, // ３
+    0xA3B5: 0xFF15, // ５
+    0xA3B6: 0xFF16, // ６
+    0xA3B8: 0xFF18, // ８
+    0xA3B9: 0xFF19, // ９
+    0xB0CB: 0x516B, // 八
+    0xB1AC: 0x7206, // 爆
+    0xB1E0: 0x7F16, // 编
+    0xB2BF: 0x90E8, // 部
+    0xB2FA: 0x4EA7, // 产
+    0xB3D6: 0x6301, // 持
+    0xB5C4: 0x7684, // 的
+    0xB5D0: 0x654C, // 敌
+    0xB5D8: 0x5730, // 地
+    0xB6C0: 0x72EC, // 独
+    0xB6C8: 0x5EA6, // 度
+    0xB6CF: 0x65AD, // 断
+    0xB6D4: 0x5BF9, // 对
+    0xB6FE: 0x4E8C, // 二
+    0xB7A2: 0x53D1, // 发
+    0xB7BD: 0x65B9, // 方
+    0xB7C0: 0x9632, // 防
+    0xB8C4: 0x6539, // 改
+    0xB8F7: 0x5404, // 各
+    0xB9D8: 0x5173, // 关
+    0xB9FA: 0x56FD, // 国
+    0xBACF: 0x5408, // 合
+    0xBAEC: 0x7EA2, // 红
+    0xBAF3: 0x540E, // 后
+    0xBBF7: 0x51FB, // 击
+    0xBCB0: 0x53CA, // 及
+    0xBCE1: 0x575A, // 坚
+    0xBCFB: 0x89C1, // 见
+    0xBDD3: 0x63A5, // 接
+    0xBDE2: 0x89E3, // 解
+    0xBDE7: 0x754C, // 界
+    0xBEC5: 0x4E5D, // 九
+    0xBEFC: 0x519B, // 军
+    0xBFAA: 0x5F00, // 开
+    0xC0B4: 0x6765, // 来
+    0xC1A2: 0x7ACB, // 立
+    0xC1AA: 0x8054, // 联
+    0xC2B7: 0x8DEF, // 路
+    0xC2BC: 0x5F55, // 录
+    0xC2D4: 0x7565, // 略
+    0xC4BF: 0x76EE, // 目
+    0xC4CF: 0x5357, // 南
+    0xC4EA: 0x5E74, // 年
+    0xC5D0: 0x5224, // 判
+    0xC6DF: 0x4E03, // 七
+    0xC6F0: 0x8D77, // 起
+    0xC7A2: 0x6D3D, // 洽
+    0xC7AB: 0x8C26, // 谦
+    0xC7E9: 0x60C5, // 情
+    0xC7F8: 0x533A, // 区
+    0xC8AB: 0x5168, // 全
+    0xC8CE: 0x4EFB, // 任
+    0xC8D5: 0x65E5, // 日
+    0xC8FD: 0x4E09, // 三
+    0xC9BD: 0x5C71, // 山
+    0xCAAE: 0x5341, // 十
+    0xCAB1: 0x65F6, // 时
+    0xCAB5: 0x5B9E, // 实
+    0xCAC0: 0x4E16, // 世
+    0xCAC6: 0x52BF, // 势
+    0xCACD: 0x91CA, // 释
+    0xCAF0: 0x7F72, // 署
+    0xCBC4: 0x56DB, // 四
+    0xCCAC: 0x6001, // 态
+    0xCCB8: 0x8C08, // 谈
+    0xCCE2: 0x9898, // 题
+    0xCDAC: 0x540C, // 同
+    0xCECA: 0x95EE, // 问
+    0xCEDE: 0x65E0, // 无
+    0xCEF1: 0x52A1, // 务
+    0xCEF7: 0x897F, // 西
+    0xD0CE: 0x5F62, // 形
+    0xD0D0: 0x884C, // 行
+    0xD1B7: 0x900A, // 逊
+    0xD2AA: 0x8981, // 要
+    0xD2BB: 0x4E00, // 一
+    0xD2E2: 0x610F, // 意
+    0xD3A6: 0x5E94, // 应
+    0xD3CE: 0x6E38, // 游
+    0xD3D0: 0x6709, // 有
+    0xD3DA: 0x4E8E, // 于
+    0xD3EB: 0x4E0E, // 与
+    0xD4AD: 0x539F, // 原
+    0xD4C2: 0x6708, // 月
+    0xD4DA: 0x5728, // 在
+    0xD4F2: 0x5219, // 则
+    0xD5B9: 0x5C55, // 展
+    0xD5BD: 0x6218, // 战
+    0xD5DF: 0x8005, // 者
+    0xD5EB: 0x9488, // 针
+    0xD5F9: 0x4E89, // 争
+    0xD6D0: 0x4E2D, // 中
+    0xD6F7: 0x4E3B, // 主
+    0xD7D4: 0x81EA, // 自
+    0xD7F7: 0x4F5C, // 作
+  };
 
   /// Minimal ToUnicode CMap reader: bfchar and bfrange sections only, which
   /// covers what real-world writers emit.

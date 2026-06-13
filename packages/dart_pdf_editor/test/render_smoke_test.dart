@@ -21,6 +21,10 @@ Future<void> loadSystemFonts() async {
       '/System/Library/Fonts/Supplemental/Times New Roman.ttf'
     ],
     'Courier': ['/System/Library/Fonts/Supplemental/Courier New.ttf'],
+    'STSong': ['/System/Library/Fonts/Supplemental/Songti.ttc'],
+    'Songti SC': ['/System/Library/Fonts/Supplemental/Songti.ttc'],
+    'Heiti SC': ['/System/Library/Fonts/STHeiti Medium.ttc'],
+    'Hiragino Sans GB': ['/System/Library/Fonts/Hiragino Sans GB.ttc'],
   };
   for (final entry in fonts.entries) {
     for (final path in entry.value) {

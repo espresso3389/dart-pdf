@@ -1813,7 +1813,12 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     return parts.join('\n');
   }
 
-  List<PdfRect> _selectionRectsOn(int pageIndex) {
+  List<PdfRect> _selectionRectsOn(int pageIndex) =>
+      [for (final quad in _selectionQuadsOn(pageIndex)) quad.bounds];
+
+  /// Baseline-aligned selection quads on [pageIndex], so the highlight
+  /// rotates with rotated text instead of painting an axis-aligned box.
+  List<PdfTextQuad> _selectionQuadsOn(int pageIndex) {
     final range = _selRange;
     if (range == null) return const [];
     final (start, end) = range;
@@ -1822,7 +1827,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     final from = pageIndex == start.$1 ? start.$2 : 0;
     final to = pageIndex == end.$1 ? end.$2 : text.text.length;
     if (from >= to) return const [];
-    return text.rectsFor(from, to);
+    return text.quadsFor(from, to);
   }
 
   void _showMatch(PdfTextMatch match) {
@@ -2212,7 +2217,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                 currentMatch: _controller._currentMatch >= 0
                     ? _controller._matches[_controller._currentMatch]
                     : null,
-                selection: _selectionRectsOn(index),
+                selection: _selectionQuadsOn(index),
                 textSelection: _textSelectionOn(index),
                 overlayBuilder: widget.pageOverlayBuilder,
                 editing: editing,
@@ -2511,7 +2516,7 @@ class _PdfViewerPage extends StatefulWidget {
   final int settleGeneration;
   final List<PdfTextMatch> matches;
   final PdfTextMatch? currentMatch;
-  final List<PdfRect> selection;
+  final List<PdfTextQuad> selection;
 
   /// Touch selection chrome on this page (handles and the copy chip);
   /// null when the page shows none.
@@ -2732,7 +2737,7 @@ class _HighlightPainter extends CustomPainter {
   final int rotation;
   final List<PdfTextMatch> matches;
   final PdfTextMatch? currentMatch;
-  final List<PdfRect> selection;
+  final List<PdfTextQuad> selection;
   final PdfViewerThemeData theme;
 
   @override
@@ -2742,8 +2747,8 @@ class _HighlightPainter extends CustomPainter {
         PdfPageGeometry(cropBox: box, rotation: rotation, viewSize: size);
     final selected = Paint()
       ..color = theme.selectionColor ?? const Color(0x4D2196F3);
-    for (final rect in selection) {
-      canvas.drawRect(geometry.toViewRect(rect), selected);
+    for (final quad in selection) {
+      _paintQuad(canvas, geometry, quad, selected);
     }
     final normal = Paint()
       ..color = theme.searchMatchColor ?? const Color(0x66FFEB3B);
@@ -2751,10 +2756,21 @@ class _HighlightPainter extends CustomPainter {
       ..color = theme.currentSearchMatchColor ?? const Color(0x88FF9800);
     for (final match in matches) {
       final paint = identical(match, currentMatch) ? current : normal;
-      for (final rect in match.rects) {
-        canvas.drawRect(geometry.toViewRect(rect), paint);
+      for (final quad in match.quads) {
+        _paintQuad(canvas, geometry, quad, paint);
       }
     }
+  }
+
+  /// Maps the quad's four page-space corners into view space and fills the
+  /// resulting (possibly rotated) polygon, so highlights follow rotated
+  /// text instead of being axis-aligned boxes.
+  void _paintQuad(
+      Canvas canvas, PdfPageGeometry geometry, PdfTextQuad quad, Paint paint) {
+    final points = [
+      for (final (x, y) in quad.corners) geometry.toViewOffset(x, y),
+    ];
+    canvas.drawPath(Path()..addPolygon(points, true), paint);
   }
 
   @override

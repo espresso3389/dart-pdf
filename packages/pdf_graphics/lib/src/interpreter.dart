@@ -122,13 +122,29 @@ class _GraphicsState {
 }
 
 class _ActiveSoftMask {
-  _ActiveSoftMask(this.form, this.matrix, this.luminosity, this.frameDepth);
+  _ActiveSoftMask(
+    this.form,
+    this.matrix,
+    this.luminosity,
+    this.frameDepth, {
+    this.backdropLuminance = 0,
+    this.transferScale = 1,
+    this.transferOffset = 0,
+  });
 
   final CosStream form;
 
   /// The CTM at the moment the mask was set — mask coordinates live there.
   final PdfMatrix matrix;
   final bool luminosity;
+
+  /// Luminance of the /BC backdrop colour for areas the mask group leaves
+  /// unpainted (default black). Only meaningful for luminosity masks.
+  final double backdropLuminance;
+
+  /// Linearised /TR transfer function: `out = value * scale + offset`.
+  final double transferScale;
+  final double transferOffset;
 
   /// q-nesting depth where the mask was opened; it closes when that frame
   /// pops (or when replaced at the same depth).
@@ -172,6 +188,13 @@ class PdfInterpreter {
   // text matrices
   PdfMatrix _textMatrix = PdfMatrix.identity;
   PdfMatrix _lineMatrix = PdfMatrix.identity;
+
+  // Text clipping (render modes 4–7, §9.4.1): glyph outlines painted between
+  // BT and ET accumulate in page space and intersect the clip at ET. The
+  // flag is set independently of the segments so a clip with no resolvable
+  // outlines (e.g. a broken embedded font) correctly clips everything away.
+  bool _textClipPending = false;
+  final List<PdfPathSegment> _textClipSegments = [];
 
   void drawPage(PdfPage page) {
     _state = _GraphicsState();
@@ -785,8 +808,18 @@ class PdfInterpreter {
         case 'BT':
           _textMatrix = PdfMatrix.identity;
           _lineMatrix = PdfMatrix.identity;
+          _textClipPending = false;
+          _textClipSegments.clear();
         case 'ET':
-          break;
+          if (_textClipPending) {
+            // §9.4.1: combine the accumulated glyph outlines (nonzero rule)
+            // and intersect with the current clip. No outlines → empty path
+            // → everything painted afterward is clipped away.
+            device.clipPath(
+                PdfPath(List.of(_textClipSegments)), PdfFillRule.nonzero);
+            _textClipPending = false;
+            _textClipSegments.clear();
+          }
         case 'Tf':
           _setFont(resources, o);
         case 'Td':
@@ -1256,11 +1289,47 @@ class PdfInterpreter {
       _finalizeSoftMask(mask);
     }
     final s = cos.resolve(smask['S']);
+    final luminosity = s is CosName && s.value == 'Luminosity';
+
+    // /BC backdrop colour (component values in the group's colour space) sets
+    // the mask value for areas the group leaves unpainted; default black.
+    var backdropLuminance = 0.0;
+    final bc = cos.resolve(smask['BC']);
+    if (bc is CosArray && bc.length > 0) {
+      final c = [for (final v in bc.items) _numOf(cos.resolve(v))];
+      backdropLuminance = switch (c.length) {
+        1 => c[0],
+        3 => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2],
+        4 => (1 - c[0]) * 0.3 + (1 - c[1]) * 0.59 + (1 - c[2]) * 0.11,
+        _ => c[0],
+      };
+    }
+
+    // /TR transfer function, linearised through its endpoints (exact for the
+    // common FunctionType 2, N=1 case these masks use).
+    var transferScale = 1.0;
+    var transferOffset = 0.0;
+    final tr = cos.resolve(smask['TR']);
+    if (!(tr is CosName && tr.value == 'Identity')) {
+      final fn = PdfFunction.parse(cos, smask['TR']);
+      if (fn != null) {
+        final lo = fn.evaluate(0);
+        final hi = fn.evaluate(1);
+        if (lo.isNotEmpty && hi.isNotEmpty) {
+          transferOffset = lo[0];
+          transferScale = hi[0] - lo[0];
+        }
+      }
+    }
+
     _state.softMask = _ActiveSoftMask(
       form,
       _state.ctm,
-      s is CosName && s.value == 'Luminosity',
+      luminosity,
       _stateStack.length,
+      backdropLuminance: backdropLuminance,
+      transferScale: transferScale,
+      transferOffset: transferOffset,
     );
     device.beginSoftMasked();
   }
@@ -1272,6 +1341,9 @@ class PdfInterpreter {
       luminosity: mask.luminosity,
       backdrop: _pageBox ?? const PdfRect(-1e5, -1e5, 1e5, 1e5),
       drawMask: () => _runSoftMaskForm(mask),
+      backdropLuminance: mask.backdropLuminance,
+      transferScale: mask.transferScale,
+      transferOffset: mask.transferOffset,
     );
   }
 
@@ -1365,7 +1437,10 @@ class PdfInterpreter {
         offset: advance / emScale,
         outline: font.outlineFor(code),
       ));
-      if (font.isType3 && _state.renderMode != 3 && size != 0) {
+      if (font.isType3 &&
+          _state.renderMode != 3 &&
+          _state.renderMode != 7 &&
+          size != 0) {
         _drawType3Glyph(font, code, advance);
       }
       var tx = font.widthOf(code) * size + _state.charSpacing;
@@ -1384,14 +1459,31 @@ class PdfInterpreter {
         0, _state.rise,
       ).concat(_textMatrix).concat(_state.ctm);
       final text = buffer.toString();
+
+      // Text rendering modes (§9.4.3): 0 fill, 1 stroke, 2 fill+stroke,
+      // 3 invisible, 4–6 = 0–2 plus clip, 7 clip only. Modes ≥4 add the
+      // glyph outlines to the clipping path (applied at ET).
+      final mode = _state.renderMode;
+      if (mode >= 4 && glyphs != null) {
+        _textClipPending = true;
+        for (final g in glyphs) {
+          final outline = g.outline;
+          if (outline == null) continue;
+          _appendTransformedPath(
+            _textClipSegments,
+            outline,
+            PdfMatrix.translation(g.offset, 0).concat(transform),
+          );
+        }
+      }
+
       if (text.trim().isNotEmpty || glyphs != null) {
-        final fillText = _state.renderMode != 1 &&
-            _state.renderMode != 3 &&
-            _state.renderMode != 5;
+        final fillText =
+            mode == 0 || mode == 2 || mode == 4 || mode == 6;
         device.drawText(PdfTextRun(
           text: text,
           transform: transform,
-          color: _state.renderMode == 1 || _state.renderMode == 5
+          color: mode == 1 || mode == 5
               ? _state.strokeColor
               : _state.fillColor,
           gradient: fillText ? _gradientOfPattern(_state.fillPattern) : null,
@@ -1399,7 +1491,7 @@ class PdfInterpreter {
           fontName: font.baseFont,
           fontSize: size,
           glyphs: glyphs,
-          invisible: _state.renderMode == 3,
+          invisible: mode == 3 || mode == 7,
         ));
       }
     }
@@ -1756,6 +1848,30 @@ class PdfInterpreter {
       const PdfClosePath(),
     ];
     device.clipPath(PdfPath(segments), PdfFillRule.nonzero);
+  }
+
+  /// Appends [path]'s segments, mapped through [m], onto [out] — used to bake
+  /// glyph outlines (em space) into the page-space text clipping path.
+  static void _appendTransformedPath(
+      List<PdfPathSegment> out, PdfPath path, PdfMatrix m) {
+    for (final s in path.segments) {
+      out.add(switch (s) {
+        PdfMoveTo(:final x, :final y) =>
+          PdfMoveTo(m.transformX(x, y), m.transformY(x, y)),
+        PdfLineTo(:final x, :final y) =>
+          PdfLineTo(m.transformX(x, y), m.transformY(x, y)),
+        PdfCubicTo(:final x1, :final y1, :final x2, :final y2, :final x3,
+                :final y3) =>
+          PdfCubicTo(
+              m.transformX(x1, y1),
+              m.transformY(x1, y1),
+              m.transformX(x2, y2),
+              m.transformY(x2, y2),
+              m.transformX(x3, y3),
+              m.transformY(x3, y3)),
+        PdfClosePath() => const PdfClosePath(),
+      });
+    }
   }
 
   void _drawInlineImage(List<CosObject> o) {

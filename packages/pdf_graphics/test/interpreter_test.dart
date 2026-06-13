@@ -89,7 +89,10 @@ class RecordingDevice implements PdfDevice {
   void endSoftMasked(
       {required bool luminosity,
       required PdfRect backdrop,
-      required void Function() drawMask}) {
+      required void Function() drawMask,
+      double backdropLuminance = 0,
+      double transferScale = 1,
+      double transferOffset = 0}) {
     calls.add('endSoftMasked');
     softMaskEnds.add((luminosity, drawMask));
   }

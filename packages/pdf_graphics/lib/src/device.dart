@@ -176,13 +176,20 @@ abstract interface class PdfDevice {
 
   /// Ends the capture opened by [beginSoftMasked]. [drawMask] paints the
   /// mask group's content through this same device; for luminosity masks
-  /// the device converts the result's luminance to alpha over a black
-  /// [backdrop], then composites it into the captured content (dstIn).
+  /// the device converts the result's luminance to alpha over the
+  /// [backdrop] box, then composites it into the captured content (dstIn).
+  /// Areas the mask group doesn't paint take [backdropLuminance] (the
+  /// luminance of the /BC backdrop colour, default black). The mask value
+  /// is remapped through the /TR transfer function, linearised here as
+  /// `value * transferScale + transferOffset` (identity by default).
   /// Devices that collect content from [drawMask] (e.g. image collectors)
   /// should invoke it even if they do no compositing.
   void endSoftMasked({
     required bool luminosity,
     required PdfRect backdrop,
     required void Function() drawMask,
+    double backdropLuminance = 0,
+    double transferScale = 1,
+    double transferOffset = 0,
   });
 }

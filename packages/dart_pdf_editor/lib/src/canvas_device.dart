@@ -85,16 +85,44 @@ class CanvasPdfDevice implements PdfDevice {
   void endSoftMasked(
       {required bool luminosity,
       required PdfRect backdrop,
-      required void Function() drawMask}) {
+      required void Function() drawMask,
+      double backdropLuminance = 0,
+      double transferScale = 1,
+      double transferOffset = 0}) {
+    final hasTransfer = transferScale != 1 || transferOffset != 0;
     final paint = Paint()..blendMode = BlendMode.dstIn;
-    if (luminosity) paint.colorFilter = _luminanceToAlpha;
+    if (luminosity) {
+      // Fold the /TR transfer (linearised) into the luminance→alpha matrix:
+      // alpha = luminance * scale + offset.
+      paint.colorFilter = hasTransfer
+          ? ColorFilter.matrix(<double>[
+              0, 0, 0, 0, 0, //
+              0, 0, 0, 0, 0, //
+              0, 0, 0, 0, 0, //
+              0.2126 * transferScale, 0.7152 * transferScale,
+              0.0722 * transferScale, 0, transferOffset * 255,
+            ])
+          : _luminanceToAlpha;
+    } else if (hasTransfer) {
+      // Alpha mask: remap the captured alpha through the transfer. Unpainted
+      // (transparent) areas filter to transferOffset = TR(0), so the
+      // out-of-bounds backdrop falls out for free.
+      paint.colorFilter = ColorFilter.matrix(<double>[
+        0, 0, 0, 0, 0, //
+        0, 0, 0, 0, 0, //
+        0, 0, 0, 0, 0, //
+        0, 0, 0, transferScale, transferOffset * 255,
+      ]);
+    }
     canvas.saveLayer(null, paint);
     if (luminosity) {
-      // unpainted mask area has luminance 0 → fully transparent content
+      // Unpainted mask area takes the /BC backdrop luminance (default black →
+      // fully transparent content); the colour filter turns it into alpha.
+      final g = backdropLuminance.clamp(0.0, 1.0);
       canvas.drawRect(
         Rect.fromLTRB(
             backdrop.left, backdrop.bottom, backdrop.right, backdrop.top),
-        Paint()..color = const Color(0xFF000000),
+        Paint()..color = Color.from(alpha: 1, red: g, green: g, blue: g),
       );
     }
     drawMask();

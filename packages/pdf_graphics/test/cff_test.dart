@@ -1,3 +1,7 @@
+import 'dart:io';
+
+import 'package:pdf_cos/pdf_cos.dart';
+import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 import 'package:pdf_graphics/src/fonts/cff.dart';
 import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
@@ -42,6 +46,29 @@ void main() {
     expect(font.outlineForGlyph(0), isNull);
     // .notdef has no width operand: defaultWidthX 500
     expect(font.advanceForGlyph(0), closeTo(0.5, 1e-9));
+  });
+
+  test('endchar seac composes accented glyphs', () {
+    final doc = PdfDocument.open(
+        File('../../test_corpora/pdfjs/endchar.pdf').readAsBytesSync());
+    final cos = doc.cos;
+    final page = doc.page(0);
+    final xobjects = cos.resolve(page.resources['XObject']) as CosDictionary;
+    final form = cos.resolve(xobjects['Fm0']) as CosStream;
+    final resources =
+        cos.resolve(form.dictionary['Resources']) as CosDictionary;
+    final fonts = cos.resolve(resources['Font']) as CosDictionary;
+    final pdfFont = cos.resolve(fonts['T1_0']) as CosDictionary;
+    final descriptor = cos.resolve(pdfFont['FontDescriptor']) as CosDictionary;
+    final fontFile = cos.resolve(descriptor['FontFile3']) as CosStream;
+    final cff = CffFont.parse(cos.decodeStreamData(fontFile))!;
+
+    final e = cff.outlineForGlyph(cff.gidForName('E'))!;
+    final acute = cff.outlineForGlyph(cff.gidForName('acute'))!;
+    final eacute = cff.outlineForGlyph(cff.gidForName('Eacute'));
+    expect(eacute, isNotNull);
+    expect(eacute!.segments.length,
+        greaterThan(e.segments.length + acute.segments.length - 2));
   });
 
   test('garbage input parses to null', () {

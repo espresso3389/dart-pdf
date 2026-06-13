@@ -63,7 +63,8 @@ class CffFont {
   /// Extracts the 'CFF ' table when [bytes] is an OpenType (OTTO) font.
   static Uint8List? _unwrapOpenType(Uint8List bytes) {
     if (bytes.length < 12) return null;
-    final scaler = (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
+    final scaler =
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
     if (scaler != 0x4F54544F) return null;
     final numTables = (bytes[4] << 8) | bytes[5];
     for (var i = 0; i < numTables; i++) {
@@ -99,8 +100,7 @@ class CffFont {
     final top = _parseDict(bytes, topDicts[0]);
     final charStringsOffset = _firstInt(top[17]);
     if (charStringsOffset == null) return null;
-    final charStrings =
-        _readIndex(_Reader(bytes)..seek(charStringsOffset));
+    final charStrings = _readIndex(_Reader(bytes)..seek(charStringsOffset));
     if (charStrings.isEmpty) return null;
 
     final fontMatrix = [
@@ -116,14 +116,12 @@ class CffFont {
       final fdArrayOffset = _firstInt(top[0x0C24]);
       if (fdArrayOffset != null) {
         for (final range in _readIndex(_Reader(bytes)..seek(fdArrayOffset))) {
-          privates.add(
-              _PrivateDict.parse(bytes, _parseDict(bytes, range)[18]));
+          privates.add(_PrivateDict.parse(bytes, _parseDict(bytes, range)[18]));
         }
       }
       final fdSelectOffset = _firstInt(top[0x0C25]);
       if (fdSelectOffset != null) {
-        fdSelect =
-            _parseFdSelect(bytes, fdSelectOffset, charStrings.length);
+        fdSelect = _parseFdSelect(bytes, fdSelectOffset, charStrings.length);
       }
     }
     if (privates.isEmpty) {
@@ -224,7 +222,8 @@ class CffFont {
     final select = _fdSelect;
     if (select != null && gid < select.length) fd = select[gid];
     final private = _privates[fd < _privates.length ? fd : 0];
-    final runner = _CharstringRunner(
+    late final _CharstringRunner runner;
+    runner = _CharstringRunner(
       bytes: _bytes,
       globalSubrs: _globalSubrs,
       localSubrs: private.subrs,
@@ -234,10 +233,25 @@ class CffFont {
       skewX: _fontMatrix.length > 2 ? _fontMatrix[2] : 0,
       skewY: _fontMatrix.length > 1 ? _fontMatrix[1] : 0,
       scaleY: _fontMatrix.length > 3 ? _fontMatrix[3] : 0.001,
+      seac: (adx, ady, bchar, achar) {
+        final base = _outlineForStandardCode(bchar);
+        final accent = _outlineForStandardCode(achar);
+        if (base != null) runner.appendPath(base);
+        if (accent != null) runner.appendPath(accent, dx: adx, dy: ady);
+      },
     );
     runner.execute(_charStrings[gid]);
     return runner;
   }
+
+  PdfPath? _outlineForStandardCode(int code) {
+    final name = _standardEncodingName(code);
+    return name == null ? null : outlineForGlyph(gidForName(name));
+  }
+
+  static String? _standardEncodingName(int code) => code >= 32 && code <= 126
+      ? winAnsiGlyphName(code)
+      : standardGlyphName(code);
 
   // ---------- low-level structures ----------
 
@@ -431,8 +445,7 @@ class _PrivateDict {
     var subrs = const <(int, int)>[];
     final subrsOffset = CffFont._firstInt(dict[19]);
     if (subrsOffset != null) {
-      subrs =
-          CffFont._readIndex(_Reader(bytes)..seek(offset + subrsOffset));
+      subrs = CffFont._readIndex(_Reader(bytes)..seek(offset + subrsOffset));
     }
     return _PrivateDict(
       subrs,
@@ -454,6 +467,7 @@ class _CharstringRunner {
     required this.skewX,
     required this.skewY,
     required this.scaleY,
+    required this.seac,
   }) : width = defaultWidthX;
 
   final Uint8List bytes;
@@ -462,6 +476,7 @@ class _CharstringRunner {
   final double defaultWidthX;
   final double nominalWidthX;
   final double scaleX, skewX, skewY, scaleY;
+  final void Function(double adx, double ady, int bchar, int achar) seac;
 
   final segments = <PdfPathSegment>[];
   final _stack = <double>[];
@@ -579,8 +594,8 @@ class _CharstringRunner {
             i = 1;
           }
           for (; i + 3 < _stack.length; i += 4) {
-            _relCurve(dx1, _stack[i], _stack[i + 1], _stack[i + 2], 0,
-                _stack[i + 3]);
+            _relCurve(
+                dx1, _stack[i], _stack[i + 1], _stack[i + 2], 0, _stack[i + 3]);
             dx1 = 0;
           }
           _stack.clear();
@@ -592,8 +607,8 @@ class _CharstringRunner {
             i = 1;
           }
           for (; i + 3 < _stack.length; i += 4) {
-            _relCurve(_stack[i], dy1, _stack[i + 1], _stack[i + 2],
-                _stack[i + 3], 0);
+            _relCurve(
+                _stack[i], dy1, _stack[i + 1], _stack[i + 2], _stack[i + 3], 0);
             dy1 = 0;
           }
           _stack.clear();
@@ -636,6 +651,10 @@ class _CharstringRunner {
           return;
         case 14: // endchar
           _takeWidth(even: true);
+          if (_stack.length == 4) {
+            seac(_stack[0], _stack[1], _stack[2].round(), _stack[3].round());
+            _stack.clear();
+          }
           _closeIfOpen();
           return;
         case 12:
@@ -652,8 +671,8 @@ class _CharstringRunner {
     switch (op) {
       case 35: // flex
         if (_stack.length >= 13) {
-          _relCurve(_stack[0], _stack[1], _stack[2], _stack[3], _stack[4],
-              _stack[5]);
+          _relCurve(
+              _stack[0], _stack[1], _stack[2], _stack[3], _stack[4], _stack[5]);
           _relCurve(_stack[6], _stack[7], _stack[8], _stack[9], _stack[10],
               _stack[11]);
         }
@@ -669,8 +688,8 @@ class _CharstringRunner {
         if (_stack.length >= 9) {
           final dy1 = _stack[1], dy2 = _stack[3], dy5 = _stack[7];
           _relCurve(_stack[0], dy1, _stack[2], dy2, _stack[4], 0);
-          _relCurve(_stack[5], 0, _stack[6], dy5, _stack[8],
-              -(dy1 + dy2 + dy5));
+          _relCurve(
+              _stack[5], 0, _stack[6], dy5, _stack[8], -(dy1 + dy2 + dy5));
         }
         _stack.clear();
       case 37: // flex1
@@ -681,8 +700,8 @@ class _CharstringRunner {
             dx += _stack[i];
             dy += _stack[i + 1];
           }
-          _relCurve(_stack[0], _stack[1], _stack[2], _stack[3], _stack[4],
-              _stack[5]);
+          _relCurve(
+              _stack[0], _stack[1], _stack[2], _stack[3], _stack[4], _stack[5]);
           final c1x = _x + _stack[6], c1y = _y + _stack[7];
           final c2x = c1x + _stack[8], c2y = c1y + _stack[9];
           final double endX, endY;
@@ -749,6 +768,31 @@ class _CharstringRunner {
       segments.add(const PdfClosePath());
       _open = false;
     }
+  }
+
+  void appendPath(PdfPath path, {double dx = 0, double dy = 0}) {
+    final tx = _tx(dx, dy);
+    final ty = _ty(dx, dy);
+    for (final segment in path.segments) {
+      segments.add(_translate(segment, tx, ty));
+    }
+  }
+
+  PdfPathSegment _translate(PdfPathSegment segment, double dx, double dy) {
+    return switch (segment) {
+      PdfMoveTo(:final x, :final y) => PdfMoveTo(x + dx, y + dy),
+      PdfLineTo(:final x, :final y) => PdfLineTo(x + dx, y + dy),
+      PdfCubicTo(
+        :final x1,
+        :final y1,
+        :final x2,
+        :final y2,
+        :final x3,
+        :final y3
+      ) =>
+        PdfCubicTo(x1 + dx, y1 + dy, x2 + dx, y2 + dy, x3 + dx, y3 + dy),
+      PdfClosePath() => segment,
+    };
   }
 
   double _tx(double x, double y) => x * scaleX + y * skewX;

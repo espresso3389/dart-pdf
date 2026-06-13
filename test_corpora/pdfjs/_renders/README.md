@@ -87,7 +87,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | empty.pdf | 1 | 612x792 | 0.000% |
 | empty_protected.pdf | 1 | 612x792 | 0.000% |
 | encrypted-attachment.pdf | 1 | 612x792 | 0.126% |
-| endchar.pdf | 1 | 15x34 | 36.275% |
+| endchar.pdf | 1 | 15x34 | 32.745% |
 | extractPages_null_in_array.pdf | 1 | 612x792 | 0.000% |
 | file_url_link.pdf | 1 | 200x50 | 11.470% |
 | font_ascent_descent.pdf | 1 | 842x595 | 0.013% |
@@ -832,7 +832,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### endchar.pdf page 1
 
-15x34; diff: 36.275%
+15x34; diff: 32.745%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

@@ -21,6 +21,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  image: ^4.9.1
   pdf_cos: ^0.1.0
   pdf_document: ^0.1.0
   pdf_graphics: ^0.1.0

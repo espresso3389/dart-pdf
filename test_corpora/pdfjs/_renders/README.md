@@ -77,7 +77,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | cidfont_cmap_overflow.pdf | 1 | 400x150 | 0.000% |
 | clippath.pdf | 1 | 200x100 | 0.000% |
 | close-path-bug.pdf | 1 | 612x792 | 0.001% |
-| cmykjpeg.pdf | 1 | 612x792 | 6.180% |
+| cmykjpeg.pdf | 1 | 612x792 | 5.996% |
 | colorkeymask.pdf | 1 | 596x842 | 0.000% |
 | colorspace_atan.pdf | 1 | 276x276 | 83.903% |
 | complex_ttf_font.pdf | 1 | 595x842 | 3.207% |
@@ -752,7 +752,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### cmykjpeg.pdf page 1
 
-612x792; diff: 6.180%
+612x792; diff: 5.996%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

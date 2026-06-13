@@ -1,9 +1,11 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_cos/pdf_cos.dart';
 import 'package:dart_pdf_editor/src/image_decoder.dart';
+import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
 import 'package:pdf_test_fixtures/pdf_test_fixtures.dart';
 
@@ -343,6 +345,31 @@ void main() {
       expect(pixels[0], lessThan(60));
       expect(pixels[1], greaterThan(200));
       expect(pixels[2], greaterThan(200));
+      expect(pixels[3], 255);
+    });
+  });
+
+  testWidgets('DeviceCMYK DCT images decode in PDF sample polarity',
+      (tester) async {
+    await tester.runAsync(() async {
+      final doc = PdfDocument.open(
+          File('../../test_corpora/pdfjs/cmykjpeg.pdf').readAsBytesSync());
+      final collector = ImageCollector();
+      PdfInterpreter(cos: doc.cos, device: collector).drawPage(doc.page(0));
+      expect(collector.streams, hasLength(1));
+
+      final request = collector.streams.single;
+      final images = await decodeImages(doc.cos, [request]);
+      final image = images[pdfImageKey(request)]!;
+      expect(image.width, 200);
+      expect(image.height, 150);
+
+      final pixels = await pixelsOf(image);
+      // The embedded Adobe CMYK JPEG starts with a light sky pixel.
+      // Platform RGB conversion rendered this nearly black.
+      expect(pixels[0], greaterThan(90));
+      expect(pixels[1], greaterThan(140));
+      expect(pixels[2], greaterThan(170));
       expect(pixels[3], 255);
     });
   });

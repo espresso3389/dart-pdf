@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:image/image.dart' as img;
 import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_graphics/pdf_graphics.dart';
@@ -85,9 +86,10 @@ class ImageCollector implements PdfDevice {
 ///
 /// Coverage: DCTDecode via the platform codec; CCITTFaxDecode and
 /// JBIG2Decode (with /JBIG2Globals) via the pure-Dart decoders;
-/// Flate/raw DeviceRGB, DeviceGray (8 and 1 bit) and Indexed samples
-/// (1/2/4/8 bit, palettes in RGB, gray, or CMYK bases including
-/// ICCBased — real ICC profiles applied); /SMask soft-mask alpha;
+/// DeviceCMYK DCTDecode via a pure-Dart JPEG component decode; Flate/raw
+/// DeviceRGB, DeviceGray (8 and 1 bit) and Indexed samples (1/2/4/8 bit,
+/// palettes in RGB, gray, or CMYK bases including ICCBased — real ICC
+/// profiles applied); /SMask soft-mask alpha;
 /// explicit /Mask stencil streams; color-key /Mask ranges and /Decode
 /// arrays (on raw samples and on platform-decoded JPEGs); /ImageMask
 /// stencils (decoded as alpha, tinted by the device); JPXDecode via the
@@ -119,16 +121,30 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
           ? 'DCT'
           : null;
   if (!isMask && dctName != null) {
-    // undo any wrapping filters (e.g. [/FlateDecode /DCTDecode]), then
-    // hand the JPEG to the platform codec
+    // undo any wrapping filters (e.g. [/FlateDecode /DCTDecode])
     final jpeg = cos.decodeStreamData(stream, stopBeforeFilter: dctName);
+    final family = _colorSpaceOf(cos, dict);
+    if (family == 'DeviceCMYK') {
+      final cmyk = _decodeDctCmyk(jpeg);
+      if (cmyk != null) {
+        final rgba = _toRgba(cos, dict, cmyk.samples, cmyk.width, cmyk.height,
+            8, icc: _iccProfileFor(cos, dict));
+        if (rgba != null) {
+          final mask =
+              await _softMaskOf(cos, dict) ?? _stencilMaskOf(cos, dict);
+          if (mask != null) _applyAlpha(rgba, cmyk.width, cmyk.height, mask);
+          return _imageFromPixels(rgba, cmyk.width, cmyk.height);
+        }
+      }
+    }
+
+    // Non-CMYK JPEGs can use the platform codec.
     final codec = await ui.instantiateImageCodec(jpeg);
     final base = (await codec.getNextFrame()).image;
     final mask = await _softMaskOf(cos, dict) ?? _stencilMaskOf(cos, dict);
     // /Decode and color-key /Mask apply to the decoded samples; gray
     // JPEGs decode to RGBA with the sample replicated, so one channel
     // stands in for the raw sample either way
-    final family = _colorSpaceOf(cos, dict);
     final components = switch (family) {
       'DeviceGray' => 1,
       'DeviceRGB' => 3,
@@ -190,6 +206,77 @@ Future<ui.Image?> _decodeOne(CosDocument cos, CosStream stream) async {
   }
   return _imageFromPixels(rgba, width, height);
 }
+
+class _DctCmykImage {
+  const _DctCmykImage(this.samples, this.width, this.height);
+
+  final Uint8List samples;
+  final int width;
+  final int height;
+}
+
+/// Decodes 4-component JPEG samples in PDF polarity: 0 = no ink,
+/// 255 = full ink. Platform codecs convert these directly to RGB as Adobe
+/// inverted CMYK and lose the original K, producing very dark images.
+_DctCmykImage? _decodeDctCmyk(Uint8List jpegBytes) {
+  final jpeg = img.JpegData()..read(jpegBytes);
+  if (jpeg.components.length != 4) return null;
+  final width = jpeg.width;
+  final height = jpeg.height;
+  if (width == null || height == null || width <= 0 || height <= 0) {
+    return null;
+  }
+
+  final out = Uint8List(width * height * 4);
+  final component1 = jpeg.components[0];
+  final component2 = jpeg.components[1];
+  final component3 = jpeg.components[2];
+  final component4 = jpeg.components[3];
+  final ycck = (jpeg.adobe?.transformCode ?? 0) != 0;
+
+  for (var y = 0; y < height; y++) {
+    final y1 = y >> component1.vScaleShift;
+    final y2 = y >> component2.vScaleShift;
+    final y3 = y >> component3.vScaleShift;
+    final y4 = y >> component4.vScaleShift;
+    final line1 = component1.lines[y1];
+    final line2 = component2.lines[y2];
+    final line3 = component3.lines[y3];
+    final line4 = component4.lines[y4];
+    if (line1 == null || line2 == null || line3 == null || line4 == null) {
+      return null;
+    }
+    for (var x = 0; x < width; x++) {
+      final x1 = x >> component1.hScaleShift;
+      final x2 = x >> component2.hScaleShift;
+      final x3 = x >> component3.hScaleShift;
+      final x4 = x >> component4.hScaleShift;
+      var c = line1[x1];
+      var m = line2[x2];
+      var yy = line3[x3];
+      var k = line4[x4];
+
+      if (ycck) {
+        final cr = yy - 128;
+        final cb = m - 128;
+        final yScaled = c << 8;
+        c = _shiftR(yScaled + 359 * cr, 8).clamp(0, 255);
+        m = _shiftR(yScaled - 88 * cb - 183 * cr, 8).clamp(0, 255);
+        yy = _shiftR(yScaled + 454 * cb, 8).clamp(0, 255);
+        k = 255 - k;
+      }
+
+      final i = (y * width + x) * 4;
+      out[i] = c;
+      out[i + 1] = m;
+      out[i + 2] = yy;
+      out[i + 3] = k;
+    }
+  }
+  return _DctCmykImage(out, width, height);
+}
+
+int _shiftR(int value, int count) => (value >> count).toSigned(32);
 
 /// JPX samples to RGBA by component count (per §7.4.9 the embedded
 /// color description governs; gray, RGB, and CMYK cover PDF practice).

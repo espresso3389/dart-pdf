@@ -10,7 +10,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 | PDF | Page | Size | Diff | Result |
 | --- | ---: | ---: | ---: | :---: |
-| 90ms_rksj_h_sample.pdf | 1 | 612x792 | 0.196% | ❌ fail |
+| 90ms_rksj_h_sample.pdf | 1 | 612x792 | 0.180% | ❌ fail |
 | ContentStreamCycleType3insideType3.pdf | 1 | 600x840 | 0.866% | ❌ fail |
 | ContentStreamNoCycleType3insideType3.pdf | 1 | 600x840 | 0.888% | ❌ fail |
 | IdentityToUnicodeMap_charCodeOf.pdf | 1 | 200x50 | 4.170% | ❌ fail |
@@ -114,7 +114,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | issue3061.pdf | 1 | 596x842 | 0.173% | ❌ fail |
 | issue3371.pdf | 1 | 596x842 | 0.318% | ❌ fail |
 | issue3458.pdf | 1 | 720x540 | 0.192% | ❌ fail |
-| issue3521.pdf | 1 | 596x842 | 0.103% | ❌ fail |
+| issue3521.pdf | 1 | 596x842 | 0.272% | ❌ fail |
 | issue3566.pdf | 1 | 200x50 | 0.940% | ❌ fail |
 | issue3584.pdf | 1 | 200x50 | 0.050% | ✅ pass |
 | issue3928.pdf | 1 | 300x50 | 0.033% | ✅ pass |
@@ -153,9 +153,9 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 | nested_outline.pdf | 3 | 596x842 | 0.388% | ❌ fail |
 | nested_outline.pdf | 4 | 596x842 | 0.475% | ❌ fail |
 | nested_outline.pdf | 5 | 596x842 | 0.385% | ❌ fail |
-| noembed-eucjp.pdf | 1 | 595x842 | 0.119% | ❌ fail |
-| noembed-identity.pdf | 1 | 595x842 | 0.022% | ✅ pass |
-| noembed-sjis.pdf | 1 | 595x842 | 0.223% | ❌ fail |
+| noembed-eucjp.pdf | 1 | 595x842 | 0.123% | ❌ fail |
+| noembed-identity.pdf | 1 | 595x842 | 0.033% | ✅ pass |
+| noembed-sjis.pdf | 1 | 595x842 | 0.184% | ❌ fail |
 | non-embedded-NuptialScript.pdf | 1 | 350x50 | 21.069% | ❌ fail |
 | openoffice.pdf | 1 | 200x50 | 1.340% | ❌ fail |
 | operator-in-TJ-array.pdf | 1 | 595x839 | 0.244% | ❌ fail |
@@ -221,7 +221,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### 90ms_rksj_h_sample.pdf page 1
 
-612x792; diff: 0.196%
+612x792; diff: 0.180%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1053,7 +1053,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### issue3521.pdf page 1
 
-596x842; diff: 0.103%
+596x842; diff: 0.272%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1365,7 +1365,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### noembed-eucjp.pdf page 1
 
-595x842; diff: 0.119%
+595x842; diff: 0.123%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1373,7 +1373,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### noembed-identity.pdf page 1
 
-595x842; diff: 0.022%
+595x842; diff: 0.033%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |
@@ -1381,7 +1381,7 @@ fvm dart packages/dart_pdf_editor/tool/rebuild_pdfjs_render_index.dart
 
 ### noembed-sjis.pdf page 1
 
-595x842; diff: 0.223%
+595x842; diff: 0.184%
 
 | PDF.js baseline | Dart render | Diff |
 | --- | --- | --- |

@@ -25,6 +25,10 @@ Live demo: <https://dart-pdf-demo.web.app> (the example app built for
 the web; it opens onto a six-page feature showcase, and the open button
 loads your own PDF).
 
+Visual render results: the checked-in
+[PDF.js corpus comparison gallery](test_corpora/pdfjs/_renders/README.md)
+shows PDF.js baselines, Dart renders, and diffs directly in GitHub.
+
 ## Architecture
 
 Strictly layered packages; `dart:ui` is only allowed in `dart_pdf_editor`, so
@@ -238,7 +242,7 @@ the real decode pipeline, with optional PDF.js baseline comparison).
 Checked-in PDF.js reference PNGs live under
 [`test_corpora/pdfjs/_baselines`](test_corpora/pdfjs/_baselines), and the
 latest checked-in side-by-side visual results are browsable from
-[`test_corpora/pdfjs/_renders/index.html`](test_corpora/pdfjs/_renders/index.html).
+[`test_corpora/pdfjs/_renders/README.md`](test_corpora/pdfjs/_renders/README.md).
 
 Run the checked-in corpora from their package directories so the relative
 `../../test_corpora/...` paths line up:

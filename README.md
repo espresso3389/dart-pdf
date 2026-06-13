@@ -1,5 +1,9 @@
 ![dart-pdf — pure-Dart PDF renderer & editor for Flutter](doc/banner.png)
 
+[![CI](https://github.com/ben-milanko/dart-pdf/actions/workflows/ci.yml/badge.svg)](https://github.com/ben-milanko/dart-pdf/actions/workflows/ci.yml)
+[![dart_pdf_editor on pub.dev](https://img.shields.io/pub/v/dart_pdf_editor.svg)](https://pub.dev/packages/dart_pdf_editor)
+[![License: Apache-2.0](https://img.shields.io/github/license/ben-milanko/dart-pdf)](LICENSE)
+
 A PDF renderer and editor written entirely in Dart, for use in Flutter
 apps. No PDFium, no platform channels.
 
@@ -35,13 +39,13 @@ Strictly layered packages; `dart:ui` is only allowed in `dart_pdf_editor`, so
 the core runs on servers and in plain Dart tests. Each package is
 published on pub.dev under its directory name.
 
-| Package | Role |
-|---|---|
-| [`pdf_cos`](packages/pdf_cos) | The PDF file format itself: tokenizer, parser, filters (incl. CCITT/JBIG2/JPX), encryption, cross-reference machinery, serializer, crypto primitives. |
-| [`pdf_document`](packages/pdf_document) | Document semantics: page tree, annotations, AcroForm, digital signatures, and the incremental-save `PdfEditor`. |
-| [`pdf_graphics`](packages/pdf_graphics) | Content-stream interpreter, device interface, font engine, ICC color, text extraction. |
-| [`dart_pdf_editor`](packages/dart_pdf_editor) | Flutter viewer and editing UI: canvas device, `PdfViewer`, tools, panels, forms. |
-| [`pdf_test_fixtures`](packages/pdf_test_fixtures) | Programmatic, structurally-correct PDF builders for tests. |
+| Package | pub.dev | Role |
+|---|---|---|
+| [`pdf_cos`](packages/pdf_cos) | [![pub package](https://img.shields.io/pub/v/pdf_cos.svg)](https://pub.dev/packages/pdf_cos) | The PDF file format itself: tokenizer, parser, filters (incl. CCITT/JBIG2/JPX), encryption, cross-reference machinery, serializer, crypto primitives. |
+| [`pdf_document`](packages/pdf_document) | [![pub package](https://img.shields.io/pub/v/pdf_document.svg)](https://pub.dev/packages/pdf_document) | Document semantics: page tree, annotations, AcroForm, digital signatures, and the incremental-save `PdfEditor`. |
+| [`pdf_graphics`](packages/pdf_graphics) | [![pub package](https://img.shields.io/pub/v/pdf_graphics.svg)](https://pub.dev/packages/pdf_graphics) | Content-stream interpreter, device interface, font engine, ICC color, text extraction. |
+| [`dart_pdf_editor`](packages/dart_pdf_editor) | [![pub package](https://img.shields.io/pub/v/dart_pdf_editor.svg)](https://pub.dev/packages/dart_pdf_editor) | Flutter viewer and editing UI: canvas device, `PdfViewer`, tools, panels, forms. |
+| [`pdf_test_fixtures`](packages/pdf_test_fixtures) | [![pub package](https://img.shields.io/pub/v/pdf_test_fixtures.svg)](https://pub.dev/packages/pdf_test_fixtures) | Programmatic, structurally-correct PDF builders for tests. |
 
 ## Roadmap
 

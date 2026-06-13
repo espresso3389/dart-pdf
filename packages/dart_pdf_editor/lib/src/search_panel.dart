@@ -12,8 +12,9 @@ import 'theme.dart';
 /// count, previous/next, and clear riding alongside — small enough for
 /// an app bar.
 ///
-/// Searches as you type (debounced) and on enter. Pair it with a
-/// [PdfSearchResultsPanel] listing every hit.
+/// Searches as you type (debounced) and on enter; once a query is live,
+/// pressing enter again steps to the next match (browser-style). Pair it
+/// with a [PdfSearchResultsPanel] listing every hit.
 class PdfSearchField extends StatefulWidget {
   const PdfSearchField({
     super.key,
@@ -71,7 +72,17 @@ class _PdfSearchFieldState extends State<PdfSearchField> {
 
   void _onSubmitted(String text) {
     _debounce?.cancel();
-    unawaited(widget.controller.search(text));
+    final controller = widget.controller;
+    // Browser-style: the first enter searches; once the query is live
+    // (already searched, with hits), each subsequent enter steps to the
+    // next match. A changed query searches afresh.
+    if (text == controller.query &&
+        !controller.isSearching &&
+        controller.matchCount > 0) {
+      controller.nextMatch();
+    } else {
+      unawaited(controller.search(text));
+    }
   }
 
   void _clear() {
@@ -126,6 +137,10 @@ class _PdfSearchFieldState extends State<PdfSearchField> {
                     const BoxConstraints(minWidth: 32, minHeight: 32),
               ),
               textInputAction: TextInputAction.search,
+              // The search action unfocuses the field by default; keep
+              // focus so a second enter reaches onSubmitted and steps to
+              // the next match instead of dismissing the field.
+              onEditingComplete: () {},
               onChanged: _onChanged,
               onSubmitted: _onSubmitted,
             ),

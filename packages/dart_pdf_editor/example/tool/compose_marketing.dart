@@ -50,14 +50,14 @@ const _captions = <String, (String, String)>{
 /// it for a ring, while the near-full-bleed phone reads better with a linear
 /// mark that simply exits an edge.
 final _annotations = <String, _Flourish>{
-  // Hero: a hand-drawn ink squiggle swept across the open page, running off the
-  // right edge of the frame into the gradient.
+  // Hero: a big, wide ink scribble swept diagonally across the bottom-right of
+  // the open page, running off the bottom-right corner into the gradient.
   'app/01-welcome': _Flourish((f, portrait) => _squiggle(
-        f.x(0.12), f.y(portrait ? 0.40 : 0.58), f.x(1.10),
-        f.y(portrait ? 0.40 : 0.58),
-        weight: f.min(portrait ? 0.013 : 0.017),
-        amp: f.min(portrait ? 0.022 : 0.03),
-        waves: portrait ? 6 : 5,
+        f.x(portrait ? 0.32 : 0.42), f.y(portrait ? 0.62 : 0.48),
+        f.x(1.10), f.y(portrait ? 0.99 : 1.12),
+        weight: f.min(portrait ? 0.014 : 0.02),
+        amp: f.min(portrait ? 0.085 : 0.11),
+        waves: 3.5,
       )),
   // Editor: a highlighter swipe across a content row that runs off the right
   // edge of the frame.

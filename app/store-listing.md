@@ -11,7 +11,7 @@ Accurate to what the app ships today. Character budgets noted per field.
 **Subtitle** (≤30): `Edit, annotate & sign PDFs` _(26)_
 
 **Promotional text** (≤170, editable without review):
-`Edit PDFs instead of just reading them. Mark up, fill forms, sign, redact and rearrange pages, all on your device, with no account needed and nothing uploaded.` _(159)_
+`A PDF editor that runs entirely on your device. Mark up, fill in forms, sign, redact, and rearrange pages. No account, no ads, no uploads.` _(135)_
 
 **Keywords** (≤100, comma-separated, no spaces):
 `pdf,editor,annotate,markup,highlight,sign,signature,form,fill,redact,merge,pages,document,viewer,scan` _(100)_
@@ -19,30 +19,30 @@ Accurate to what the app ships today. Character budgets noted per field.
 **Description** (≤4000):
 
 ```
-DartPDF is for editing PDFs, not just looking at them.
+DartPDF is a PDF editor that runs entirely on your device.
 
-Open a document and you can write on it, fill in a form, sign it, hide the parts you don't want seen, shuffle the pages around, or change the text and pictures already on the page. When you're done, your changes save straight back to the file you opened.
+Open any PDF to mark it up, fill in forms, sign it, redact content, rearrange pages, or edit the text and images on the page. Changes save back to the original file.
 
-It all runs on the device. Nothing is uploaded, there's no account to set up, and there are no ads. A PDF you open stays with you until you send it somewhere yourself.
+Nothing is uploaded. There's no account, no sync, and no ads.
 
-In the app you can:
+Features:
 
-• Highlight, underline and strike through text, or draw freehand
-• Add shapes, arrows, text boxes, notes and stamps
-• Edit text that's already there, and drop in images
-• Redact anything you need to keep hidden
-• Fill in text boxes, checkboxes, radio buttons and dropdowns, or add your own fields
-• Sign by drawing your signature and placing it where you want
-• Reorder and delete pages, or pull a few pages out into a new PDF
-• Search the whole document, select and copy text, and follow links
-• Put two versions side by side to see what changed
-• Open files that are password protected
+• Highlight, underline, strikethrough, and freehand ink
+• Shapes, arrows, text boxes, notes, and stamps
+• Edit existing text and add images
+• Redaction
+• Fill form fields (text, checkboxes, radio buttons, dropdowns), or add your own
+• Drawn signatures, placed anywhere on the page
+• Reorder, delete, and export pages to a new file
+• Full-text search, text selection, and links
+• Compare two versions side by side
+• Open password-protected files
 
-The same app runs on iPhone, iPad and Mac, as well as Android, Windows, Linux and the web. Open PDFs from the Files app, a share sheet, or by dragging them onto the window. Light and dark themes are both built in.
+Runs on iPhone, iPad, and Mac, plus Android, Windows, Linux, and the web. Opens PDFs from the Files app, share sheets, or drag-and-drop. Light and dark themes.
 ```
 
 **What's New** (first release):
-`The first release of DartPDF. You can annotate, fill in forms, sign, redact, edit text and images, and reorganize pages, all on your device.`
+`First release. A PDF editor that runs on your device: annotate, fill forms, sign, redact, edit text and images, and rearrange pages.`
 
 ---
 
@@ -51,31 +51,31 @@ The same app runs on iPhone, iPad and Mac, as well as Android, Windows, Linux an
 **App name** (≤30): `DartPDF`
 
 **Short description** (≤80):
-`Annotate, edit, sign and fill in PDFs. Nothing leaves your device.` _(65)_
+`Edit, annotate, sign, and fill in PDFs. Everything stays on your device.` _(71)_
 
 **Full description** (≤4000):
 
 ```
-DartPDF is for editing PDFs, not just looking at them.
+DartPDF is a PDF editor that runs entirely on your device.
 
-Open a document and you can write on it, fill in a form, sign it, hide the parts you don't want seen, shuffle the pages around, or change the text and pictures already on the page. When you're done, your changes save straight back to the file you opened.
+Open any PDF to mark it up, fill in forms, sign it, redact content, rearrange pages, or edit the text and images on the page. Changes save back to the original file.
 
-It all runs on the device. Nothing is uploaded, there's no account to set up, and there are no ads. A PDF you open stays with you until you send it somewhere yourself.
+Nothing is uploaded. There's no account, no sync, and no ads.
 
-In the app you can:
+Features:
 
-• Highlight, underline and strike through text, or draw freehand
-• Add shapes, arrows, text boxes, notes and stamps
-• Edit text that's already there, and drop in images
-• Redact anything you need to keep hidden
-• Fill in text boxes, checkboxes, radio buttons and dropdowns, or add your own fields
-• Sign by drawing your signature and placing it where you want
-• Reorder and delete pages, or pull a few pages out into a new PDF
-• Search the whole document, select and copy text, and follow links
-• Put two versions side by side to see what changed
-• Open files that are password protected
+• Highlight, underline, strikethrough, and freehand ink
+• Shapes, arrows, text boxes, notes, and stamps
+• Edit existing text and add images
+• Redaction
+• Fill form fields (text, checkboxes, radio buttons, dropdowns), or add your own
+• Drawn signatures, placed anywhere on the page
+• Reorder, delete, and export pages to a new file
+• Full-text search, text selection, and links
+• Compare two versions side by side
+• Open password-protected files
 
-The same app runs on Android, iPhone, iPad and Mac, as well as Windows, Linux and the web. Open PDFs from your file manager, a share sheet, or by dragging them in. Light and dark themes are both built in.
+Runs on Android, iPhone, iPad, and Mac, plus Windows, Linux, and the web. Opens PDFs from your file manager, share sheets, or drag-and-drop. Light and dark themes.
 ```
 
 ---

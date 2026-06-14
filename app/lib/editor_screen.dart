@@ -25,12 +25,22 @@ const double _tabStripHeight = 42;
 /// (search, page number, panels, toolbar). The screen supplies the edit
 /// sessions, file handling, recents, dirty-state, and app-side wiring.
 class EditorScreen extends StatefulWidget {
-  const EditorScreen({super.key, required this.prefs, this.launchArgs = const []});
+  const EditorScreen({
+    super.key,
+    required this.prefs,
+    this.launchArgs = const [],
+    this.initialDocument,
+  });
 
   final PdfEditingPreferences prefs;
 
   /// Desktop launch arguments — a `.pdf` path here opens at startup.
   final List<String> launchArgs;
+
+  /// An in-memory document opened in a tab at startup, regardless of
+  /// platform. Used by screenshot/integration harnesses (and handy in
+  /// tests) to land directly in the editor without a file picker.
+  final ({Uint8List bytes, String title})? initialDocument;
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -70,6 +80,8 @@ class _EditorScreenState extends State<EditorScreen>
     _openLaunchArgs();
     // PWA file-handler opens (installed web app); no-op off the web.
     startWebLaunchQueue(_openIncoming);
+    final doc = widget.initialDocument;
+    if (doc != null) _openBytes(doc.bytes, doc.title);
   }
 
   /// Opens a `.pdf` passed on the command line — how Windows and Linux deliver

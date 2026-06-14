@@ -166,18 +166,30 @@ jobs:
         working-directory: app
         shell: pwsh
         run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dartpdf-windows-x64.zip -Force
-      - name: Build self-extracting portable exe
+      - name: Build self-extracting portable exe (NSIS)
         working-directory: app
         shell: pwsh
         run: |
-          $7z = "$env:ProgramFiles\7-Zip\7z.exe"
-          $rel = "build/windows/x64/runner/Release"
-          & $7z a -t7z -mx=9 app.7z "$rel\*" | Out-Null
-          Invoke-WebRequest "https://www.7-zip.org/a/7z2301-extra.7z" -OutFile extra.7z
-          & $7z e extra.7z 7zS.sfx -oextra -y | Out-Null
-          $cfg = ";!@Install@!UTF-8!`r`nRunProgram=`"dart_pdf_editor_app.exe`"`r`nGUIMode=`"2`"`r`n;!@InstallEnd@!`r`n"
-          [System.IO.File]::WriteAllText("config.txt", $cfg, (New-Object System.Text.UTF8Encoding($false)))
-          cmd /c copy /b extra\7zS.sfx + config.txt + app.7z dartpdf-windows-portable.exe
+          $rel = (Resolve-Path "build/windows/x64/runner/Release").Path
+          $nsi = @"
+          Unicode true
+          Name "DartPDF"
+          OutFile "dartpdf-windows-portable.exe"
+          SilentInstall silent
+          RequestExecutionLevel user
+          Section
+            InitPluginsDir
+            SetOutPath "`$PLUGINSDIR\DartPDF"
+            File /r "$rel\*.*"
+            ExecWait '"`$PLUGINSDIR\DartPDF\dart_pdf_editor_app.exe"'
+          SectionEnd
+          "@
+          Set-Content -Path portable.nsi -Value $nsi -Encoding UTF8
+          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) { choco install nsis -y --no-progress | Out-Null }
+          & $makensis portable.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed ($LASTEXITCODE)" }
+          if (-not (Test-Path dartpdf-windows-portable.exe)) { throw "portable exe not produced" }
       - uses: actions/upload-artifact@v4
         with:
           name: windows

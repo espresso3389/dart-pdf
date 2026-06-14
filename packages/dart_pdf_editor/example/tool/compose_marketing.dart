@@ -50,14 +50,16 @@ const _captions = <String, (String, String)>{
 /// it for a ring, while the near-full-bleed phone reads better with a linear
 /// mark that simply exits an edge.
 final _annotations = <String, _Flourish>{
-  // Hero: a big, wide ink scribble swept diagonally across the bottom-right of
-  // the open page, running off the bottom-right corner into the gradient.
-  'app/01-welcome': _Flourish((f, portrait) => _squiggle(
-        f.x(portrait ? 0.32 : 0.42), f.y(portrait ? 0.62 : 0.48),
-        f.x(1.10), f.y(portrait ? 0.99 : 1.12),
-        weight: f.min(portrait ? 0.014 : 0.02),
-        amp: f.min(portrait ? 0.085 : 0.11),
-        waves: 3.5,
+  // Hero: a wide "windscreen wiper" ink sweep fanning out from a pivot just
+  // past the bottom-right corner, its streaks running off the frame.
+  'app/01-welcome': _Flourish((f, portrait) => _wiperStreaks(
+        f.x(portrait ? 1.04 : 1.10), f.y(portrait ? 1.04 : 1.12),
+        rInner: f.diag(portrait ? 0.14 : 0.16),
+        rOuter: f.diag(portrait ? 0.52 : 0.66),
+        aStartDeg: 190,
+        aEndDeg: 244,
+        sweeps: 6,
+        weight: f.min(portrait ? 0.013 : 0.017),
       )),
   // Editor: a highlighter swipe across a content row that runs off the right
   // edge of the frame.
@@ -110,6 +112,10 @@ class _FrameRect {
   /// A length as a fraction of the frame's smaller side (for round marks and
   /// stroke weights, so they read the same thickness in either orientation).
   double min(double f) => (width < height ? width : height) * f;
+
+  /// A length as a fraction of the frame diagonal (for marks that span the
+  /// frame, like the wiper sweep).
+  double diag(double f) => sqrt(width * width + height * height) * f;
 }
 
 /// A translucent highlighter swipe (thick round-capped stroke) from
@@ -122,30 +128,32 @@ String _highlight(double x1, double y1, double x2, double y2,
       'stroke-linecap="round"/>';
 }
 
-/// A hand-drawn ink squiggle: a wavy round-capped stroke from ([x1],[y1]) to
-/// ([x2],[y2]) — the classic review "squiggly" mark. [waves] sets how many
-/// crests; [amp] the wave height.
-String _squiggle(double x1, double y1, double x2, double y2,
-    {required double weight,
-    required double amp,
-    double waves = 5,
+/// A hand-drawn "windscreen wiper" sweep: one continuous stroke that fans back
+/// and forth across an angular range about a pivot at ([pivotX],[pivotY]),
+/// spiralling out from [rInner] to [rOuter] so each pass lays down a wide
+/// curved streak. [sweeps] is the number of passes across the range (a
+/// back-and-forth is two), [aStartDeg]/[aEndDeg] the swing limits.
+String _wiperStreaks(double pivotX, double pivotY,
+    {required double rInner,
+    required double rOuter,
+    required double aStartDeg,
+    required double aEndDeg,
+    required double sweeps,
+    required double weight,
     String color = _inkColor}) {
-  final dx = x2 - x1, dy = y2 - y1;
-  final len = sqrt(dx * dx + dy * dy);
-  if (len == 0) return '';
-  // Unit vector along the stroke and its perpendicular (for the wave offset).
-  final ux = dx / len, uy = dy / len;
-  final px = -uy, py = ux;
-  const steps = 96;
+  final a0 = aStartDeg * pi / 180, a1 = aEndDeg * pi / 180;
+  const steps = 280;
   final pts = <String>[];
   for (var i = 0; i <= steps; i++) {
     final t = i / steps;
-    // Taper the amplitude at the very ends so the wave starts and stops cleanly.
-    final taper = sin(t * pi);
-    final wave = sin(t * waves * 2 * pi) * amp * taper;
-    final bx = x1 + dx * t, by = y1 + dy * t;
-    final sx = bx + px * wave, sy = by + py * wave;
-    pts.add('${sx.toStringAsFixed(1)},${sy.toStringAsFixed(1)}');
+    final r = rInner + (rOuter - rInner) * t;
+    // Triangle wave: the blade swings a0→a1→a0… across `sweeps` passes.
+    final phase = t * sweeps;
+    final within = phase - phase.floorToDouble();
+    final frac = phase.floor().isEven ? within : 1 - within;
+    final a = a0 + (a1 - a0) * frac;
+    final x = pivotX + r * cos(a), y = pivotY + r * sin(a);
+    pts.add('${x.toStringAsFixed(1)},${y.toStringAsFixed(1)}');
   }
   final d = 'M${pts.first} ${pts.skip(1).map((p) => 'L$p').join(' ')}';
   return '<path d="$d" fill="none" stroke="$color" stroke-width="$weight" '

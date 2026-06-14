@@ -19,9 +19,11 @@ import 'editing/text_prompt.dart';
 import 'editing/tool_shortcuts.dart';
 import 'exact_extent_list.dart';
 import 'page_geometry.dart';
+import 'perf_log.dart';
 import 'pdf_page_view.dart';
 import 'preview_cache.dart';
 import 'render_scheduler.dart';
+import 'render_worker.dart';
 import 'scrollbar.dart';
 import 'theme.dart';
 import 'viewport.dart';
@@ -362,9 +364,21 @@ class PdfViewer extends StatefulWidget {
     this.pagePreviews = true,
     this.previewWindow = 20,
     this.predictStrokes = true,
+    this.renderWorker,
   });
 
   final PdfDocument document;
+
+  /// Offloads page interpretation (the content-stream parse + walk, the
+  /// dominant render cost) to a background isolate, so heavy pages flying
+  /// past during a scroll can't stall frames. Caller-owned and caller-
+  /// disposed; it must be started over the same bytes as [document] and is
+  /// only correct while [document] doesn't change under it — pass one for a
+  /// read-only document, leave it null for an editing session whose bytes
+  /// change per revision (it would render stale pages). Image-bearing pages
+  /// always render locally. Null and the web fallback keep today's
+  /// on-thread behavior.
+  final PdfRenderWorker? renderWorker;
   final PdfViewerController? controller;
 
   /// Called when a tapped link or button carries an action the viewer
@@ -953,7 +967,9 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
         final page = pages[index];
         _previewAttempts.add(page);
         await _previews.renderPreview(index, page,
-            pageColor: widget.pageColor, annotations: widget.showAnnotations);
+            pageColor: widget.pageColor,
+            annotations: widget.showAnnotations,
+            worker: widget.renderWorker);
         if (!mounted) return;
         // breathe between interpreter walks — each is a synchronous
         // UI-thread chunk, so give the engine a frame for input and
@@ -1053,8 +1069,12 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     // lapses and the page sharpens; the settle timer clears the burst.
     final opening =
         now - _scrollBurstStart < const Duration(milliseconds: 150);
-    _renderScheduler.holding =
-        opening || velocity > math.max(800, 2 * viewport);
+    final hold = opening || velocity > math.max(800, 2 * viewport);
+    PdfPerfLog.log('scroll page=${_controller.currentPage} '
+        'v=${velocity.toStringAsFixed(0)}px/s '
+        'threshold=${math.max(800, 2 * viewport).toStringAsFixed(0)} '
+        'opening=$opening hold=${hold ? 'ON' : 'off'}');
+    _renderScheduler.holding = hold;
   }
 
   @override
@@ -2907,6 +2927,7 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
                 transformScale: _transformScale,
                 renderScheduler: _renderScheduler,
                 previewCache: widget.pagePreviews ? _previews : null,
+                renderWorker: widget.renderWorker,
                 predictStrokes: widget.predictStrokes,
               ),
             ),
@@ -3261,6 +3282,7 @@ class _PdfViewerPage extends StatefulWidget {
     required this.transformScale,
     required this.renderScheduler,
     required this.previewCache,
+    required this.renderWorker,
     required this.predictStrokes,
   });
 
@@ -3334,6 +3356,9 @@ class _PdfViewerPage extends StatefulWidget {
   /// See [PdfPageView.previewCache]; null when previews are off.
   final PdfPagePreviewCache? previewCache;
 
+  /// See [PdfPageView.renderWorker]; null when interpretation runs on-thread.
+  final PdfRenderWorker? renderWorker;
+
   /// See [PdfViewer.predictStrokes].
   final bool predictStrokes;
 
@@ -3378,6 +3403,7 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
         onRasterReady: _onRasterReady,
         renderScheduler: widget.renderScheduler,
         previewCache: widget.previewCache,
+        renderWorker: widget.renderWorker,
         previewIndex: widget.index,
       ),
       // the field highlight sits under text highlights and overlays:

@@ -126,6 +126,58 @@ class PdfPageRenderer {
     return picture;
   }
 
+  /// Builds a page picture from an already-recorded [commands] buffer —
+  /// the replay half of an off-thread render. The interpreter walk that
+  /// produced [commands] happened elsewhere (a [PdfRenderWorker]'s isolate),
+  /// so this is just the cheap canvas replay plus the paper/transform setup,
+  /// pixel-identical to [renderPictureRecorded].
+  ///
+  /// The only UI-thread work besides the replay is decoding any images the
+  /// buffer carries (image XObjects serialize as self-contained streams; see
+  /// [serializeCommands]). Those decodes are shared through [PdfImageCache] like
+  /// every other render path — the reconstructed streams key by content, so a
+  /// page redrawn while scrolling reuses its decoded pixels instead of re-
+  /// running the codec. An image-free buffer decodes nothing.
+  static Future<ui.Picture> pictureFromCommands(
+      PdfPage page, List<PdfRenderCommand> commands,
+      {Color pageColor = const Color(0xFFFFFFFF)}) async {
+    final requests = <PdfImageRequest>[];
+    _collectImageRequests(commands, requests);
+    final images = requests.isEmpty
+        ? const <Object, ui.Image>{}
+        : await decodeImages(page.document.cos, requests,
+            cache: PdfImageCache.instance);
+
+    final box = page.cropBox;
+    final size = pageSize(page);
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    _paintBackground(canvas, size, pageColor);
+    _applyPageTransform(canvas, page, size, box);
+    replayCommands(commands, CanvasPdfDevice(canvas, images: images));
+    final picture = recorder.endRecording();
+    for (final image in images.values) {
+      image.dispose();
+    }
+    return picture;
+  }
+
+  /// Gathers every image draw request in [commands], descending into soft-mask
+  /// groups (whose own commands can draw images), in replay order.
+  static void _collectImageRequests(
+      List<PdfRenderCommand> commands, List<PdfImageRequest> out) {
+    for (final command in commands) {
+      switch (command) {
+        case PdfDrawImageCommand(:final request):
+          out.add(request);
+        case PdfEndSoftMaskedCommand(:final maskCommands):
+          _collectImageRequests(maskCommands, out);
+        default:
+          break;
+      }
+    }
+  }
+
   /// Paints the page paper under the content: an opaque white backing when
   /// [pageColor] is translucent (so a tint washes over white rather than the
   /// viewer canvas behind the page), then [pageColor]. A fully opaque colour
@@ -195,9 +247,13 @@ class PdfPageRenderer {
   static Future<ui.Image> renderImage(PdfPage page,
       {double pixelRatio = 1,
       Color pageColor = const Color(0xFFFFFFFF),
-      bool annotations = true}) async {
-    final picture = await renderPicture(page,
-        pageColor: pageColor, annotations: annotations);
+      bool annotations = true,
+      bool recorded = false}) async {
+    final picture = recorded
+        ? await renderPictureRecorded(page,
+            pageColor: pageColor, annotations: annotations)
+        : await renderPicture(page,
+            pageColor: pageColor, annotations: annotations);
     try {
       return await rasterize(picture, pageSize(page), pixelRatio);
     } finally {

@@ -6,8 +6,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:pdf_document/pdf_document.dart';
 
+import 'perf_log.dart';
 import 'preview_cache.dart';
 import 'render_scheduler.dart';
+import 'render_worker.dart';
 import 'renderer.dart';
 
 /// Displays a single PDF page, rendered natively in Dart.
@@ -31,9 +33,17 @@ class PdfPageView extends StatefulWidget {
     this.renderScheduler,
     this.previewCache,
     this.previewIndex = 0,
+    this.renderWorker,
   });
 
   final PdfPage page;
+
+  /// Offloads this page's interpretation (the content-stream parse + walk)
+  /// to a background isolate when set and [showAnnotations] matches a
+  /// serializable page — the picture is then replayed cheaply on this
+  /// thread. Image-bearing pages and the null fallback render locally. Must
+  /// be a worker started over the same bytes [page] belongs to.
+  final PdfRenderWorker? renderWorker;
 
   /// Shared low-res previews (see [PdfPagePreviewCache]): while this
   /// page's full render is pending — most visibly under [renderHold]
@@ -289,14 +299,48 @@ class _PdfPageViewState extends State<PdfPageView> {
     await _renderNow();
   }
 
+  /// Interprets the page into a picture, off the UI thread when a worker is
+  /// available and the page is serializable, else locally. The worker path
+  /// records the page on a background isolate and replays the returned
+  /// command buffer here (cheap); image-bearing pages come back null and
+  /// fall through to the local recorded render.
+  Future<ui.Picture> _interpretPicture() async {
+    final worker = widget.renderWorker;
+    if (worker != null && worker.isActive) {
+      // priority 0: the on-screen page preempts background prefetch
+      final commands = await worker.record(widget.previewIndex,
+          annotations: widget.showAnnotations, priority: 0);
+      if (commands != null) {
+        _lastInterpretPath = 'worker';
+        return PdfPageRenderer.pictureFromCommands(widget.page, commands,
+            pageColor: widget.pageColor);
+      }
+    }
+    // The worker may be active yet decline this page (it returns null), in
+    // which case the interpret runs here — the log must say so, not 'worker'.
+    _lastInterpretPath = 'recorded';
+    return PdfPageRenderer.renderPictureRecorded(widget.page,
+        pageColor: widget.pageColor, annotations: widget.showAnnotations);
+  }
+
+  /// Which path [_interpretPicture] actually took, for the perf log — 'worker'
+  /// only when a command buffer came back and replayed, else 'recorded'.
+  String _lastInterpretPath = 'recorded';
+
   /// The actual interpret + rasterize, run once the first render is no
   /// longer gated (or directly for re-rasters of a cached picture).
   Future<void> _renderNow() async {
     final generation = ++_renderGeneration;
-    final picture = await (_picture ??= PdfPageRenderer.renderPicture(
-        widget.page,
-        pageColor: widget.pageColor,
-        annotations: widget.showAnnotations));
+    final firstInterpret = _picture == null;
+    final sw = Stopwatch()..start();
+    final picture = await (_picture ??= _interpretPicture());
+    sw.stop();
+    if (firstInterpret) {
+      PdfPerfLog.interpret(widget.previewIndex,
+          path: _lastInterpretPath,
+          interpretMs: sw.elapsedMicroseconds / 1000.0,
+          first: true);
+    }
     if (!mounted || generation != _renderGeneration) return;
     final effective = _effectiveRatio();
     // Skip the full-page readback when the cached raster is already at

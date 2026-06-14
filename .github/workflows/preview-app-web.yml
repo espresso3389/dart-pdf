@@ -36,7 +36,14 @@ jobs:
 
       - run: flutter pub get
 
-      - run: flutter build web --release
+      # Compile the off-thread render worker (app/lib/main.dart already points
+      # pdfRenderWorkerScriptUrl at it), then build with the wasm renderer —
+      # app/firebase.json carries the COOP/COEP headers for multithreaded skwasm.
+      - name: Build the render worker
+        working-directory: app
+        run: dart run dart_pdf_editor:build_web_worker
+
+      - run: flutter build web --release --wasm
         working-directory: app
 
       # Firebase Hosting caps preview channels per site, and auto-generated

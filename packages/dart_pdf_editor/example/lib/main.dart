@@ -48,7 +48,17 @@ Future<Uint8List?> _pickImage(BuildContext context) =>
     openFile(acceptedTypeGroups: const [_imageTypeGroup])
         .then((file) => file?.readAsBytes());
 
-void main() => runApp(const ViewerApp());
+void main() {
+  // On web, point the render worker at its compiled script so the heavy page
+  // interpretation + image decode run in a dedicated Web Worker instead of on
+  // the UI thread (the deploy workflow compiles it with
+  // `dart run dart_pdf_editor:build_web_worker`). With no script present the
+  // worker degrades to local rendering, so this is safe before a worker build.
+  if (kIsWeb) {
+    pdfRenderWorkerScriptUrl = 'pdf_render_worker.dart.js';
+  }
+  runApp(const ViewerApp());
+}
 
 class ViewerApp extends StatefulWidget {
   const ViewerApp({super.key});

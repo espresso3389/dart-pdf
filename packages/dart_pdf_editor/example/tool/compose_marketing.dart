@@ -26,16 +26,16 @@ import 'dart:io';
 /// marketing copy in the pipeline.
 const _captions = <String, (String, String)>{
   // The standalone DartPDF app.
-  'app/01-welcome': ('DartPDF', 'A fully native PDF editor'),
-  'app/02-editor': ('Edit PDFs like a pro', 'Tabs, panels, and a full toolset'),
-  'app/03-dark': ('Light or dark, your call', 'The whole app follows your theme'),
+  'app/01-welcome': ('DartPDF', 'A native PDF editor'),
+  'app/02-editor': ('Edit PDFs', 'Tabs, panels, and the full toolset'),
+  'app/03-dark': ('Light and dark themes', 'Follows your system theme'),
 
   // The dart_pdf_editor example showcase.
-  'example/01-document': ('Open any PDF, instantly', 'Pure-Dart rendering on every platform'),
-  'example/02-graphics': ('Pixel-perfect graphics', 'Gradients, shadings & transparency — native'),
-  'example/03-annotations': ('Annotate with ease', 'Highlights, ink, notes, stamps & forms'),
-  'example/04-markup': ('Powerful markup tools', 'Draw, shape, and sign right on the page'),
-  'example/05-reader': ('A clean reading view', 'Distraction-free, with reflowable text'),
+  'example/01-document': ('Open any PDF', 'Rendered in pure Dart, on every platform'),
+  'example/02-graphics': ('Graphics', 'Gradients, shadings, and transparency'),
+  'example/03-annotations': ('Annotations', 'Highlights, ink, notes, stamps, and forms'),
+  'example/04-markup': ('Markup tools', 'Draw, add shapes, and sign on the page'),
+  'example/05-reader': ('Reading view', 'Reflows text to fit the screen'),
 };
 
 void main(List<String> argv) async {

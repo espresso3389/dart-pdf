@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
-- Toolbar tool types can be disabled individually: the new
-  `PdfEditingToolbar.groups` (and `PdfEditorFeatures.toolGroups`) takes a
-  set of `PdfEditToolGroup` values (Select, Markup, Draw, Shapes, Insert,
-  Measure, Edit) — pass a subset to hide whole tool types at once,
-  without enumerating each tool in `tools`.
+- Background rendering: heavy pages now interpret off the UI thread, so
+  scrolling and drawing stay smooth on large/CAD documents.
+  `PdfRenderWorker` runs page interpretation and image decode in a
+  background isolate (native) or a dedicated Web Worker (web); set
+  `pdfRenderWorkerScriptUrl` and build the worker bundle with
+  `dart run dart_pdf_editor:build_web_worker` to enable it on the web. The
+  viewer also paints a low-res preview of pages still rendering during a
+  fast scroll, and cancels superseded prefetches.
 - Reflow reading view: images and diagrams now appear inline with the
   text, decoded and laid out at their on-page aspect ratio in reading
   order; bullet/numbered lists read as separate, indented items.
@@ -14,6 +17,22 @@
   The view now scrolls through a single non-lazy list so the scrollbar
   no longer jumps as pages of differing heights (text vs. images) come
   into view.
+- Toolbar tool types can be disabled individually: the new
+  `PdfEditingToolbar.groups` (and `PdfEditorFeatures.toolGroups`) takes a
+  set of `PdfEditToolGroup` values (Select, Markup, Draw, Shapes, Insert,
+  Measure, Edit) — pass a subset to hide whole tool types at once,
+  without enumerating each tool in `tools`.
+- Count tool: place Bluebeam-style check-marks and watch a running
+  on-page tally — the editor surface for `PdfEditor.addCheckMark`.
+- Right-click text context menu on mouse platforms (copy, select all).
+- Thumbnail strip: Shift-click to multi-select a range of pages.
+- Single-key keyboard shortcuts for the common editing tools.
+- Performance: decoded image XObjects and substituted-text glyph layouts
+  are cached across renders; per-pixel image decode is inlined; the
+  preview prerender is bounded to a window around the viewport.
+- Fixes: page content no longer flashes under a moved annotation's old
+  spot; mobile toolbar colors show only when relevant to the current
+  tool; thumbnail-sheet scrolling and header layout overflow.
 
 ## 1.0.0
 

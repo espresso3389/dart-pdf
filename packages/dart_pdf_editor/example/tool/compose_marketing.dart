@@ -58,7 +58,7 @@ final _annotations = <String, _Flourish>{
         rOuter: f.diag(portrait ? 0.52 : 0.66),
         aStartDeg: 190,
         aEndDeg: 244,
-        sweeps: 6,
+        sweeps: 4,
         weight: f.min(portrait ? 0.013 : 0.017),
       )),
   // Editor: a highlighter swipe across a content row that runs off the right
@@ -147,10 +147,10 @@ String _wiperStreaks(double pivotX, double pivotY,
   for (var i = 0; i <= steps; i++) {
     final t = i / steps;
     final r = rInner + (rOuter - rInner) * t;
-    // Triangle wave: the blade swings a0→a1→a0… across `sweeps` passes.
+    // Cosine swing: the blade eases a0→a1→a0… across `sweeps` passes, so the
+    // turnarounds are rounded rather than sharp cusps.
     final phase = t * sweeps;
-    final within = phase - phase.floorToDouble();
-    final frac = phase.floor().isEven ? within : 1 - within;
+    final frac = 0.5 - 0.5 * cos(phase * pi);
     final a = a0 + (a1 - a0) * frac;
     final x = pivotX + r * cos(a), y = pivotY + r * sin(a);
     pts.add('${x.toStringAsFixed(1)},${y.toStringAsFixed(1)}');

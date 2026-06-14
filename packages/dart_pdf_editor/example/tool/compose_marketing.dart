@@ -20,6 +20,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 /// Headline + subtitle per screenshot, keyed `<target>/<basename>` (the raw
 /// PNG name without its extension). Edit these freely — they're the only
@@ -37,6 +38,132 @@ const _captions = <String, (String, String)>{
   'example/04-markup': ('Markup tools', 'Draw, add shapes, and sign on the page'),
   'example/05-reader': ('Reading view', 'Reflows text to fit the screen'),
 };
+
+/// An optional hand-drawn markup flourish per screenshot, keyed
+/// `<target>/<basename>` (same scheme as [_captions]). Each builder is handed
+/// the device-frame rect (its on-canvas left/top/width/height after scaling)
+/// and the canvas orientation, and returns SVG drawn *over* the capture —
+/// deliberately allowed to run past the frame edge into the gradient, the way a
+/// reviewer's pen overshoots the page. Only the standalone-app shots are marked
+/// up. Geometry is in frame fractions (values outside 0..1 fall beyond the
+/// frame), and is orientation-aware: the wide landscape window has room around
+/// it for a ring, while the near-full-bleed phone reads better with a linear
+/// mark that simply exits an edge.
+final _annotations = <String, _Flourish>{
+  // Hero: a hand-drawn ink squiggle swept across the open page, running off the
+  // right edge of the frame into the gradient.
+  'app/01-welcome': _Flourish((f, portrait) => _squiggle(
+        f.x(0.12), f.y(portrait ? 0.40 : 0.58), f.x(1.10),
+        f.y(portrait ? 0.40 : 0.58),
+        weight: f.min(portrait ? 0.013 : 0.017),
+        amp: f.min(portrait ? 0.022 : 0.03),
+        waves: portrait ? 6 : 5,
+      )),
+  // Editor: a highlighter swipe across a content row that runs off the right
+  // edge of the frame.
+  'app/02-editor': _Flourish((f, portrait) => _highlight(
+        f.x(0.40), f.y(portrait ? 0.40 : 0.42), f.x(1.10),
+        f.y(portrait ? 0.40 : 0.42),
+        weight: f.h(portrait ? 0.022 : 0.05),
+      )),
+  // Dark: an ink underline that sweeps out past the left edge of the frame.
+  'app/03-dark': _Flourish((f, portrait) => _underline(
+        f.x(0.52), f.y(portrait ? 0.30 : 0.28), f.x(-0.08),
+        f.y(portrait ? 0.30 : 0.28),
+        weight: f.min(portrait ? 0.015 : 0.019),
+      )),
+};
+
+/// The brand "ink" colour for drawn-on markup — a confident marker red-orange
+/// that reads cleanly over both the screenshot and the blue gradient.
+const _inkColor = '#FF5A47';
+
+/// Wraps a flourish builder so it can sit in a `const`-free map. [build] takes
+/// the resolved device-frame rect and the canvas orientation, and returns an
+/// SVG fragment.
+class _Flourish {
+  const _Flourish(this.build);
+  final String Function(_FrameRect frame, bool portrait) build;
+}
+
+/// The on-canvas rect of the embedded capture, with helpers to place marks in
+/// frame-fraction coordinates (values outside 0..1 fall beyond the frame).
+class _FrameRect {
+  const _FrameRect(this.left, this.top, this.width, this.height);
+  final double left, top, width, height;
+
+  /// X at fraction [fx] across the frame (0 = left edge, 1 = right edge).
+  double x(double fx) => left + width * fx;
+
+  /// Y at fraction [fy] down the frame.
+  double y(double fy) => top + height * fy;
+
+  /// A length as a fraction of the frame width.
+  double fw(double f) => width * f;
+
+  /// A length as a fraction of the frame height.
+  double h(double f) => height * f;
+
+  /// A length as a fraction of the frame height (alias of [h], for radii).
+  double fh(double f) => height * f;
+
+  /// A length as a fraction of the frame's smaller side (for round marks and
+  /// stroke weights, so they read the same thickness in either orientation).
+  double min(double f) => (width < height ? width : height) * f;
+}
+
+/// A translucent highlighter swipe (thick round-capped stroke) from
+/// ([x1],[y1]) to ([x2],[y2]).
+String _highlight(double x1, double y1, double x2, double y2,
+    {required double weight, String color = '#FFD23F', double opacity = 0.5}) {
+  return '<line x1="${x1.toStringAsFixed(1)}" y1="${y1.toStringAsFixed(1)}" '
+      'x2="${x2.toStringAsFixed(1)}" y2="${y2.toStringAsFixed(1)}" '
+      'stroke="$color" stroke-opacity="$opacity" stroke-width="$weight" '
+      'stroke-linecap="round"/>';
+}
+
+/// A hand-drawn ink squiggle: a wavy round-capped stroke from ([x1],[y1]) to
+/// ([x2],[y2]) — the classic review "squiggly" mark. [waves] sets how many
+/// crests; [amp] the wave height.
+String _squiggle(double x1, double y1, double x2, double y2,
+    {required double weight,
+    required double amp,
+    double waves = 5,
+    String color = _inkColor}) {
+  final dx = x2 - x1, dy = y2 - y1;
+  final len = sqrt(dx * dx + dy * dy);
+  if (len == 0) return '';
+  // Unit vector along the stroke and its perpendicular (for the wave offset).
+  final ux = dx / len, uy = dy / len;
+  final px = -uy, py = ux;
+  const steps = 96;
+  final pts = <String>[];
+  for (var i = 0; i <= steps; i++) {
+    final t = i / steps;
+    // Taper the amplitude at the very ends so the wave starts and stops cleanly.
+    final taper = sin(t * pi);
+    final wave = sin(t * waves * 2 * pi) * amp * taper;
+    final bx = x1 + dx * t, by = y1 + dy * t;
+    final sx = bx + px * wave, sy = by + py * wave;
+    pts.add('${sx.toStringAsFixed(1)},${sy.toStringAsFixed(1)}');
+  }
+  final d = 'M${pts.first} ${pts.skip(1).map((p) => 'L$p').join(' ')}';
+  return '<path d="$d" fill="none" stroke="$color" stroke-width="$weight" '
+      'stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.92"/>';
+}
+
+/// A hand-drawn ink underline: a single round-capped stroke with a gentle bow,
+/// from ([x1],[y1]) to ([x2],[y2]).
+String _underline(double x1, double y1, double x2, double y2,
+    {required double weight, String color = _inkColor}) {
+  // A slight downward bow at the midpoint reads as a pen stroke, not a ruler.
+  final mx = (x1 + x2) / 2, my = (y1 + y2) / 2 + weight * 1.6;
+  return '<path d="M${x1.toStringAsFixed(1)},${y1.toStringAsFixed(1)} '
+      'Q${mx.toStringAsFixed(1)},${my.toStringAsFixed(1)} '
+      '${x2.toStringAsFixed(1)},${y2.toStringAsFixed(1)}" '
+      'fill="none" stroke="$color" stroke-width="$weight" '
+      'stroke-linecap="round" stroke-opacity="0.92"/>';
+}
 
 void main(List<String> argv) async {
   final args = _parseArgs(argv);
@@ -80,6 +207,7 @@ void main(List<String> argv) async {
       portrait: orientation == 'portrait',
       headline: caption.$1,
       subtitle: caption.$2,
+      flourish: _annotations['$target/$base'],
     );
     final tmp = File('${outDir.path}/.$base.svg')..writeAsStringSync(svg);
     final out = '${outDir.path}/$base.png';
@@ -110,6 +238,7 @@ String _composeSvg({
   required bool portrait,
   required String headline,
   required String subtitle,
+  _Flourish? flourish,
 }) {
   final (sw, sh) = _pngSize(shotBytes);
   final b64 = base64Encode(shotBytes);
@@ -145,6 +274,10 @@ String _composeSvg({
 
   final head = _esc(headline);
   final sub = _esc(subtitle);
+
+  // Drawn-on markup, painted last so it sits over the capture (and may spill
+  // past the frame into the gradient).
+  final marks = flourish?.build(_FrameRect(dx, dy, dw, dh), portrait) ?? '';
 
   return '''
 <svg xmlns="http://www.w3.org/2000/svg" width="$width" height="$height"
@@ -186,6 +319,7 @@ String _composeSvg({
          xmlns:xlink="http://www.w3.org/1999/xlink"/>
   <rect x="$dx" y="$dy" width="$dw" height="$dh" rx="$cornerRadius" ry="$cornerRadius"
         fill="none" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="2"/>
+  $marks
 </svg>''';
 }
 

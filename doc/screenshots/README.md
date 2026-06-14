@@ -15,7 +15,9 @@ doc/marketing/<target>/<platform>/NN-name.png     framed store shots (gradient +
 
 1. **Self-driving entry** — each target has a screenshot build that walks a
    fixed list of showcase scenes, holds each still, and prints a marker line:
-   - `app/tool/screenshots_main.dart` (welcome / editor / dark)
+   - `app/tool/screenshots_main.dart` (hero / editor / dark — all on a loaded
+     showcase document; the hero is the clean page, editor + dark add the
+     page-thumbnail panel)
    - `packages/dart_pdf_editor/example/lib/screenshots_main.dart`
      (document / graphics / annotations / markup / reader)
 
@@ -36,7 +38,10 @@ doc/marketing/<target>/<platform>/NN-name.png     framed store shots (gradient +
 
 3. **Marketing compose** — `tool/compose_marketing.dart` drops each capture onto
    a brand-gradient canvas with a headline + subtitle, rounded corners, and a
-   soft shadow, rendered to the exact store size with `rsvg-convert`.
+   soft shadow, rendered to the exact store size with `rsvg-convert`. The
+   standalone-app shots also get a hand-drawn markup flourish (ink squiggle /
+   highlighter swipe / underline) drawn over the capture and deliberately
+   overrunning the device frame into the gradient.
 
 ## Dimensions
 
@@ -92,6 +97,12 @@ Useful env: `FLUTTER` (flutter binary; defaults to fvm then PATH),
 The headline + subtitle per scene live in one map, `_captions`, at the top of
 `tool/compose_marketing.dart`, keyed `<target>/<basename>`. The gradient and
 layout are in `_composeSvg` in the same file.
+
+The drawn-on markup flourishes live in the `_annotations` map just below
+`_captions` (same key scheme; only `app/*` entries are set). Each builder gets
+the device-frame rect and the orientation and returns SVG via the `_squiggle` /
+`_highlight` / `_underline` helpers; geometry is in frame fractions, so values
+outside `0..1` fall beyond the frame on purpose.
 
 ## CI
 

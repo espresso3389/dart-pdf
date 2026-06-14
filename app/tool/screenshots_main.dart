@@ -47,24 +47,25 @@ class AppScreenshots extends StatefulWidget {
   State<AppScreenshots> createState() => _AppScreenshotsState();
 }
 
-/// Which screen a scene shows.
-enum _Screen { welcome, editor }
-
 class _Scene {
   const _Scene(this.name,
-      {required this.screen, this.themeMode = ThemeMode.light});
+      {this.themeMode = ThemeMode.light, this.thumbnails = false});
   final String name;
-  final _Screen screen;
   final ThemeMode themeMode;
+
+  /// Whether the page-thumbnail side panel is open for this scene.
+  final bool thumbnails;
 }
 
 const _scenes = <_Scene>[
-  // The real landing screen with no document open.
-  _Scene('01-welcome', screen: _Screen.welcome),
-  // The editor with the showcase document and the browser-style tab strip.
-  _Scene('02-editor', screen: _Screen.editor),
+  // Hero: a real document open in the editor, clean (no side panels) so the
+  // page itself is the focus.
+  _Scene('01-welcome'),
+  // The editor showing the page-thumbnail panel and the browser-style tab strip
+  // — the full workspace.
+  _Scene('02-editor', thumbnails: true),
   // The same editor in dark mode.
-  _Scene('03-dark', screen: _Screen.editor, themeMode: ThemeMode.dark),
+  _Scene('03-dark', themeMode: ThemeMode.dark, thumbnails: true),
 ];
 
 class _AppScreenshotsState extends State<AppScreenshots> {
@@ -93,12 +94,17 @@ class _AppScreenshotsState extends State<AppScreenshots> {
   }
 
   Future<void> _run() async {
-    // Let the first frame, the preferences load, and the welcome screen settle.
+    // Let the first frame, the preferences load, and the document open + render.
     await Future<void>.delayed(const Duration(milliseconds: 2000));
     for (final scene in _scenes) {
+      // Set the prefs first, THEN rebuild the editor under a per-scene key. The
+      // shell reads panel visibility once at init, so flipping the pref on a
+      // live shell won't collapse an open panel — re-keying forces a fresh read
+      // (the theme still applies live through the prefs listenable).
       _prefs.themeMode = scene.themeMode;
+      _prefs.showThumbnailSidebar = scene.thumbnails;
       if (mounted) setState(() => _scene = scene);
-      await _settle(heavy: scene.screen == _Screen.editor);
+      await _settle(heavy: true);
       debugPrint('@@SHOT@@ ${scene.name}');
       await Future<void>.delayed(Duration(milliseconds: _holdMs));
     }
@@ -107,12 +113,10 @@ class _AppScreenshotsState extends State<AppScreenshots> {
 
   @override
   Widget build(BuildContext context) {
-    // A fresh editor per screen kind (keyed) so the welcome→editor switch
-    // re-runs initState and the document opens; the light→dark step keeps the
-    // same editor key so the open document survives the theme flip.
-    final editorKey = ValueKey(_scene.screen);
     // ListenableBuilder mirrors app/lib/app.dart so the MaterialApp re-themes
-    // the instant a scene flips the persisted theme mode.
+    // the instant a scene flips the persisted theme mode. The editor is keyed
+    // per scene so each one re-reads its panel-visibility prefs at init (and the
+    // document reopens fresh, landing on page 1).
     return ListenableBuilder(
       listenable: _prefs,
       builder: (context, _) => MaterialApp(
@@ -126,9 +130,9 @@ class _AppScreenshotsState extends State<AppScreenshots> {
         ),
         themeMode: _prefs.themeMode,
         home: EditorScreen(
-          key: editorKey,
+          key: ValueKey(_scene.name),
           prefs: _prefs,
-          initialDocument: _scene.screen == _Screen.editor ? _doc : null,
+          initialDocument: _doc,
         ),
       ),
     );

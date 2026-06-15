@@ -106,6 +106,14 @@ void main() {
 
     expect(find.byKey(const ValueKey('tab-strip')), findsNothing);
     expect(find.byKey(const ValueKey('mobile-tabs-button')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mobile-tabs-count')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('mobile-tabs-button')),
+        matching: find.text('2'),
+      ),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('mobile-app-save')), findsOneWidget);
     expect(find.byKey(const ValueKey('pdf-shell-save')), findsNothing);
 

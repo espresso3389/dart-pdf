@@ -696,6 +696,7 @@ class _EditorScreenState extends State<EditorScreen>
                   },
                 ),
         ),
+      if (compact && _tabs.isNotEmpty) _buildMobileTabsButton(),
       if (compact && !_readOnly && tab?.session != null)
         Padding(
           padding: const EdgeInsets.only(right: 8),
@@ -728,64 +729,31 @@ class _EditorScreenState extends State<EditorScreen>
       );
 
   Widget _buildTabsTitle() {
-    return _isCompactWidth(context)
-        ? _buildCompactTabsButton()
-        : _buildTabStrip();
+    if (!_isCompactWidth(context)) return _buildTabStrip();
+    final tab = _active;
+    return Text(
+      tab?.title.isEmpty ?? true ? 'Untitled' : tab!.title,
+      overflow: TextOverflow.ellipsis,
+    );
   }
 
   bool _isCompactWidth(BuildContext context) =>
       MediaQuery.sizeOf(context).width < _mobileTabsBreakpoint;
 
-  Widget _buildCompactTabsButton() {
-    final tab = _active;
-    final scheme = Theme.of(context).colorScheme;
-    Widget label() {
-      final text = Text(
-        tab?.title.isEmpty ?? true ? 'Untitled' : tab!.title,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontWeight: FontWeight.w600,
-          color: scheme.onSecondaryContainer,
-        ),
-      );
-      final session = tab?.session;
-      if (session == null) return text;
-      return ListenableBuilder(
-        listenable: session,
-        builder: (context, _) => Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (tab!.isDirty)
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: Icon(Icons.circle, size: 8, color: scheme.primary),
-              ),
-            Flexible(child: text),
-          ],
-        ),
-      );
-    }
-
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 5),
-        child: Material(
-          key: const ValueKey('mobile-tabs-button'),
-          color: scheme.secondaryContainer,
-          borderRadius: BorderRadius.circular(8),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: _showTabsSheet,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 190),
-                child: Center(child: label()),
-              ),
-            ),
+  Widget _buildMobileTabsButton() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: IconButton(
+        key: const ValueKey('mobile-tabs-button'),
+        tooltip: 'Open tabs',
+        icon: Badge(
+          label: Text(
+            '${_tabs.length}',
+            key: const ValueKey('mobile-tabs-count'),
           ),
+          child: const Icon(Icons.tab_outlined),
         ),
+        onPressed: _showTabsSheet,
       ),
     );
   }

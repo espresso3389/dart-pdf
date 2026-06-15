@@ -21,6 +21,13 @@ void main() {
 
   tearDown(() => prefs.dispose());
 
+  Future<void> setMobileSize(WidgetTester tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+  }
+
   // Delivers a PDF to the running app the way the OS would (a warm-start
   // "open with"), opening it in a new tab.
   Future<void> openTab(WidgetTester tester, String name) async {
@@ -86,6 +93,43 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.byType(CircularProgressIndicator), findsNothing);
     expect(tabTitle('slow.pdf'), findsOneWidget);
+  });
+
+  testWidgets('compact tabs open as a preview grid bottom sheet',
+      (tester) async {
+    await setMobileSize(tester);
+    await tester.pumpWidget(MaterialApp(home: EditorScreen(prefs: prefs)));
+    await tester.pump();
+
+    await openTab(tester, 'alpha.pdf');
+    await openTab(tester, 'beta.pdf');
+
+    expect(find.byKey(const ValueKey('tab-strip')), findsNothing);
+    expect(find.byKey(const ValueKey('mobile-tabs-button')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mobile-app-save')), findsOneWidget);
+    expect(find.byKey(const ValueKey('pdf-shell-save')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('mobile-tabs-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('mobile-tabs-grid')), findsOneWidget);
+    expect(find.byKey(const ValueKey('mobile-tab-tile')), findsNWidgets(2));
+    expect(find.byKey(const ValueKey('mobile-tab-preview')), findsNWidgets(2));
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('mobile-tabs-grid')),
+        matching: find.text('alpha.pdf'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('mobile-tabs-grid')),
+        matching: find.text('beta.pdf'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('mobile-tabs-open')), findsOneWidget);
   });
 
   testWidgets('right-click opens the tab context menu', (tester) async {

@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:ui' show AppExitResponse;
+import 'dart:ui' as ui;
 
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 import 'package:desktop_drop/desktop_drop.dart';
@@ -21,6 +21,9 @@ import 'welcome_screen.dart';
 
 /// Height of the AppBar's browser-style tab strip.
 const double _tabStripHeight = 42;
+const double _mobileTabsBreakpoint = 700;
+const double _appMenuLeadingWidth = 68;
+const double _appMenuIconSize = 40;
 
 /// The editor's main screen: a strip of open-document tabs over the drop-in
 /// [PdfEditorView] / [PdfReader] shells, which carry all the PDF chrome
@@ -120,15 +123,15 @@ class _EditorScreenState extends State<EditorScreen>
   /// Blocks app exit while any document has unsaved changes, offering to
   /// discard. On platforms that don't ask (mobile/web) this is a no-op.
   @override
-  Future<AppExitResponse> didRequestAppExit() async {
+  Future<ui.AppExitResponse> didRequestAppExit() async {
     final dirty = _tabs.where((t) => t.isDirty).length;
-    if (dirty == 0) return AppExitResponse.exit;
+    if (dirty == 0) return ui.AppExitResponse.exit;
     final proceed = await _confirmDiscard(
       dirty == 1
           ? 'A document has unsaved changes.'
           : '$dirty documents have unsaved changes.',
     );
-    return proceed ? AppExitResponse.exit : AppExitResponse.cancel;
+    return proceed ? ui.AppExitResponse.exit : ui.AppExitResponse.cancel;
   }
 
   // --- opening -------------------------------------------------------------
@@ -596,7 +599,8 @@ class _EditorScreenState extends State<EditorScreen>
     return Scaffold(
       appBar: AppBar(
         leading: _buildAppMenu(tab),
-        title: _tabs.isEmpty ? const Text('DartPDF') : _buildTabStrip(),
+        leadingWidth: _appMenuLeadingWidth,
+        title: _tabs.isEmpty ? const Text('DartPDF') : _buildTabsTitle(),
         titleSpacing: _tabs.isEmpty ? null : 8,
         actions: _buildActions(tab),
       ),
@@ -618,6 +622,7 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   Widget _buildBody(DocumentTab? tab) {
+    final compact = _isCompactWidth(context);
     if (tab == null) {
       return WelcomeScreen(
         recents: _recents,
@@ -654,6 +659,7 @@ class _EditorScreenState extends State<EditorScreen>
       controller: tab.session,
       viewerController: tab.viewer,
       onSave: (_) => unawaited(_save(tab)),
+      showSaveButton: !compact,
       onPickPdfToInsert: pickPdfBytes,
       onExportPages: (bytes) =>
           unawaited(saveBytesAs(context, bytes, tab.title)),
@@ -665,6 +671,7 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   List<Widget> _buildActions(DocumentTab? tab) {
+    final compact = _isCompactWidth(context);
     return [
       // Background OCR progress (when a job is running) — non-blocking, so the
       // user keeps using the PDF while hundreds of pages are recognized.
@@ -689,21 +696,191 @@ class _EditorScreenState extends State<EditorScreen>
                   },
                 ),
         ),
+      if (compact && !_readOnly && tab?.session != null)
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: FilledButton.icon(
+            key: const ValueKey('mobile-app-save'),
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            icon: const Icon(Icons.save_alt, size: 18),
+            label: const Text('Save'),
+            onPressed: () => unawaited(_save(tab!)),
+          ),
+        ),
     ];
   }
 
   Widget _buildAppMenu(DocumentTab? tab) => PopupMenuButton<VoidCallback>(
         key: const ValueKey('dartpdf-app-menu'),
+        iconSize: _appMenuIconSize,
         icon: Image.asset(
           'web/favicon.png',
-          width: 28,
-          height: 28,
+          width: _appMenuIconSize,
+          height: _appMenuIconSize,
           semanticLabel: 'DartPDF',
         ),
         tooltip: 'DartPDF menu',
         onSelected: (action) => action(),
         itemBuilder: (context) => _appMenuItems(tab),
       );
+
+  Widget _buildTabsTitle() {
+    return _isCompactWidth(context)
+        ? _buildCompactTabsButton()
+        : _buildTabStrip();
+  }
+
+  bool _isCompactWidth(BuildContext context) =>
+      MediaQuery.sizeOf(context).width < _mobileTabsBreakpoint;
+
+  Widget _buildCompactTabsButton() {
+    final tab = _active;
+    final scheme = Theme.of(context).colorScheme;
+    Widget label() {
+      final text = Text(
+        tab?.title.isEmpty ?? true ? 'Untitled' : tab!.title,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontWeight: FontWeight.w600,
+          color: scheme.onSecondaryContainer,
+        ),
+      );
+      final session = tab?.session;
+      if (session == null) return text;
+      return ListenableBuilder(
+        listenable: session,
+        builder: (context, _) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (tab!.isDirty)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Icon(Icons.circle, size: 8, color: scheme.primary),
+              ),
+            Flexible(child: text),
+          ],
+        ),
+      );
+    }
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 5),
+        child: Material(
+          key: const ValueKey('mobile-tabs-button'),
+          color: scheme.secondaryContainer,
+          borderRadius: BorderRadius.circular(8),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: _showTabsSheet,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 190),
+                child: Center(child: label()),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showTabsSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) {
+          final scheme = Theme.of(sheetContext).colorScheme;
+          return SafeArea(
+            top: false,
+            child: SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * 0.72,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 12, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Tabs',
+                            style: Theme.of(sheetContext).textTheme.titleMedium,
+                          ),
+                        ),
+                        IconButton(
+                          key: const ValueKey('mobile-tabs-open'),
+                          icon: const Icon(Icons.add),
+                          tooltip: 'Open PDF in a new tab',
+                          onPressed: () {
+                            Navigator.of(sheetContext).pop();
+                            unawaited(_pickAndOpen());
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: GridView.builder(
+                      key: const ValueKey('mobile-tabs-grid'),
+                      padding: const EdgeInsets.all(12),
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                        maxCrossAxisExtent: 220,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: 0.78,
+                      ),
+                      itemCount: _tabs.length,
+                      itemBuilder: (context, index) {
+                        final tab = _tabs[index];
+                        final selected = index == _activeIndex;
+                        return _MobileTabTile(
+                          key: ValueKey('mobile-tab-${tab.hashCode}'),
+                          tab: tab,
+                          selected: selected,
+                          onTap: () {
+                            setState(() => _activeIndex = index);
+                            Navigator.of(sheetContext).pop();
+                          },
+                          onClose: () async {
+                            await _closeTabs([tab]);
+                            if (!mounted || !sheetContext.mounted) return;
+                            if (_tabs.isEmpty) {
+                              Navigator.of(sheetContext).pop();
+                            } else {
+                              setSheetState(() {});
+                            }
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Text(
+                      '${_tabs.length} open',
+                      style: Theme.of(sheetContext)
+                          .textTheme
+                          .labelMedium
+                          ?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 
   /// Moves the tab at [oldIndex] to [newIndex] (drag-reorder), keeping the
   /// currently active document active wherever it lands. [newIndex] is already
@@ -1014,6 +1191,268 @@ class _OcrStatusChip extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MobileTabTile extends StatelessWidget {
+  const _MobileTabTile({
+    super.key,
+    required this.tab,
+    required this.selected,
+    required this.onTap,
+    required this.onClose,
+  });
+
+  final DocumentTab tab;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final session = tab.session;
+    if (session == null) return _build(context);
+    return ListenableBuilder(
+      listenable: session,
+      builder: (context, _) => _build(context),
+    );
+  }
+
+  Widget _build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      key: const ValueKey('mobile-tab-tile'),
+      color: selected ? scheme.secondaryContainer : scheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: selected ? scheme.primary : scheme.outlineVariant,
+          width: selected ? 2 : 1,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+                child: _MobileTabPreview(tab: tab),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 4, 6),
+              child: Row(
+                children: [
+                  if (tab.isDirty)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: Icon(Icons.circle, size: 8, color: scheme.primary),
+                    ),
+                  Expanded(
+                    child: Text(
+                      tab.title.isEmpty ? 'Untitled' : tab.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight:
+                            selected ? FontWeight.w600 : FontWeight.normal,
+                        color: selected
+                            ? scheme.onSecondaryContainer
+                            : scheme.onSurface,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    tooltip: 'Close tab',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints.tightFor(width: 32, height: 32),
+                    onPressed: onClose,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileTabPreview extends StatelessWidget {
+  const _MobileTabPreview({required this.tab});
+
+  final DocumentTab tab;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final session = tab.session;
+    if (session != null) {
+      return _MobileTabDocumentPreview(
+        controller: session,
+        stamp: session.pageRenderStamp(0),
+        pageColor: session.preferences.pageColor,
+        showAnnotations: session.preferences.showAnnotations,
+      );
+    }
+    final (icon, label) = tab.isLoading
+        ? (Icons.hourglass_empty, 'Opening')
+        : tab.error != null
+            ? (Icons.error_outline, 'Could not open')
+            : tab.isComparison
+                ? (Icons.compare_arrows, 'Comparison')
+                : (Icons.picture_as_pdf_outlined, 'PDF');
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (tab.isLoading)
+              const SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              )
+            else
+              Icon(icon, size: 36, color: scheme.onSurfaceVariant),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: Theme.of(context)
+                  .textTheme
+                  .labelMedium
+                  ?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileTabDocumentPreview extends StatefulWidget {
+  const _MobileTabDocumentPreview({
+    required this.controller,
+    required this.stamp,
+    required this.pageColor,
+    required this.showAnnotations,
+  });
+
+  final PdfEditingController controller;
+  final int stamp;
+  final Color pageColor;
+  final bool showAnnotations;
+
+  @override
+  State<_MobileTabDocumentPreview> createState() =>
+      _MobileTabDocumentPreviewState();
+}
+
+class _MobileTabDocumentPreviewState extends State<_MobileTabDocumentPreview> {
+  ui.Image? _image;
+  Object? _pendingKey;
+  Object? _imageKey;
+
+  Object get _key => (
+        widget.controller,
+        widget.stamp,
+        widget.pageColor.toARGB32(),
+        widget.showAnnotations,
+      );
+
+  @override
+  void didUpdateWidget(_MobileTabDocumentPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.controller, widget.controller) ||
+        oldWidget.stamp != widget.stamp ||
+        oldWidget.pageColor != widget.pageColor ||
+        oldWidget.showAnnotations != widget.showAnnotations) {
+      _image?.dispose();
+      _image = null;
+      _imageKey = null;
+      _pendingKey = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _pendingKey = null;
+    _image?.dispose();
+    _image = null;
+    super.dispose();
+  }
+
+  Future<void> _render(Object key, double pixelRatio) async {
+    _pendingKey = key;
+    try {
+      final page = widget.controller.pageAt(0);
+      final size = PdfPageRenderer.pageSize(page);
+      if (size.width <= 0 || size.height <= 0) return;
+      final ratio = (150 * pixelRatio / size.width).clamp(0.08, 0.5);
+      final image = await PdfPageRenderer.renderImage(
+        page,
+        pixelRatio: ratio,
+        pageColor: widget.pageColor,
+        annotations: widget.showAnnotations,
+      );
+      if (!mounted || _pendingKey != key) {
+        image.dispose();
+        return;
+      }
+      setState(() {
+        _image?.dispose();
+        _image = image;
+        _imageKey = key;
+        _pendingKey = null;
+      });
+    } catch (_) {
+      if (mounted && _pendingKey == key) _pendingKey = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final key = _key;
+    if (_imageKey != key && _pendingKey != key) {
+      unawaited(_render(key, MediaQuery.devicePixelRatioOf(context)));
+    }
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      key: const ValueKey('mobile-tab-preview'),
+      decoration: BoxDecoration(
+        color: widget.pageColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: scheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: scheme.shadow.withValues(alpha: 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(7),
+        child: _image == null
+            ? const SizedBox.expand()
+            : RawImage(
+                key: const ValueKey('mobile-tab-preview-image'),
+                image: _image,
+                fit: BoxFit.contain,
+              ),
       ),
     );
   }

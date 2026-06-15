@@ -182,6 +182,7 @@ class PdfEditorView extends StatefulWidget {
     this.preferences,
     this.features = const PdfEditorFeatures(),
     this.onSave,
+    this.showSaveButton = true,
     this.onDocumentChanged,
     this.onPickPdfToInsert,
     this.onExportPages,
@@ -249,6 +250,12 @@ class PdfEditorView extends StatefulWidget {
   /// shortcut) are off when null. Writing the bytes somewhere is the
   /// app's job.
   final void Function(Uint8List bytes)? onSave;
+
+  /// Whether the stock shell chrome shows its Save button when [onSave]
+  /// is present. Hosts can set this false when they provide their own
+  /// save affordance while still keeping [onSave] and the keyboard
+  /// shortcut active.
+  final bool showSaveButton;
 
   /// Called after every revision — edits, undo, redo — with the new
   /// current bytes. For autosaving hosts.
@@ -719,7 +726,7 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                   PdfShellPanelSwitch(items: panelItems),
                   // Save sits in the header, not in the floating toolbar —
                   // ⌘S/Ctrl+S takes the same path.
-                  if (widget.onSave != null)
+                  if (widget.onSave != null && widget.showSaveButton)
                     FilledButton.icon(
                       key: const ValueKey('pdf-shell-save'),
                       style: FilledButton.styleFrom(
@@ -742,7 +749,7 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                       selected: item.selected,
                       onPressed: item.onPressed,
                     ),
-                  if (widget.onSave != null)
+                  if (widget.onSave != null && widget.showSaveButton)
                     PdfShellControlItem(
                       key: const ValueKey('pdf-shell-save'),
                       icon: Icons.save_alt,

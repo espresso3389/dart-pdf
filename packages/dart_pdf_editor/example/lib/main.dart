@@ -789,10 +789,11 @@ class _ViewerScreenState extends State<ViewerScreen> {
 
   Widget _buildAppMenu(_DocumentTab? tab) => PopupMenuButton<VoidCallback>(
         key: const ValueKey('dartpdf-app-menu'),
+        iconSize: 100,
         icon: Image.memory(
           demoLogoPng(),
-          width: 32,
-          height: 32,
+          width: 48,
+          height: 48,
           semanticLabel: 'DartPDF',
         ),
         tooltip: 'DartPDF menu',

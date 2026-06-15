@@ -517,6 +517,30 @@ void main() {
       expect(find.byIcon(Icons.save_alt), findsNothing);
     });
 
+    testWidgets('showSaveButton hides only the stock save control',
+        (tester) async {
+      final editing = PdfEditingController(buildMultiPagePdf(1));
+      addTearDown(editing.dispose);
+      List<int>? saved;
+      await pump(
+        tester,
+        PdfEditorView(
+          controller: editing,
+          onSave: (bytes) => saved = bytes,
+          showSaveButton: false,
+        ),
+      );
+      expect(find.byKey(const ValueKey('pdf-shell-save')), findsNothing);
+
+      await tester.tap(find.byType(PdfViewer), kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+
+      expect(saved, editing.bytes);
+    });
+
     testWidgets('Ctrl+S saves through onSave', (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(1));
       addTearDown(editing.dispose);

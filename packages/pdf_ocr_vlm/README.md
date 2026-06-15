@@ -1,6 +1,6 @@
 # pdf_ocr_vlm
 
-[![License: Apache-2.0](https://img.shields.io/github/license/ben-milanko/dart-pdf)](https://github.com/ben-milanko/dart-pdf/blob/main/LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/ben-milanko/dart-pdf/blob/main/LICENSE)
 
 A pluggable **OCR engine** for the
 [dart-pdf suite](https://github.com/ben-milanko/dart-pdf). It adds an

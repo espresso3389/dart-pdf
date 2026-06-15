@@ -3,7 +3,7 @@
 [![CI](https://github.com/ben-milanko/dart-pdf/actions/workflows/ci.yml/badge.svg)](https://github.com/ben-milanko/dart-pdf/actions/workflows/ci.yml)
 [![dart_pdf_editor on pub.dev](https://img.shields.io/pub/v/dart_pdf_editor.svg)](https://pub.dev/packages/dart_pdf_editor)
 [![codecov](https://codecov.io/gh/ben-milanko/dart-pdf/branch/main/graph/badge.svg)](https://codecov.io/gh/ben-milanko/dart-pdf)
-[![License: Apache-2.0](https://img.shields.io/github/license/ben-milanko/dart-pdf)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 > [!TIP]
 > **Want the app, not the SDK?** [**DartPDF**](https://dart-pdf.com) is the

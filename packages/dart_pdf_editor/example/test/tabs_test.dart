@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
+import 'package:flutter/material.dart';
 import 'package:pdf_viewer_example/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -18,6 +19,20 @@ void main() {
     await openDemo(tester);
     expect(closeButtons(), findsOneWidget);
     expect(find.byType(PdfViewer), findsOneWidget);
+  });
+
+  testWidgets('tab strip is left aligned and app logo is compact',
+      (tester) async {
+    await openDemo(tester);
+
+    expect(tester.getTopLeft(find.byKey(const ValueKey('tab-strip'))).dx,
+        lessThan(120));
+
+    final logo = find.descendant(
+      of: find.byKey(const ValueKey('dartpdf-app-menu')),
+      matching: find.byType(Image),
+    );
+    expect(tester.getSize(logo), const Size(24, 24));
   });
 
   testWidgets('the AppBar demo action opens a second tab', (tester) async {

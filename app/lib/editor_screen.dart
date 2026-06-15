@@ -600,6 +600,7 @@ class _EditorScreenState extends State<EditorScreen>
       appBar: AppBar(
         leading: _buildAppMenu(tab),
         leadingWidth: _appMenuLeadingWidth,
+        centerTitle: false,
         title: _tabs.isEmpty ? const Text('DartPDF') : _buildTabsTitle(),
         titleSpacing: _tabs.isEmpty ? null : 8,
         actions: _buildActions(tab),
@@ -875,7 +876,7 @@ class _EditorScreenState extends State<EditorScreen>
           final tabsWidth =
               desiredTabsWidth < maxTabsWidth ? desiredTabsWidth : maxTabsWidth;
           return Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: MainAxisSize.max,
             children: [
               if (tabsWidth > 0)
                 SizedBox(

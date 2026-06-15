@@ -695,6 +695,8 @@ class _ViewerScreenState extends State<ViewerScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: _buildAppMenu(tab),
+        leadingWidth: _appMenuLeadingWidth,
+        centerTitle: false,
         title: _tabs.isEmpty ? const Text('dart-pdf viewer') : _buildTabStrip(),
         titleSpacing: _tabs.isEmpty ? null : 8,
         actions: [
@@ -789,11 +791,11 @@ class _ViewerScreenState extends State<ViewerScreen> {
 
   Widget _buildAppMenu(_DocumentTab? tab) => PopupMenuButton<VoidCallback>(
         key: const ValueKey('dartpdf-app-menu'),
-        iconSize: 100,
+        iconSize: _appMenuIconSize,
         icon: Image.memory(
           demoLogoPng(),
-          width: 48,
-          height: 48,
+          width: _appMenuIconSize,
+          height: _appMenuIconSize,
           semanticLabel: 'DartPDF',
         ),
         tooltip: 'DartPDF menu',
@@ -816,7 +818,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
           final tabsWidth =
               desiredTabsWidth < maxTabsWidth ? desiredTabsWidth : maxTabsWidth;
           return Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: MainAxisSize.max,
             children: [
               if (tabsWidth > 0)
                 SizedBox(
@@ -920,6 +922,8 @@ class _ViewerScreenState extends State<ViewerScreen> {
 
 /// Height of the AppBar's tab strip.
 const double _tabStripHeight = 42;
+const double _appMenuLeadingWidth = 60;
+const double _appMenuIconSize = 24;
 
 class _OpeningDocument extends StatelessWidget {
   const _OpeningDocument({required this.title});

@@ -3,9 +3,9 @@
 # Manual pub.dev release for every workspace package.
 #
 # Publishes packages in dependency order. Because the cross-package
-# constraints are `^1.0.0` (hosted, not path), each package must be live on
-# pub.dev before a dependent can resolve — so the script waits for each
-# version to appear before publishing the next.
+# constraints are hosted, not path, so each package must be live on pub.dev
+# before a dependent can resolve — the script waits for each version to appear
+# before publishing the next.
 #
 # Usage:
 #   tool/release.sh                 # dry-run every package (no publishing)
@@ -28,6 +28,8 @@ PACKAGES=(
   "pdf_document:packages/pdf_document"
   "pdf_graphics:packages/pdf_graphics"
   "dart_pdf_editor:packages/dart_pdf_editor"
+  "pdf_ocr_vlm:packages/pdf_ocr_vlm"
+  "pdf_ocr_ondevice:packages/pdf_ocr_ondevice"
 )
 
 PUBLISH=0

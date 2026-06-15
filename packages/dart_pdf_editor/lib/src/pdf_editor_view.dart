@@ -18,6 +18,7 @@ import 'pdf_reflow_view.dart';
 import 'pdf_viewer.dart';
 import 'raster_cache.dart';
 import 'render_worker.dart';
+import 'scrollbar.dart';
 import 'search_panel.dart';
 import 'shell_chrome.dart';
 import 'theme.dart';
@@ -760,7 +761,10 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                 if (toolbar != null && !dockToolbar)
                   Positioned(
                     left: 0,
-                    right: 0,
+                    // The viewer scrollbar is an overlay control; keep the
+                    // floating toolbar clear of its hit zone so the transparent
+                    // toolbar gutter doesn't make the card look clipped.
+                    right: PdfScrollbar.hitExtent,
                     bottom: 0,
                     child: toolbar,
                   ),

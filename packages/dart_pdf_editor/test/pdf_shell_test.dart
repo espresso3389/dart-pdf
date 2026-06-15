@@ -27,6 +27,12 @@ void main() {
     addTearDown(tester.view.reset);
   }
 
+  Future<void> openShellControls(WidgetTester tester) async {
+    await tester.tap(find.byKey(const ValueKey('pdf-shell-controls')),
+        kind: PointerDeviceKind.mouse);
+    await tester.pumpAndSettle();
+  }
+
   group('PdfReader', () {
     testWidgets('stock chrome: search, page number, view options, thumbnails',
         (tester) async {
@@ -84,6 +90,9 @@ void main() {
       expect(prefs.showThumbnailSidebar, isTrue);
       expect(prefs.hasShowThumbnailSidebarPreference, isFalse);
       expect(find.byType(PdfThumbnailSidebar), findsNothing);
+      expect(find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
+          findsNothing);
+      await openShellControls(tester);
       final toggle = tester.widget<IconButton>(find.ancestor(
         of: find.byIcon(Icons.grid_view),
         matching: find.byType(IconButton),
@@ -93,7 +102,7 @@ void main() {
       await tester.tap(
           find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
           kind: PointerDeviceKind.mouse);
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.byType(PdfThumbnailSidebar), findsOneWidget);
       expect(prefs.hasShowThumbnailSidebarPreference, isTrue);
       expect(prefs.showThumbnailSidebar, isTrue);
@@ -265,6 +274,7 @@ void main() {
           PdfEditorView(bytes: buildMultiPagePdf(2), preferences: prefs));
       expect(prefs.hasShowThumbnailSidebarPreference, isTrue);
       expect(find.byType(PdfThumbnailSidebar), findsOneWidget);
+      await openShellControls(tester);
       final toggle = tester.widget<IconButton>(find.ancestor(
         of: find.byIcon(Icons.grid_view),
         matching: find.byType(IconButton),
@@ -721,16 +731,39 @@ void main() {
   // On a narrow screen the side panels and the thumbnail strip become
   // bottom sheets instead of docking and crowding the page out.
   group('bottom sheets on small screens', () {
+    testWidgets('compact: shell right controls move into a controls sheet',
+        (tester) async {
+      compactScreen(tester);
+      await pump(tester, PdfEditorView(bytes: buildMultiPagePdf(2)));
+
+      expect(find.byKey(const ValueKey('pdf-shell-controls')), findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('pdf-shell-view-options')), findsNothing);
+      expect(find.byKey(const ValueKey('pdf-shell-annotations-toggle')),
+          findsNothing);
+
+      await openShellControls(tester);
+
+      expect(find.text('Controls'), findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('pdf-shell-view-options')), findsOneWidget);
+      expect(find.byKey(const ValueKey('pdf-shell-annotations-toggle')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('pdf-shell-properties-toggle')),
+          findsOneWidget);
+    });
+
     testWidgets('compact: a toggled panel floats up as a bottom sheet',
         (tester) async {
       compactScreen(tester);
       await pump(tester, PdfEditorView(bytes: buildMultiPagePdf(2)));
       expect(find.byType(PdfAnnotationSidebar), findsNothing);
 
+      await openShellControls(tester);
       await tester.tap(
           find.byKey(const ValueKey('pdf-shell-annotations-toggle')),
           kind: PointerDeviceKind.mouse);
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       // the panel is present, wrapped in a bottom sheet (its close button)
       expect(find.byType(PdfAnnotationSidebar), findsOneWidget);
@@ -749,10 +782,11 @@ void main() {
       await pump(tester,
           PdfEditorView(bytes: buildMultiPagePdf(2), preferences: prefs));
 
+      await openShellControls(tester);
       await tester.tap(
           find.byKey(const ValueKey('pdf-shell-properties-toggle')),
           kind: PointerDeviceKind.mouse);
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.byType(PdfAnnotationPropertiesPanel), findsOneWidget);
 
       await tester.tap(
@@ -770,10 +804,11 @@ void main() {
       compactScreen(tester); // 600x800
       await pump(tester,
           PdfEditorView(bytes: buildMultiPagePdf(2), preferences: prefs));
+      await openShellControls(tester);
       await tester.tap(
           find.byKey(const ValueKey('pdf-shell-properties-toggle')),
           kind: PointerDeviceKind.mouse);
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       // the panel fills the sheet below its header, so its height tracks the
       // sheet's
@@ -826,10 +861,11 @@ void main() {
           tester, PdfReader(bytes: buildMultiPagePdf(3), preferences: prefs));
 
       // compact first run starts closed; toggle it on
+      await openShellControls(tester);
       await tester.tap(
           find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
           kind: PointerDeviceKind.mouse);
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(find.byType(PdfThumbnailSidebar), findsOneWidget);
       expect(find.byKey(const ValueKey('pdf-shell-thumbnails-sheet-close')),
@@ -860,10 +896,11 @@ void main() {
       compactScreen(tester); // 600x800
       await pump(
           tester, PdfReader(bytes: buildMultiPagePdf(12), preferences: prefs));
+      await openShellControls(tester);
       await tester.tap(
           find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
           kind: PointerDeviceKind.mouse);
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       final sheet = find.byType(PdfThumbnailSidebar);
       final position = tester
@@ -956,6 +993,17 @@ void main() {
       final toolbarTop = tester.getRect(toolbar).top;
       expect(toolbarTop, lessThan(viewerBottom),
           reason: 'the floating toolbar overlaps the viewer');
+    });
+
+    testWidgets('wide: the floating toolbar clears the viewer scrollbar',
+        (tester) async {
+      await pump(tester, PdfEditorView(bytes: buildMultiPagePdf(2)));
+
+      final viewerRight = tester.getRect(find.byType(PdfViewer)).right;
+      final toolbarRight = tester.getRect(find.byType(PdfEditingToolbar)).right;
+
+      expect(toolbarRight, lessThanOrEqualTo(viewerRight - 13.5),
+          reason: 'the floating toolbar should not sit under the scrollbar');
     });
   });
 

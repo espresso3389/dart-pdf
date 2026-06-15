@@ -30,8 +30,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
   }
 
-  testWidgets(
-      'the DartPDF menu offers OCR with a document open',
+  testWidgets('the DartPDF menu offers OCR with a document open',
       (tester) async {
     await pumpWithDoc(tester);
 

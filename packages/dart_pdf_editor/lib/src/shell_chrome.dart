@@ -304,6 +304,60 @@ class PdfShellBar extends StatelessWidget {
   final List<Widget> leading;
   final List<Widget> trailing;
 
+  Future<void> _showControls(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => _ShellControlsSheetScope(
+        close: () => Navigator.of(context).maybePop(),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text('Controls',
+                          style: Theme.of(context).textTheme.titleMedium),
+                    ),
+                    IconButton(
+                      key: const ValueKey('pdf-shell-controls-close'),
+                      icon: const Icon(Icons.close),
+                      tooltip: 'Close',
+                      onPressed: () => Navigator.of(context).maybePop(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerLow,
+                    border: Border.all(color: scheme.outlineVariant),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: trailing,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Material(
@@ -323,28 +377,73 @@ class PdfShellBar extends StatelessWidget {
           // a Spacer can't live in an unbounded-width Row, so the gap
           // comes from spaceBetween over a min-width-constrained Row
           child: LayoutBuilder(
-            builder: (context, constraints) => SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minWidth: constraints.maxWidth),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            builder: (context, constraints) {
+              if (pdfShellUseBottomSheets(constraints)) {
+                return Row(
                   children: [
-                    Row(
-                      children: [const SizedBox(width: 8), ...leading],
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(children: [
+                          const SizedBox(width: 8),
+                          ...leading,
+                          const SizedBox(width: 4),
+                        ]),
+                      ),
                     ),
-                    Row(
-                      children: [...trailing, const SizedBox(width: 8)],
-                    ),
+                    if (trailing.isNotEmpty)
+                      IconButton(
+                        key: const ValueKey('pdf-shell-controls'),
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.more_horiz),
+                        tooltip: 'Controls',
+                        onPressed: () => unawaited(_showControls(context)),
+                      ),
+                    const SizedBox(width: 8),
                   ],
+                );
+              }
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [const SizedBox(width: 8), ...leading],
+                      ),
+                      Row(
+                        children: [...trailing, const SizedBox(width: 8)],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ),
       ),
     );
   }
+}
+
+class _ShellControlsSheetScope extends InheritedWidget {
+  const _ShellControlsSheetScope({required this.close, required super.child});
+
+  final VoidCallback close;
+
+  static _ShellControlsSheetScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_ShellControlsSheetScope>();
+
+  @override
+  bool updateShouldNotify(_ShellControlsSheetScope oldWidget) => false;
+}
+
+void _maybeCloseShellControls(BuildContext context) {
+  final scope = _ShellControlsSheetScope.maybeOf(context);
+  if (scope == null) return;
+  WidgetsBinding.instance.addPostFrameCallback((_) => scope.close());
 }
 
 enum _ViewOption { annotations, formHighlight, reflow, pageColor, author }
@@ -500,7 +599,10 @@ class PdfShellToggleButton extends StatelessWidget {
       icon: Icon(icon),
       tooltip: tooltip,
       isSelected: selected,
-      onPressed: onPressed,
+      onPressed: () {
+        onPressed();
+        _maybeCloseShellControls(context);
+      },
     );
   }
 }
@@ -578,7 +680,10 @@ class PdfShellPanelSwitch extends StatelessWidget {
                     icon: Icon(item.icon),
                     tooltip: item.tooltip,
                     isSelected: item.selected,
-                    onPressed: item.onPressed,
+                    onPressed: () {
+                      item.onPressed();
+                      _maybeCloseShellControls(context);
+                    },
                   ),
               ],
             ),

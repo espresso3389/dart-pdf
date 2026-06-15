@@ -20,12 +20,12 @@ in CLIs and servers, and on the web. The Flutter canvas device lives in
 
 - Interpreter covering the full content operator set: paths, clipping,
   text, images and inline images, XObjects, transparency groups, soft
-  masks, blend modes, optional content, and type 0–4 functions.
+  masks, blend modes, optional content, and type 0-4 functions.
 - Fonts: Type 1, TrueType, CFF, Type 0/CID, and Type 3, embedded or with
   standard-14 metrics; encodings, CMaps, and glyph outlines.
 - Color: ICC profiles (validated against littleCMS), Separation/DeviceN
   with tint transforms, Indexed, Lab, and calibrated spaces.
-- Shadings and patterns: types 1–7 including the mesh families, with
+- Shadings and patterns: types 1-7 including the mesh families, with
   `/Extend` semantics; tiling and shading patterns.
 - Text extraction: run geometry for selection and search, reading in
   document order, rotation-aware page geometry.

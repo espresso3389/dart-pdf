@@ -3,13 +3,13 @@
 On-device, **downloadable** OCR for [`dart_pdf_editor`](https://pub.dev/packages/dart_pdf_editor).
 
 Adds a selectable, searchable, *invisible* text layer over scanned (image-only)
-PDF pages — running entirely on the device, with **no per-page network call**.
+PDF pages. It runs entirely on the device, with **no per-page network call**.
 A small OCR model (PaddleOCR PP-OCRv5 *mobile*, ~21 MB) downloads once, is cached
 under the app-support directory, and then runs locally on
 [ONNX Runtime](https://onnxruntime.ai).
 
 It implements `dart_pdf_editor`'s `PdfOcrEngine`, so the recognized text is
-written by `PdfEditor.applyOcr` exactly like any other engine — the page looks
+written by `PdfEditor.applyOcr` exactly like any other engine. The page looks
 unchanged, but its text becomes selectable, searchable, copyable, and
 extractable.
 
@@ -19,8 +19,8 @@ dart-pdf has two OCR engines, two tiers:
 
 | Engine | Where it runs | Best for |
 | --- | --- | --- |
-| [`pdf_ocr_vlm`](../pdf_ocr_vlm) | A server/cloud you call over HTTP (dots.ocr on vLLM, or any VLM) | Highest accuracy, layout/table parsing — when a GPU server or an API is available |
-| **`pdf_ocr_ondevice`** (this) | The device, offline | Privacy, offline use, no infrastructure — a plain selectable text layer on every native platform |
+| [`pdf_ocr_vlm`](../pdf_ocr_vlm) | A server/cloud you call over HTTP (dots.ocr on vLLM, or any VLM) | Highest accuracy and layout/table parsing when a GPU server or an API is available |
+| **`pdf_ocr_ondevice`** (this) | The device, offline | Privacy, offline use, and no infrastructure; a plain selectable text layer on every native platform |
 
 The SOTA document-parsing models (dots.ocr 1.7B, PaddleOCR-VL 0.9B) are
 billion-parameter VLMs that realistically need a GPU; this package uses the
@@ -29,7 +29,7 @@ on CPU on a phone or a laptop.
 
 ## Supported platforms
 
-Android, iOS, macOS, Windows, Linux — wherever ONNX Runtime has prebuilt
+Android, iOS, macOS, Windows, and Linux, wherever ONNX Runtime has prebuilt
 binaries. **Not the web** (no local model store / native runtime): on the web,
 `PdfOcrModelManager.isSupported` is `false`; use `pdf_ocr_vlm` against an HTTP
 service there.
@@ -91,7 +91,7 @@ from your app flow with progress and cancellation; the DartPDF app's
 
 `PdfOcrModels.ppOcrV5Mobile` downloads its files from the
 [`ocr-models-v1`](https://github.com/ben-milanko/dart-pdf/releases/tag/ocr-models-v1)
-GitHub release — nothing to host, it works out of the box. Each file's
+GitHub release. There is nothing to host, and it works out of the box. Each file's
 `sha256` is pinned in the descriptor, so a corrupted or tampered download is
 rejected.
 
@@ -128,7 +128,7 @@ supply your own `PdfOcrModel`:
 
 The default bundle is a **derivative work of PaddleOCR PP-OCRv5 mobile**
 (Copyright © PaddlePaddle Authors), redistributed under the **Apache License
-2.0** — the same license as this package. The `.onnx` files are the official
+2.0**, the same license as this package. The `.onnx` files are the official
 PaddlePaddle inference models converted to ONNX with `paddle2onnx` (opset 14;
 no weights retrained or altered); `ppocrv5_dict.txt` is the recognizer's
 character dictionary extracted verbatim from the official config. The
@@ -184,7 +184,7 @@ Everything except the two `OrtSession.run` calls is plain Dart and unit tested.
 
 `OnDeviceOcrEngine` takes any `OcrModelRunner`, so a platform-native recognizer
 (Apple Vision, ML Kit, Windows.Media.Ocr) can stand in while reusing the
-download lifecycle and the page-geometry mapping — return `RecognizedTextLine`s
+download lifecycle and the page-geometry mapping. Return `RecognizedTextLine`s
 in raster pixels and the engine does the rest.
 
 ## Native setup

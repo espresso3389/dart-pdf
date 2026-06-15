@@ -7,7 +7,7 @@
 
 ## 1.1.0
 
-- Performance: a faster content-stream tokenizer — the heart of the
+- Performance: a faster content-stream tokenizer. This is the heart of the
   render-speed work that puts dart-pdf ahead of PDFium on the benchmark
   corpus.
 - Fix: JPEG 2000 tile-part desynchronization, and indexed Lab color

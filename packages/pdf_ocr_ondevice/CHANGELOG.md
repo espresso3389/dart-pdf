@@ -14,7 +14,7 @@
   progress as bytes arrive. Native platforms only (`isSupported` is false on
   the web).
 - `OnDeviceOcrEngine` implements `PdfOcrEngine`, mapping a backend's
-  pixel-space text lines into PDF user space — so `PdfEditor.applyOcr` writes
+  pixel-space text lines into PDF user space. `PdfEditor.applyOcr` writes
   an invisible, selectable layer with no per-page network call.
 - `OnnxOcrModelRunner` runs a PP-OCR detect+recognize pipeline on ONNX
   Runtime (det resize/normalize, DB box extraction, CRNN/CTC decode), all of

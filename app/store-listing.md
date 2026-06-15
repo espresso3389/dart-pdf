@@ -1,4 +1,4 @@
-# DartPDF — App Store / Play Store listing copy
+# DartPDF App Store / Play Store listing copy
 
 Accurate to what the app ships today. Character budgets noted per field.
 
@@ -83,10 +83,10 @@ Runs on Android, iPhone, iPad, and Mac, plus Windows, Linux, and the web. Opens 
 ---
 
 ## Notes for whoever fills the listing
-- **Don't overclaim:** the app does *drawn* signatures (place your handwritten mark), not certified PKI/digital signatures — keep the copy as written.
+- **Don't overclaim:** the app does *drawn* signatures (place your handwritten mark), not certified PKI/digital signatures. Keep the copy as written.
 - OCR/text-recognition can be advertised, but keep the privacy wording exact:
   native builds download a model once and then run OCR on device; web builds
   download browser model/runtime files and run OCR in the browser. Do not imply
   that OCR goes through a DartPDF server.
 - "Redaction" hides content on the page; describe it as blacking-out/hiding rather than guaranteeing forensic removal.
-- Keep the privacy claims exact — they match `app/PRIVACY.md` (collects nothing, on-device).
+- Keep the privacy claims exact. They match `app/PRIVACY.md` (collects nothing, on-device).

@@ -1,4 +1,4 @@
-# Codex Cloud Environment
+# Codex cloud environment
 
 Configure the repository's Codex cloud environment with these scripts:
 

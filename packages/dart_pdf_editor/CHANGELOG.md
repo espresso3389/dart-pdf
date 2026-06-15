@@ -20,7 +20,7 @@
 - Snapshot tool (`PdfEditTool.snapshot`, in the Edit toolbar): drag a
   region to capture it, Bluebeam-style. The captured region is rendered to
   a PNG handed to `PdfViewer.onSnapshot` (copy/save/share) AND kept on the
-  controller as detached **vector** graphics — paste it back into the PDF
+  controller as detached **vector** graphics. Paste it back into the PDF
   with ⌘V/Ctrl+V or the right-click Paste (`PdfEditingController.
   pasteSnapshot`) and it stays vector, crisp at any zoom.
 - Background rendering: heavy pages now interpret off the UI thread, so
@@ -41,10 +41,10 @@
 - Toolbar tool types can be disabled individually: the new
   `PdfEditingToolbar.groups` (and `PdfEditorFeatures.toolGroups`) takes a
   set of `PdfEditToolGroup` values (Select, Markup, Draw, Shapes, Insert,
-  Measure, Edit) — pass a subset to hide whole tool types at once,
+  Measure, Edit). Pass a subset to hide whole tool types at once,
   without enumerating each tool in `tools`.
 - Count tool: place Bluebeam-style check-marks and watch a running
-  on-page tally — the editor surface for `PdfEditor.addCheckMark`.
+  on-page tally. This is the editor surface for `PdfEditor.addCheckMark`.
 - Right-click text context menu on mouse platforms (copy, select all).
 - Thumbnail strip: Shift-click to multi-select a range of pages.
 - Single-key keyboard shortcuts for the common editing tools.
@@ -88,7 +88,7 @@ First stable release. Highlights since 0.1.0:
   `onPickPdfToInsert` (host returns a PDF to merge after the current page)
   and `onExportPages` (host saves the exported range); the range is chosen
   with the new exported `showPdfPageRangeDialog`.
-- Pluggable OCR: `PdfOcrEngine` (a host-supplied recognizer — ML Kit,
+- Pluggable OCR: `PdfOcrEngine` (a host-supplied recognizer such as ML Kit,
   Tesseract WASM, a cloud API; none ships in-tree) plus
   `PdfEditor.applyOcr(pageIndex, engine)`, which rasterizes the page, runs
   the engine, and injects an invisible selectable/searchable text layer.
@@ -100,7 +100,7 @@ First stable release. Highlights since 0.1.0:
   `PdfViewer.initialViewport`, and per-document persistence in
   `PdfEditingPreferences` (`viewportFor`/`setViewport`). The `PdfReader`
   and `PdfEditorView` shells remember and restore each document's
-  position automatically — pass `documentId` for a stable key, or let it
+  position automatically. Pass `documentId` for a stable key, or let it
   derive one from the bytes (`pdfDocumentKey`).
 - Keyboard shortcuts for the common editing tools: single, unmodified keys
   arm a tool from the viewer (V select, P pen/ink, E eraser, R rectangle,
@@ -115,7 +115,7 @@ First stable release. Highlights since 0.1.0:
 
 Initial release.
 
-- Drop-in widgets: `PdfEditorView` (the full editor — header bar with
+- Drop-in widgets: `PdfEditorView` (the full editor: header bar with
   search and panel toggles, all panels, the editing toolbar, save) and
   `PdfReader` (view-only with search, page navigation, and a read-only
   thumbnail strip), both theme-following and configurable via

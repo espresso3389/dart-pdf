@@ -1,4 +1,4 @@
-# DartPDF — Privacy Policy
+# DartPDF privacy policy
 
 _Last updated: 14 June 2026_
 

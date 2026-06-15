@@ -1,4 +1,4 @@
-![dart-pdf — pure-Dart PDF renderer & editor for Flutter](https://raw.githubusercontent.com/ben-milanko/dart-pdf/main/doc/banner.png)
+![dart-pdf, pure-Dart PDF renderer & editor for Flutter](https://raw.githubusercontent.com/ben-milanko/dart-pdf/main/doc/banner.png)
 
 # dart_pdf_editor
 
@@ -20,8 +20,8 @@ Android, macOS, Windows, Linux, and the web.
 flutter pub add dart_pdf_editor
 ```
 
-Two drop-in widgets carry the whole UI — give them bytes and bounded
-space, and everything in the screenshot above (search, page navigation,
+Two drop-in widgets carry the whole UI. Give them bytes and bounded
+space; everything in the screenshot above (search, page navigation,
 panels, tools, undo/redo, save) is wired up:
 
 ```dart
@@ -70,20 +70,20 @@ Built on the pure-Dart
 
 Pure Dart, and fast: on a real-world corpus (49 files / 245 pages of
 CAD drawings, scans, reports, and forms) the parse + content-stream
-**interpreter is ~1.5× faster than PDFium** — the C++ engine Chrome
-uses — at **13.6 ms/page vs 20.6 ms/page** (scale 2). Full Flutter
-rasterization is 53.7 ms/page (2.6× PDFium); that remaining gap is image
+**interpreter is ~1.5x faster than PDFium**: **13.6 ms/page vs 20.6 ms/page**
+at scale 2. PDFium is the C++ engine Chrome uses. Full Flutter
+rasterization is 53.7 ms/page (2.6x PDFium); that remaining gap is image
 decoding and GPU raster, not the interpreter.
 
 | engine | ms/page | vs PDFium |
 |---|---|---|
-| dart-pdf interpret (pure Dart) | **13.6** | **1.52× faster** |
+| dart-pdf interpret (pure Dart) | **13.6** | **1.52x faster** |
 | PDFium (open + rasterize) | 20.6 | 1.00× |
-| dart-pdf render (full Flutter raster) | 53.7 | 2.60× slower |
+| dart-pdf render (full Flutter raster) | 53.7 | 2.60x slower |
 
-Numbers and methodology — including reproducible harnesses that diff
-dart-pdf against PDFium file-by-file — are in
+Numbers and methodology are in
 [`benchmark/`](https://github.com/ben-milanko/dart-pdf/tree/main/benchmark).
+The harnesses diff dart-pdf against PDFium file by file.
 
 ## Viewing
 
@@ -131,8 +131,8 @@ are byte prefixes of one buffer.
 
 ## Composing your own UI
 
-`PdfEditorView` and `PdfReader` are assembled from public parts —
-`PdfViewer`, `PdfEditingController`, `PdfEditingToolbar`, the panels —
+`PdfEditorView` and `PdfReader` are assembled from public parts:
+`PdfViewer`, `PdfEditingController`, `PdfEditingToolbar`, and the panels,
 so apps wanting custom chrome can wire those directly:
 
 ```dart
@@ -250,7 +250,7 @@ same, but text selection, search, copy, and extraction work. Pass
 
 ## Web rendering
 
-On the web the viewer renders on the main thread by default — nothing to
+On the web the viewer renders on the main thread by default. There is nothing to
 configure. For heavy/CAD documents you can move page interpretation and
 image decode onto a **Web Worker** (the web counterpart of the native
 background isolate): build the worker bundle from your app root, then
@@ -270,7 +270,7 @@ void main() {
 ```
 
 `PdfReader`/`PdfEditorView` pick it up automatically, and if the script is
-missing it degrades to main-thread rendering — it's a pure opt-in upgrade.
+missing it degrades to main-thread rendering. It is a pure opt-in upgrade.
 You can commit `web/pdf_render_worker.dart.js` and rebuild it only when you
 upgrade `dart_pdf_editor`, or generate it in CI before `flutter build web`.
 The worker itself does not require COOP/COEP headers; only Flutter's

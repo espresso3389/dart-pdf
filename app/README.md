@@ -1,8 +1,8 @@
 # DartPDF
 
 A standalone, cross-platform PDF editor built on the
-[`dart_pdf_editor`](../packages/dart_pdf_editor) SDK — pure Dart, no PDFium, no
-platform channels for rendering. Runs on iOS, Android, web, macOS, Windows, and
+[`dart_pdf_editor`](../packages/dart_pdf_editor) SDK. Rendering is pure Dart:
+no PDFium and no platform channels. Runs on iOS, Android, web, macOS, Windows, and
 Linux from one codebase.
 
 This is the **product app**. The SDK's feature showcase lives separately in
@@ -60,7 +60,7 @@ cd app && fvm flutter test
 ## Build
 
 `flutter build <apk|appbundle|ios|macos|windows|linux|web> --release`. Releases
-are automated on `app-v*` tags — see [RELEASING.md](RELEASING.md).
+are automated on `app-v*` tags. See [RELEASING.md](RELEASING.md).
 
 ## Manual device-test matrix
 
@@ -70,8 +70,8 @@ native OS-integration paths still want on-device confirmation:
 | Check | iOS | Android | macOS | Windows | Linux | Web |
 |---|---|---|---|---|---|---|
 | Open via "open with" / association | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ (installed PWA) |
-| Receive a shared PDF | ☐ | ☐ | — | — | — | — |
-| Drag-and-drop onto window | — | — | ☐ | ☐ | ☐ | ☐ |
+| Receive a shared PDF | ☐ | ☐ | n/a | n/a | n/a | n/a |
+| Drag-and-drop onto window | n/a | n/a | ☐ | ☐ | ☐ | ☐ |
 | Edit → Save overwrites the original | n/a* | n/a* | ☐ | ☐ | ☐ | n/a* |
 | OCR a scanned PDF | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | Reopen restores viewport | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |

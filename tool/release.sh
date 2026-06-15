@@ -19,7 +19,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-DART="fvm dart"
+DART=(fvm dart)
 
 # package:directory, in publish order (dependencies first).
 PACKAGES=(
@@ -39,7 +39,11 @@ for arg in "$@"; do
     --publish) PUBLISH=1 ;;
     --yes|-y) ASSUME_YES=1 ;;
     --help|-h)
-      sed -n '2,20p' "$0"
+      awk '
+        NR == 1 { next }
+        /^#/ { sub(/^# ?/, ""); print; next }
+        { exit }
+      ' "$0"
       exit 0
       ;;
     *)
@@ -50,7 +54,44 @@ for arg in "$@"; do
 done
 
 version_for() {
-  ruby -ryaml -e 'puts YAML.load_file(ARGV.fetch(0)).fetch("version")' "$1/pubspec.yaml"
+  pubspec_value "$1/pubspec.yaml" version
+}
+
+pubspec_name_for() {
+  pubspec_value "$1/pubspec.yaml" name
+}
+
+pubspec_value() {
+  local pubspec="$1" key="$2"
+  awk -v key="$key" '
+    $0 ~ "^[[:space:]]*" key ":" {
+      value = $0
+      sub("^[[:space:]]*" key ":[[:space:]]*", "", value)
+      sub("[[:space:]]*(#.*)?$", "", value)
+      gsub(/^["'\''"]|["'\''"]$/, "", value)
+      print value
+      found = 1
+      exit
+    }
+    END { if (!found) exit 1 }
+  ' "$pubspec"
+}
+
+validate_package_list() {
+  local spec pkg dir actual
+  for spec in "${PACKAGES[@]}"; do
+    pkg="${spec%%:*}"
+    dir="${spec#*:}"
+    if [[ ! -f "$dir/pubspec.yaml" ]]; then
+      echo "::error:: Missing package pubspec: $dir/pubspec.yaml" >&2
+      return 1
+    fi
+    actual="$(pubspec_name_for "$dir")"
+    if [[ "$actual" != "$pkg" ]]; then
+      echo "::error:: Release list says $pkg for $dir, but pubspec name is $actual" >&2
+      return 1
+    fi
+  done
 }
 
 # 0 if $version is already published for $package on pub.dev, 1 otherwise.
@@ -78,10 +119,12 @@ wait_for_pub() {
 }
 
 echo "==> Resolving workspace"
-$DART pub get >/dev/null
+"${DART[@]}" pub get >/dev/null
 
 echo "==> Static analysis"
-$DART analyze --fatal-infos
+"${DART[@]}" analyze --fatal-infos
+
+validate_package_list
 
 echo
 echo "Release plan:"
@@ -104,7 +147,7 @@ if [[ "$PUBLISH" -eq 0 ]]; then
       continue
     fi
     echo "--- dry-run $pkg $ver ---"
-    ( cd "$dir" && $DART pub publish --dry-run )
+    ( cd "$dir" && "${DART[@]}" pub publish --dry-run )
   done
   echo
   echo "Dry run complete. Re-run with --publish to release."
@@ -126,7 +169,7 @@ for spec in "${PACKAGES[@]}"; do
   fi
 
   echo "==> Publishing $pkg $ver"
-  ( cd "$dir" && $DART pub publish --force )
+  ( cd "$dir" && "${DART[@]}" pub publish --force )
 
   # Later packages depend on this one (^1.0.0, hosted), so it must resolve
   # before we publish them.

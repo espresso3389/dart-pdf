@@ -220,8 +220,12 @@ jobs:
       - name: Package DMG (unsigned)
         working-directory: app
         run: |
+          rm -rf build/dmg-root
+          mkdir -p build/dmg-root
+          cp -R "build/macos/Build/Products/Release/DartPDF.app" build/dmg-root/
+          ln -s /Applications build/dmg-root/Applications
           hdiutil create -volname "DartPDF" \
-            -srcfolder "build/macos/Build/Products/Release/DartPDF.app" \
+            -srcfolder build/dmg-root \
             -ov -format UDZO dartpdf-macos.dmg
       - uses: actions/upload-artifact@v7
         with:

@@ -208,6 +208,12 @@ void main() {
       ]) {
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
       }
+      expect(
+          find.descendant(
+              of: find.byKey(const ValueKey('pdf-shell-panels')),
+              matching: find
+                  .byKey(const ValueKey('pdf-shell-search-results-toggle'))),
+          findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('pdf-shell-view-options')),
           kind: PointerDeviceKind.mouse);
       await tester.pumpAndSettle();

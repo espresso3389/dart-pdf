@@ -2840,8 +2840,9 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   // fingers on screen (spilling into the zoom window's translation at the
   // scroll extents, so the document's ends stay reachable while zoomed),
   // horizontal deltas pan the zoom window, and pinch zooms around the
-  // gesture's focal point. Lifting off hands the tracked velocity to the
-  // scroll position's ballistic simulation, so flings feel stock.
+  // gesture's focal point. Lifting off feeds vertical velocity back through
+  // the same direct pan path as live scrolling; the list's ScrollPhysics may
+  // be disabled while editing, but trackpad momentum should still continue.
 
   void _onTrackpadPanZoomStart(PointerPanZoomStartEvent event) {
     _panFlinger.stop();
@@ -2915,13 +2916,13 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     if (zoomed != _zoomed) setState(() => _zoomed = zoomed);
     // a pinch's lift-off carries no momentum anywhere
     if (_trackpadIntent != _TrackpadIntent.scroll) return;
-    // hand leftover momentum to the scroll physics (same sign convention
-    // as a drag: content follows the fingers)
+    // Continue vertical momentum through the same direct path used during
+    // the gesture. `goBallistic` is tempting here, but it goes through the
+    // list's ScrollPhysics; with an edit tool armed those physics are
+    // deliberately NeverScrollable, so a real trackpad fling stops as if it
+    // had hit an edge.
     if (_scroll.hasClients && velocity.dy.abs() > kMinFlingVelocity) {
-      final position = _scroll.position;
-      if (position is ScrollPositionWithSingleContext) {
-        position.goBallistic(-velocity.dy / scale);
-      }
+      _flingViewport(Velocity(pixelsPerSecond: Offset(0, velocity.dy / scale)));
     }
     // horizontal momentum continues in the zoom window's translation,
     // with the same friction InteractiveViewer uses for its flings

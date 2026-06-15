@@ -847,36 +847,6 @@ class PdfShellViewOptionsButton extends StatelessWidget {
   }
 }
 
-/// A compact header toggle for one of the side panels.
-class PdfShellToggleButton extends StatelessWidget {
-  const PdfShellToggleButton({
-    super.key,
-    required this.icon,
-    required this.tooltip,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      visualDensity: VisualDensity.compact,
-      icon: Icon(icon),
-      tooltip: tooltip,
-      isSelected: selected,
-      onPressed: () {
-        onPressed();
-        _maybeCloseShellControls(context);
-      },
-    );
-  }
-}
-
 /// One item in the shell's grouped panel switch.
 class PdfShellPanelItem {
   const PdfShellPanelItem({

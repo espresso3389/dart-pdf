@@ -544,6 +544,44 @@ void main() {
     expect(scrollable.position.pixels, greaterThan(atLiftOff + 100));
   });
 
+  testWidgets('trackpad fling keeps scrolling with an edit tool armed',
+      (tester) async {
+    final editing = PdfEditingController(buildMultiPagePdf(5));
+    addTearDown(editing.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ListenableBuilder(
+          listenable: editing,
+          builder: (_, __) => PdfViewer(
+            initialFit: PdfViewerFit.width,
+            document: editing.document,
+            editing: editing,
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+    editing.tool = PdfEditTool.ink;
+    await tester.pumpAndSettle();
+
+    final scrollable =
+        tester.state<ScrollableState>(find.byType(Scrollable).first);
+    final gesture = await tester.createGesture(
+        kind: PointerDeviceKind.trackpad, pointer: 32);
+    await gesture.panZoomStart(const Offset(400, 300));
+    for (var i = 1; i <= 6; i++) {
+      await gesture.panZoomUpdate(const Offset(400, 300),
+          pan: Offset(0, -50.0 * i), timeStamp: Duration(milliseconds: 16 * i));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await gesture.panZoomEnd(timeStamp: const Duration(milliseconds: 112));
+    await tester.pump();
+    final atLiftOff = scrollable.position.pixels;
+
+    await tester.pumpAndSettle(const Duration(milliseconds: 100));
+    expect(scrollable.position.pixels, greaterThan(atLiftOff + 100));
+  });
+
   testWidgets('trackpad pinch zooms without scrolling the document',
       (tester) async {
     final controller = await pumpViewer(tester);

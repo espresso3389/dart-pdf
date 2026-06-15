@@ -648,23 +648,16 @@ class _PdfEditorViewState extends State<PdfEditorView> {
               );
             },
           );
-          final searchResultsControl = PdfShellToggleButton(
-            key: const ValueKey('pdf-shell-search-results-toggle'),
-            icon: Icons.manage_search,
-            tooltip: 'Search results',
-            selected: prefs.showSearchResultsPanel,
-            onPressed: () =>
-                prefs.showSearchResultsPanel = !prefs.showSearchResultsPanel,
-          );
-          final searchResultsControlItem = PdfShellControlItem(
-            key: const ValueKey('pdf-shell-search-results-toggle'),
-            icon: Icons.manage_search,
-            label: 'Results',
-            selected: prefs.showSearchResultsPanel,
-            onPressed: () =>
-                prefs.showSearchResultsPanel = !prefs.showSearchResultsPanel,
-          );
           final panelItems = [
+            if (features.searchResultsPanel)
+              PdfShellPanelItem(
+                key: const ValueKey('pdf-shell-search-results-toggle'),
+                icon: Icons.manage_search,
+                tooltip: 'Search results',
+                selected: prefs.showSearchResultsPanel,
+                onPressed: () => prefs.showSearchResultsPanel =
+                    !prefs.showSearchResultsPanel,
+              ),
             if (features.thumbnails)
               PdfShellPanelItem(
                 key: const ValueKey('pdf-shell-thumbnails-toggle'),
@@ -714,7 +707,6 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                   ],
                 ],
                 trailing: [
-                  if (features.searchResultsPanel) searchResultsControl,
                   if (features.viewOptions)
                     PdfShellViewOptionsButton(
                         preferences: prefs,
@@ -723,7 +715,10 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                         author: features.author,
                         authorName: session.author,
                         onAuthorPressed: _promptAuthor),
-                  PdfShellPanelSwitch(items: panelItems),
+                  PdfShellPanelSwitch(
+                    key: const ValueKey('pdf-shell-panels'),
+                    items: panelItems,
+                  ),
                   // Save sits in the header, not in the floating toolbar —
                   // ⌘S/Ctrl+S takes the same path.
                   if (widget.onSave != null && widget.showSaveButton)
@@ -739,7 +734,6 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                     ),
                 ],
                 compactControls: [
-                  if (features.searchResultsPanel) searchResultsControlItem,
                   if (features.viewOptions) viewOptionsControl,
                   for (final item in panelItems)
                     PdfShellControlItem(

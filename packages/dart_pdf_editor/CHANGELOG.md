@@ -2,6 +2,11 @@
 
 ## 1.1.0
 
+- Rotate pages from the thumbnail strip: a per-tile rotate-right button,
+  plus rotate-left/right actions in the multi-select bar.
+  `PdfEditingController.rotatePages`/`rotateSelectedPages` turn pages
+  clockwise (or counterclockwise) without shifting page indices, so the
+  page selection survives the edit.
 - Snapshot tool (`PdfEditTool.snapshot`, in the Edit toolbar): drag a
   region to capture it, Bluebeam-style. The captured region is rendered to
   a PNG handed to `PdfViewer.onSnapshot` (copy/save/share) AND kept on the

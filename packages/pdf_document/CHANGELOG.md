@@ -2,6 +2,9 @@
 
 ## 1.1.0
 
+- Page rotation: `PdfEditor.rotatePages(indices, degrees)` turns the named
+  pages clockwise by a multiple of 90° (negative for counterclockwise),
+  accumulating onto each page's current `/Rotate`.
 - Vector snapshots: `PdfEditor.captureVectorSnapshot` captures a page
   region as detached vector graphics (`PdfVectorSnapshot`) and
   `pasteVectorSnapshot` re-materializes it onto any page as a /Stamp

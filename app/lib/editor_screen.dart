@@ -379,8 +379,7 @@ class _EditorScreenState extends State<EditorScreen>
   /// Close all. Entries that would close nothing are disabled.
   Future<void> _showTabMenu(int index, Offset position) async {
     final tab = _tabs[index];
-    final overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final selected = await showMenu<_TabMenuAction>(
       context: context,
       position: RelativeRect.fromRect(
@@ -460,8 +459,7 @@ class _EditorScreenState extends State<EditorScreen>
   Future<void> _save(DocumentTab tab, {bool saveAs = false}) async {
     final bytes = tab.session?.bytes;
     if (bytes == null) return;
-    final inPlace =
-        !saveAs && tab.originPath != null && supportsInPlaceSave;
+    final inPlace = !saveAs && tab.originPath != null && supportsInPlaceSave;
     var result = inPlace
         ? await saveBytesToPath(bytes, tab.originPath!)
         : await saveBytesAs(context, bytes, tab.title);
@@ -539,6 +537,81 @@ class _EditorScreenState extends State<EditorScreen>
         duration: const Duration(seconds: 2),
       ));
   }
+
+  void _cycleTheme() {
+    _prefs.themeMode = switch (_prefs.themeMode) {
+      ThemeMode.system => ThemeMode.light,
+      ThemeMode.light => ThemeMode.dark,
+      ThemeMode.dark => ThemeMode.system,
+    };
+  }
+
+  String get _nextThemeLabel => switch (_prefs.themeMode) {
+        ThemeMode.system => 'Theme: system — switch to light',
+        ThemeMode.light => 'Theme: light — switch to dark',
+        ThemeMode.dark => 'Theme: dark — switch to system',
+      };
+
+  List<PopupMenuEntry<VoidCallback>> _appMenuItems(DocumentTab? tab) => [
+        PopupMenuItem(
+          value: _pickAndOpen,
+          child: const ListTile(
+            leading: Icon(Icons.folder_open),
+            title: Text('Open PDF in a new tab'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        const PopupMenuDivider(),
+        if (tab?.session != null)
+          PopupMenuItem(
+            value: () => _save(tab!, saveAs: true),
+            child: const ListTile(
+              leading: Icon(Icons.save_as_outlined),
+              title: Text('Save as…'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        if (tab?.session != null)
+          PopupMenuItem(
+            value: _compareWith,
+            child: const ListTile(
+              leading: Icon(Icons.compare_arrows),
+              title: Text('Compare with…'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        if (tab?.session != null && OnDeviceOcr.isSupported)
+          PopupMenuItem(
+            key: const ValueKey('menu-ocr'),
+            value: () => unawaited(_runOcr()),
+            child: ListTile(
+              leading: const Icon(Icons.document_scanner_outlined),
+              title: const Text('Add OCR text layer…'),
+              subtitle: Text(kIsWeb
+                  ? 'AI in-browser · selectable text over scans'
+                  : 'On-device · selectable text over scans'),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: _cycleTheme,
+          child: ListTile(
+            leading: const Icon(Icons.dark_mode),
+            title: Text(_nextThemeLabel),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        PopupMenuItem(
+          value: () =>
+              showAppSettings(context, prefs: _prefs, recents: _recents),
+          child: const ListTile(
+            leading: Icon(Icons.settings_outlined),
+            title: Text('Settings'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+      ];
 
   // --- build ---------------------------------------------------------------
 
@@ -673,84 +746,17 @@ class _EditorScreenState extends State<EditorScreen>
       IconButton(
         visualDensity: VisualDensity.compact,
         icon: Icon(_readOnly ? Icons.edit_off : Icons.edit),
-        tooltip: _readOnly ? 'Read-only — tap to edit' : 'Editing — tap for read-only',
+        tooltip: _readOnly
+            ? 'Read-only — tap to edit'
+            : 'Editing — tap for read-only',
         onPressed: () => setState(() => _readOnly = !_readOnly),
       ),
-      IconButton(
-        visualDensity: VisualDensity.compact,
-        icon: Icon(switch (_prefs.themeMode) {
-          ThemeMode.system => Icons.brightness_auto,
-          ThemeMode.light => Icons.light_mode,
-          ThemeMode.dark => Icons.dark_mode,
-        }),
-        tooltip: 'Theme',
-        onPressed: () => _prefs.themeMode = switch (_prefs.themeMode) {
-          ThemeMode.system => ThemeMode.light,
-          ThemeMode.light => ThemeMode.dark,
-          ThemeMode.dark => ThemeMode.system,
-        },
-      ),
-      IconButton(
-        visualDensity: VisualDensity.compact,
-        icon: const Icon(Icons.folder_open),
-        tooltip: 'Open PDF in a new tab',
-        onPressed: _pickAndOpen,
-      ),
-      if (tab?.session != null && OnDeviceOcr.isSupported)
-        IconButton(
-          key: const ValueKey('ocr-action'),
-          visualDensity: VisualDensity.compact,
-          icon: const Icon(Icons.document_scanner_outlined),
-          tooltip:
-              kIsWeb ? 'Add AI OCR text layer' : 'Add on-device OCR text layer',
-          onPressed: () => unawaited(_runOcr()),
-        ),
       PopupMenuButton<VoidCallback>(
-        icon: const Icon(Icons.more_vert),
-        tooltip: 'More',
+        key: const ValueKey('dartpdf-app-menu'),
+        icon: const Icon(Icons.apps),
+        tooltip: 'DartPDF menu',
         onSelected: (action) => action(),
-        itemBuilder: (context) => [
-          if (tab?.session != null)
-            PopupMenuItem(
-              value: () => _save(tab!, saveAs: true),
-              child: const ListTile(
-                leading: Icon(Icons.save_as_outlined),
-                title: Text('Save as…'),
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-          if (tab?.session != null)
-            PopupMenuItem(
-              value: _compareWith,
-              child: const ListTile(
-                leading: Icon(Icons.compare_arrows),
-                title: Text('Compare with…'),
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-          if (tab?.session != null && OnDeviceOcr.isSupported)
-            PopupMenuItem(
-              key: const ValueKey('menu-ocr'),
-              value: () => unawaited(_runOcr()),
-              child: ListTile(
-                leading: const Icon(Icons.document_scanner_outlined),
-                title: const Text('Add OCR text layer…'),
-                subtitle: Text(kIsWeb
-                    ? 'AI in-browser · selectable text over scans'
-                    : 'On-device · selectable text over scans'),
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-          PopupMenuItem(
-            value: () =>
-                showAppSettings(context, prefs: _prefs, recents: _recents),
-            child: const ListTile(
-              leading: Icon(Icons.settings_outlined),
-              title: Text('Settings'),
-              contentPadding: EdgeInsets.zero,
-            ),
-          ),
-        ],
+        itemBuilder: (context) => _appMenuItems(tab),
       ),
     ];
   }
@@ -810,7 +816,8 @@ class _EditorScreenState extends State<EditorScreen>
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
           fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-          color: selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
+          color:
+              selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant,
         ),
       );
       final session = tab.session;
@@ -839,7 +846,9 @@ class _EditorScreenState extends State<EditorScreen>
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 5),
         child: Material(
-          color: selected ? scheme.secondaryContainer : scheme.surfaceContainerHighest,
+          color: selected
+              ? scheme.secondaryContainer
+              : scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(8),
           child: InkWell(
             borderRadius: BorderRadius.circular(8),
@@ -859,7 +868,8 @@ class _EditorScreenState extends State<EditorScreen>
                     icon: const Icon(Icons.close, size: 16),
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                    constraints:
+                        const BoxConstraints(minWidth: 30, minHeight: 30),
                     tooltip: 'Close tab',
                     onPressed: () => _closeTab(index),
                   ),

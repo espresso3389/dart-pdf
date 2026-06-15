@@ -312,15 +312,17 @@ class _PdfReaderState extends State<PdfReader> {
                         preferences: prefs,
                         reflow: true,
                         pageColor: features.pageColorEditable),
-                  if (features.thumbnails)
-                    PdfShellToggleButton(
-                      key: const ValueKey('pdf-shell-thumbnails-toggle'),
-                      icon: Icons.grid_view,
-                      tooltip: 'Pages',
-                      selected: showThumbnails,
-                      onPressed: () =>
-                          prefs.showThumbnailSidebar = !showThumbnails,
-                    ),
+                  PdfShellPanelSwitch(items: [
+                    if (features.thumbnails)
+                      PdfShellPanelItem(
+                        key: const ValueKey('pdf-shell-thumbnails-toggle'),
+                        icon: Icons.grid_view,
+                        tooltip: 'Pages',
+                        selected: showThumbnails,
+                        onPressed: () =>
+                            prefs.showThumbnailSidebar = !showThumbnails,
+                      ),
+                  ]),
                 ],
               ),
             Expanded(

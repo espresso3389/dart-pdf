@@ -201,6 +201,84 @@ class _ViewerScreenState extends State<ViewerScreen> {
     }
   }
 
+  void _cycleTheme() {
+    _prefs.themeMode = switch (_prefs.themeMode) {
+      ThemeMode.system => ThemeMode.light,
+      ThemeMode.light => ThemeMode.dark,
+      ThemeMode.dark => ThemeMode.system,
+    };
+  }
+
+  String get _nextThemeLabel => switch (_prefs.themeMode) {
+        ThemeMode.system => 'Theme: system — switch to light',
+        ThemeMode.light => 'Theme: light — switch to dark',
+        ThemeMode.dark => 'Theme: dark — switch to system',
+      };
+
+  List<PopupMenuEntry<VoidCallback>> _appMenuItems(_DocumentTab? tab) => [
+        PopupMenuItem(
+          value: _pickFile,
+          child: const ListTile(
+            leading: Icon(Icons.folder_open),
+            title: Text('Open PDF in a new tab'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        PopupMenuItem(
+          value: _openDemo,
+          child: const ListTile(
+            leading: Icon(Icons.auto_awesome),
+            title: Text('Open the interactive demo'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: () => unawaited(_runOcr()),
+          enabled: tab?.session != null,
+          child: const ListTile(
+            leading: Icon(Icons.document_scanner_outlined),
+            title: Text('Add OCR text layer…'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        PopupMenuItem(
+          value: _compareWith,
+          enabled: tab?.session != null,
+          child: const ListTile(
+            leading: Icon(Icons.compare_arrows),
+            title: Text('Compare with another PDF…'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: _cycleTheme,
+          child: ListTile(
+            leading: const Icon(Icons.dark_mode),
+            title: Text(_nextThemeLabel),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: () => _openLink(_githubUrl),
+          child: const ListTile(
+            leading: Icon(Icons.code),
+            title: Text('View source on GitHub'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        PopupMenuItem(
+          value: () => _openLink(_pubDevUrl),
+          child: const ListTile(
+            leading: Icon(Icons.inventory_2_outlined),
+            title: Text('dart_pdf_editor on pub.dev'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+      ];
+
   void _toast(String message) {
     // Floating in the bottom-right corner on desktop, so toasts stay a
     // compact pill off to the side and never cover the chrome; a
@@ -650,80 +728,12 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 : 'Editing (PdfEditorView) — tap for read-only',
             onPressed: () => setState(() => _readOnly = !_readOnly),
           ),
-          ListenableBuilder(
-            listenable: _prefs,
-            builder: (context, _) => IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: Icon(switch (_prefs.themeMode) {
-                ThemeMode.system => Icons.brightness_auto,
-                ThemeMode.light => Icons.light_mode,
-                ThemeMode.dark => Icons.dark_mode,
-              }),
-              tooltip: switch (_prefs.themeMode) {
-                ThemeMode.system => 'Theme: system — tap for light',
-                ThemeMode.light => 'Theme: light — tap for dark',
-                ThemeMode.dark => 'Theme: dark — tap for system',
-              },
-              onPressed: () => _prefs.themeMode = switch (_prefs.themeMode) {
-                ThemeMode.system => ThemeMode.light,
-                ThemeMode.light => ThemeMode.dark,
-                ThemeMode.dark => ThemeMode.system,
-              },
-            ),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.auto_awesome),
-            tooltip: 'Open the interactive demo in a new tab',
-            onPressed: _openDemo,
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.compare_arrows),
-            tooltip: 'Compare with another PDF…',
-            onPressed: _compareWith,
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.folder_open),
-            tooltip: 'Open PDF in a new tab',
-            onPressed: _pickFile,
-          ),
-          // Compare + project links share one overflow slot so the action
-          // row stays inside the 800px test window (every standalone
-          // button would push it over).
           PopupMenuButton<VoidCallback>(
-            icon: const Icon(Icons.more_vert),
-            tooltip: 'More actions',
+            key: const ValueKey('dartpdf-app-menu'),
+            icon: const Icon(Icons.apps),
+            tooltip: 'DartPDF menu',
             onSelected: (action) => action(),
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: () => unawaited(_runOcr()),
-                enabled: tab?.session != null,
-                child: const ListTile(
-                  leading: Icon(Icons.document_scanner_outlined),
-                  title: Text('Add OCR text layer…'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-              const PopupMenuDivider(),
-              PopupMenuItem(
-                value: () => _openLink(_githubUrl),
-                child: const ListTile(
-                  leading: Icon(Icons.code),
-                  title: Text('View source on GitHub'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-              PopupMenuItem(
-                value: () => _openLink(_pubDevUrl),
-                child: const ListTile(
-                  leading: Icon(Icons.inventory_2_outlined),
-                  title: Text('dart_pdf_editor on pub.dev'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-            ],
+            itemBuilder: (context) => _appMenuItems(tab),
           ),
         ],
       ),
@@ -754,45 +764,48 @@ class _ViewerScreenState extends State<ViewerScreen> {
               : tab.error != null
                   ? Center(child: Text(tab.error!, textAlign: TextAlign.center))
                   : tab.isComparison
-                  ? PdfComparisonView(
-                      key: ValueKey(tab),
-                      before: tab.compareBefore!,
-                      after: tab.compareAfter!,
-                    )
-                  // the two drop-in widgets carry all the PDF chrome (search,
-                  // page number, panels, toolbar) — the app supplies the edit
-                  // session, its file handling, and the demo's app-side wiring
-                  : _readOnly
-                      ? PdfReader(
+                      ? PdfComparisonView(
                           key: ValueKey(tab),
-                          bytes: tab.session!.bytes,
-                          // a stable id per document so reopening it (across
-                          // app restarts) restores its scroll position and zoom
-                          documentId: tab.title,
-                          controller: tab.viewer,
-                          preferences: _prefs,
-                          rasterCache: _rasterCache,
-                          textCache: _textCache,
-                          onAction: _onAction,
-                          pageOverlayBuilder: tab.isDemo ? _demoOverlays : null,
+                          before: tab.compareBefore!,
+                          after: tab.compareAfter!,
                         )
-                      : PdfEditorView(
-                          key: ValueKey(tab),
-                          documentId: tab.title,
-                          controller: tab.session,
-                          viewerController: tab.viewer,
-                          rasterCache: _rasterCache,
-                          textCache: _textCache,
-                          onSave: (saved) => unawaited(_saveAs(saved)),
-                          onPickPdfToInsert: _pickPdfBytes,
-                          onExportPages: (bytes) => unawaited(_saveAs(bytes)),
-                          onAction: _onAction,
-                          pageOverlayBuilder: tab.isDemo ? _demoOverlays : null,
-                          annotationMenuBuilder: _annotationMenuActions,
-                          formImagePicker: _pickFormImage,
-                          imagePicker: _pickImage,
-                          onSnapshot: _saveSnapshot,
-                        ),
+                      // the two drop-in widgets carry all the PDF chrome (search,
+                      // page number, panels, toolbar) — the app supplies the edit
+                      // session, its file handling, and the demo's app-side wiring
+                      : _readOnly
+                          ? PdfReader(
+                              key: ValueKey(tab),
+                              bytes: tab.session!.bytes,
+                              // a stable id per document so reopening it (across
+                              // app restarts) restores its scroll position and zoom
+                              documentId: tab.title,
+                              controller: tab.viewer,
+                              preferences: _prefs,
+                              rasterCache: _rasterCache,
+                              textCache: _textCache,
+                              onAction: _onAction,
+                              pageOverlayBuilder:
+                                  tab.isDemo ? _demoOverlays : null,
+                            )
+                          : PdfEditorView(
+                              key: ValueKey(tab),
+                              documentId: tab.title,
+                              controller: tab.session,
+                              viewerController: tab.viewer,
+                              rasterCache: _rasterCache,
+                              textCache: _textCache,
+                              onSave: (saved) => unawaited(_saveAs(saved)),
+                              onPickPdfToInsert: _pickPdfBytes,
+                              onExportPages: (bytes) =>
+                                  unawaited(_saveAs(bytes)),
+                              onAction: _onAction,
+                              pageOverlayBuilder:
+                                  tab.isDemo ? _demoOverlays : null,
+                              annotationMenuBuilder: _annotationMenuActions,
+                              formImagePicker: _pickFormImage,
+                              imagePicker: _pickImage,
+                              onSnapshot: _saveSnapshot,
+                            ),
     );
   }
 
@@ -981,7 +994,8 @@ class _DocumentTab {
 
 /// The OCR service connection the credentials dialog returns.
 class _OcrSettings {
-  const _OcrSettings({required this.endpoint, required this.model, this.apiKey});
+  const _OcrSettings(
+      {required this.endpoint, required this.model, this.apiKey});
 
   final String endpoint;
   final String model;

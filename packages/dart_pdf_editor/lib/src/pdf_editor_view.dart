@@ -526,7 +526,8 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                 viewerController: _viewer,
                 bottomSheet: bottomSheet,
               );
-          PdfAnnotationPropertiesPanel properties({required bool bottomSheet}) =>
+          PdfAnnotationPropertiesPanel properties(
+                  {required bool bottomSheet}) =>
               PdfAnnotationPropertiesPanel(
                 key: ValueKey(
                     'pdf-shell-properties-${bottomSheet ? 'sheet' : 'docked'}'),
@@ -614,6 +615,11 @@ class _PdfEditorViewState extends State<PdfEditorView> {
             if (features.headerBar)
               PdfShellBar(
                 leading: [
+                  if (features.pageNumber)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: PdfPageNumberField(controller: _viewer),
+                    ),
                   if (features.search) ...[
                     PdfSearchField(
                       controller: _viewer,
@@ -634,63 +640,56 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                             !prefs.showSearchResultsPanel,
                       ),
                   ],
-                  if (features.pageNumber)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: PdfPageNumberField(controller: _viewer),
-                    ),
                 ],
                 trailing: [
-                  // Save sits in the header (near the host's Open), not in
-                  // the floating toolbar — ⌘S/Ctrl+S takes the same path.
-                  if (widget.onSave != null)
-                    IconButton(
-                      key: const ValueKey('pdf-shell-save'),
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.save_alt),
-                      tooltip: 'Save… (⌘S / Ctrl+S)',
-                      onPressed: _save,
-                    ),
-                  // insert/export of pages now live in the thumbnail
-                  // strip's footer (see thumbnails() above)
-                  if (features.author)
-                    IconButton(
-                      key: const ValueKey('pdf-shell-author'),
-                      visualDensity: VisualDensity.compact,
-                      icon: const Icon(Icons.person_outline),
-                      tooltip: 'Author name',
-                      onPressed: _promptAuthor,
-                    ),
                   if (features.viewOptions)
                     PdfShellViewOptionsButton(
                         preferences: prefs,
-                        pageColor: features.pageColorEditable),
-                  if (features.thumbnails)
-                    PdfShellToggleButton(
-                      key: const ValueKey('pdf-shell-thumbnails-toggle'),
-                      icon: Icons.grid_view,
-                      tooltip: 'Pages',
-                      selected: showThumbnails,
-                      onPressed: () =>
-                          prefs.showThumbnailSidebar = !showThumbnails,
-                    ),
-                  if (features.annotationSidebar)
-                    PdfShellToggleButton(
-                      key: const ValueKey('pdf-shell-annotations-toggle'),
-                      icon: Icons.list_alt,
-                      tooltip: 'Annotations',
-                      selected: prefs.showAnnotationSidebar,
-                      onPressed: () => prefs.showAnnotationSidebar =
-                          !prefs.showAnnotationSidebar,
-                    ),
-                  if (features.propertiesPanel)
-                    PdfShellToggleButton(
-                      key: const ValueKey('pdf-shell-properties-toggle'),
-                      icon: Icons.tune,
-                      tooltip: 'Properties',
-                      selected: prefs.showPropertiesPanel,
-                      onPressed: () => prefs.showPropertiesPanel =
-                          !prefs.showPropertiesPanel,
+                        pageColor: features.pageColorEditable,
+                        author: features.author,
+                        authorName: session.author,
+                        onAuthorPressed: _promptAuthor),
+                  PdfShellPanelSwitch(items: [
+                    if (features.thumbnails)
+                      PdfShellPanelItem(
+                        key: const ValueKey('pdf-shell-thumbnails-toggle'),
+                        icon: Icons.grid_view,
+                        tooltip: 'Pages',
+                        selected: showThumbnails,
+                        onPressed: () =>
+                            prefs.showThumbnailSidebar = !showThumbnails,
+                      ),
+                    if (features.annotationSidebar)
+                      PdfShellPanelItem(
+                        key: const ValueKey('pdf-shell-annotations-toggle'),
+                        icon: Icons.list_alt,
+                        tooltip: 'Annotations',
+                        selected: prefs.showAnnotationSidebar,
+                        onPressed: () => prefs.showAnnotationSidebar =
+                            !prefs.showAnnotationSidebar,
+                      ),
+                    if (features.propertiesPanel)
+                      PdfShellPanelItem(
+                        key: const ValueKey('pdf-shell-properties-toggle'),
+                        icon: Icons.tune,
+                        tooltip: 'Properties',
+                        selected: prefs.showPropertiesPanel,
+                        onPressed: () => prefs.showPropertiesPanel =
+                            !prefs.showPropertiesPanel,
+                      ),
+                  ]),
+                  // Save sits in the header, not in the floating toolbar —
+                  // ⌘S/Ctrl+S takes the same path.
+                  if (widget.onSave != null)
+                    FilledButton.icon(
+                      key: const ValueKey('pdf-shell-save'),
+                      style: FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                      icon: const Icon(Icons.save_alt, size: 18),
+                      label: const Text('Save'),
+                      onPressed: _save,
                     ),
                 ],
               ),

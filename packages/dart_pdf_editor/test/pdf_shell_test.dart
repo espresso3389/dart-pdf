@@ -181,8 +181,7 @@ void main() {
       // the menu is open (annotations item shows) but page color is gone
       expect(find.byKey(const ValueKey('pdf-shell-show-annotations')),
           findsOneWidget);
-      expect(
-          find.byKey(const ValueKey('pdf-shell-page-color')), findsNothing);
+      expect(find.byKey(const ValueKey('pdf-shell-page-color')), findsNothing);
     });
   });
 
@@ -195,7 +194,6 @@ void main() {
           find.byKey(const ValueKey('pdf-page-number-field')), findsOneWidget);
       for (final key in const [
         'pdf-shell-search-results-toggle',
-        'pdf-shell-author',
         'pdf-shell-view-options',
         'pdf-shell-thumbnails-toggle',
         'pdf-shell-annotations-toggle',
@@ -203,6 +201,10 @@ void main() {
       ]) {
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
       }
+      await tester.tap(find.byKey(const ValueKey('pdf-shell-view-options')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('pdf-shell-author')), findsOneWidget);
     });
 
     testWidgets('compact layout honors an explicit thumbnail preference',
@@ -238,6 +240,7 @@ void main() {
           find.byKey(const ValueKey('pdf-shell-properties-toggle')),
           kind: PointerDeviceKind.mouse);
       await tester.pump();
+      expect(find.byType(PdfAnnotationSidebar), findsOneWidget);
       expect(find.byType(PdfAnnotationPropertiesPanel), findsOneWidget);
     });
 
@@ -507,6 +510,29 @@ void main() {
       expect(viewer.pageColor, const Color(0xFFEEF7EE));
     });
 
+    testWidgets('view options show page color hex and current author',
+        (tester) async {
+      final prefs = PdfEditingPreferences();
+      addTearDown(prefs.dispose);
+      prefs.pageColor = const Color(0xFFEEF7EE);
+      final editing =
+          PdfEditingController(buildMultiPagePdf(1), preferences: prefs);
+      addTearDown(editing.dispose);
+      editing.author = 'A. Reviewer';
+
+      await pump(
+        tester,
+        PdfEditorView(controller: editing),
+      );
+
+      await tester.tap(find.byKey(const ValueKey('pdf-shell-view-options')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+
+      expect(find.text('#EEF7EE'), findsOneWidget);
+      expect(find.text('A. Reviewer'), findsOneWidget);
+    });
+
     testWidgets('the page-actions menu is hidden without insert/export',
         (tester) async {
       await pump(tester, PdfEditorView(bytes: buildMultiPagePdf(1)));
@@ -538,7 +564,8 @@ void main() {
       expect(editing.document.pageCount, 5);
     });
 
-    testWidgets('Export pages… hands the host the chosen range', (tester) async {
+    testWidgets('Export pages… hands the host the chosen range',
+        (tester) async {
       final editing = PdfEditingController(buildMultiPagePdf(4));
       addTearDown(editing.dispose);
       Uint8List? exported;
@@ -553,7 +580,8 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('pdf-thumbnail-page-actions')),
           kind: PointerDeviceKind.mouse);
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('pdf-thumbnail-export-pages')));
+      await tester
+          .tap(find.byKey(const ValueKey('pdf-thumbnail-export-pages')));
       await tester.pumpAndSettle();
       // default range covers the whole document; narrow it to pages 2–3
       await tester.enterText(
@@ -770,11 +798,12 @@ void main() {
       final sheet = find.byType(PdfThumbnailSidebar);
       final bar = find.byKey(const ValueKey('pdf-thumbnail-scrollbar-thumb'));
       expect(bar, findsOneWidget);
-      expect(tester.getRect(bar).right,
-          closeTo(tester.getRect(sheet).right, 4.0));
+      expect(
+          tester.getRect(bar).right, closeTo(tester.getRect(sheet).right, 4.0));
     });
 
-    testWidgets('compact: dragging the empty margin of the thumbnail sheet '
+    testWidgets(
+        'compact: dragging the empty margin of the thumbnail sheet '
         'scrolls it', (tester) async {
       // Regression: the tile column was a narrow centered SizedBox, so the
       // scroll viewport only covered the tiles — a drag on the wide sheet's
@@ -793,8 +822,9 @@ void main() {
 
       final sheet = find.byType(PdfThumbnailSidebar);
       final position = tester
-          .state<ScrollableState>(
-              find.descendant(of: sheet, matching: find.byType(Scrollable)).first)
+          .state<ScrollableState>(find
+              .descendant(of: sheet, matching: find.byType(Scrollable))
+              .first)
           .position;
       expect(position.pixels, 0);
       expect(position.maxScrollExtent, greaterThan(0),
@@ -813,7 +843,8 @@ void main() {
       await tester.pump();
     });
 
-    testWidgets('the editable thumbnail strip has no Tooltip OverlayPortal '
+    testWidgets(
+        'the editable thumbnail strip has no Tooltip OverlayPortal '
         'in its reorderable tiles', (tester) async {
       // Regression: the delete-button Tooltip was an OverlayPortal inside a
       // ReorderableListView item; reactivating the item during a layout
@@ -837,8 +868,8 @@ void main() {
       expect(find.byKey(const ValueKey('pdf-shell-thumbnails-sheet-close')),
           findsOneWidget);
       // the editable delete buttons are present...
-      expect(find.widgetWithIcon(IconButton, Icons.delete_outline),
-          findsWidgets);
+      expect(
+          find.widgetWithIcon(IconButton, Icons.delete_outline), findsWidgets);
       // ...but carry no Tooltip (no OverlayPortal in the reorderable items)
       expect(
           find.descendant(
@@ -890,17 +921,16 @@ void main() {
           IconTheme.of(tester.element(icon.first)).color;
     }
 
-    testWidgets('every header icon button shares one colour', (tester) async {
-      await pump(tester,
-          PdfEditorView(bytes: buildMultiPagePdf(2), onSave: (_) {}));
+    testWidgets('neutral header icon buttons share one colour', (tester) async {
+      await pump(
+          tester, PdfEditorView(bytes: buildMultiPagePdf(2), onSave: (_) {}));
       // the view-options PopupMenuButton used to render black87 while the
       // IconButtons rendered onSurfaceVariant
       final expected = iconColorOf(
-          tester, find.byKey(const ValueKey('pdf-shell-save')));
+          tester, find.byKey(const ValueKey('pdf-shell-view-options')));
       for (final key in const [
-        'pdf-shell-author',
-        'pdf-shell-view-options',
         'pdf-shell-annotations-toggle',
+        'pdf-shell-properties-toggle',
       ]) {
         expect(iconColorOf(tester, find.byKey(ValueKey(key))), expected,
             reason: '$key icon colour should match the others');

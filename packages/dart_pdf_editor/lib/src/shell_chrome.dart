@@ -16,7 +16,8 @@ const double pdfShellCompactWidth = 700;
 /// a docked 280px panel would crowd the page out, so the shells float the
 /// panels (and the thumbnail strip) up from the bottom instead.
 bool pdfShellUseBottomSheets(BoxConstraints constraints) =>
-    constraints.maxWidth.isFinite && constraints.maxWidth < pdfShellCompactWidth;
+    constraints.maxWidth.isFinite &&
+    constraints.maxWidth < pdfShellCompactWidth;
 
 /// Height of the bottom-sheet area, as a fraction of the content area, the
 /// first time a sheet opens. The user drags a sheet's handle to resize it
@@ -99,8 +100,8 @@ class _BottomSheetResizeScope extends InheritedWidget {
   /// Grows (negative dy) or shrinks (positive dy) the sheet stack.
   final void Function(double dy) resizeBy;
 
-  static _BottomSheetResizeScope? maybeOf(BuildContext context) => context
-      .dependOnInheritedWidgetOfExactType<_BottomSheetResizeScope>();
+  static _BottomSheetResizeScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_BottomSheetResizeScope>();
 
   @override
   bool updateShouldNotify(_BottomSheetResizeScope oldWidget) => false;
@@ -346,7 +347,7 @@ class PdfShellBar extends StatelessWidget {
   }
 }
 
-enum _ViewOption { annotations, formHighlight, reflow, pageColor }
+enum _ViewOption { annotations, formHighlight, reflow, pageColor, author }
 
 /// The "view options" popup both shells offer: display-only settings
 /// (annotation visibility, form-field highlight, paper color) that live
@@ -357,6 +358,9 @@ class PdfShellViewOptionsButton extends StatelessWidget {
     required this.preferences,
     this.reflow = false,
     this.pageColor = true,
+    this.author = false,
+    this.authorName,
+    this.onAuthorPressed,
   });
 
   final PdfEditingPreferences preferences;
@@ -366,6 +370,22 @@ class PdfShellViewOptionsButton extends StatelessWidget {
   /// color can't be changed here — for hosts that set [pageColor] from
   /// the document programmatically and lock it.
   final bool pageColor;
+
+  /// Whether the display menu includes the default annotation author.
+  /// The shell owns the prompt because the author affects new annotations,
+  /// not the rendered PDF page itself.
+  final bool author;
+
+  /// The current default annotation author, shown in the display menu.
+  final String? authorName;
+
+  /// Opens the host prompt for editing the default annotation author.
+  final VoidCallback? onAuthorPressed;
+
+  String _hex(Color color) {
+    final value = color.toARGB32() & 0x00ffffff;
+    return '#${value.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -394,6 +414,8 @@ class PdfShellViewOptionsButton extends StatelessWidget {
                   preferences.colorPickerFormat = format,
             );
             if (color != null) preferences.pageColor = color;
+          case _ViewOption.author:
+            onAuthorPressed?.call();
         }
       },
       itemBuilder: (context) => [
@@ -417,10 +439,39 @@ class PdfShellViewOptionsButton extends StatelessWidget {
             child: const Text('Reflow text'),
           ),
         if (pageColor)
-          const PopupMenuItem(
-            key: ValueKey('pdf-shell-page-color'),
+          PopupMenuItem(
+            key: const ValueKey('pdf-shell-page-color'),
             value: _ViewOption.pageColor,
-            child: Text('Page color…'),
+            child: ListTile(
+              leading: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: preferences.pageColor,
+                  border:
+                      Border.all(color: Theme.of(context).colorScheme.outline),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ),
+              title: const Text('Page color…'),
+              trailing: Text(_hex(preferences.pageColor)),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+        if (author)
+          PopupMenuItem(
+            key: const ValueKey('pdf-shell-author'),
+            value: _ViewOption.author,
+            child: ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('Default author…'),
+              subtitle: Text(
+                authorName == null || authorName!.trim().isEmpty
+                    ? 'Not set'
+                    : authorName!,
+              ),
+              contentPadding: EdgeInsets.zero,
+            ),
           ),
       ],
     );
@@ -450,6 +501,90 @@ class PdfShellToggleButton extends StatelessWidget {
       tooltip: tooltip,
       isSelected: selected,
       onPressed: onPressed,
+    );
+  }
+}
+
+/// One item in the shell's grouped panel switch.
+class PdfShellPanelItem {
+  const PdfShellPanelItem({
+    required this.key,
+    required this.icon,
+    required this.tooltip,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final Key key;
+  final IconData icon;
+  final String tooltip;
+  final bool selected;
+  final VoidCallback onPressed;
+}
+
+/// The Pages / Annotations / Properties switch from the shell header.
+///
+/// It is still built from [IconButton]s so callers and tests can keep
+/// addressing each button by key, but the border makes the three loose
+/// toggles read as one "Panels" control.
+class PdfShellPanelSwitch extends StatelessWidget {
+  const PdfShellPanelSwitch({super.key, required this.items});
+
+  final List<PdfShellPanelItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (items.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(left: 4, right: 6),
+            child: Text(
+              'Panels',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    letterSpacing: 0.5,
+                  ),
+            ),
+          ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainer,
+            border: Border.all(color: scheme.outlineVariant),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(2),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final item in items)
+                  IconButton(
+                    key: item.key,
+                    visualDensity: VisualDensity.compact,
+                    style: IconButton.styleFrom(
+                      backgroundColor:
+                          item.selected ? scheme.surface : Colors.transparent,
+                      foregroundColor: item.selected
+                          ? scheme.primary
+                          : scheme.onSurfaceVariant,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                    ),
+                    icon: Icon(item.icon),
+                    tooltip: item.tooltip,
+                    isSelected: item.selected,
+                    onPressed: item.onPressed,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ]),
     );
   }
 }

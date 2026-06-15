@@ -73,7 +73,45 @@ published on pub.dev under its directory name.
 | [`pdf_document`](packages/pdf_document) | [![pub package](https://img.shields.io/pub/v/pdf_document.svg)](https://pub.dev/packages/pdf_document) | Document semantics: page tree, annotations, AcroForm, digital signatures, and the incremental-save `PdfEditor`. |
 | [`pdf_graphics`](packages/pdf_graphics) | [![pub package](https://img.shields.io/pub/v/pdf_graphics.svg)](https://pub.dev/packages/pdf_graphics) | Content-stream interpreter, device interface, font engine, ICC color, text extraction. |
 | [`dart_pdf_editor`](packages/dart_pdf_editor) | [![pub package](https://img.shields.io/pub/v/dart_pdf_editor.svg)](https://pub.dev/packages/dart_pdf_editor) | Flutter viewer and editing UI: canvas device, `PdfViewer`, tools, panels, forms. |
+| [`pdf_ocr_ondevice`](packages/pdf_ocr_ondevice) | [![pub package](https://img.shields.io/pub/v/pdf_ocr_ondevice.svg)](https://pub.dev/packages/pdf_ocr_ondevice) | Optional on-device OCR engine for native Flutter apps; downloads a small PP-OCR model once and adds searchable text layers offline. |
+| [`pdf_ocr_vlm`](packages/pdf_ocr_vlm) | [![pub package](https://img.shields.io/pub/v/pdf_ocr_vlm.svg)](https://pub.dev/packages/pdf_ocr_vlm) | Optional HTTP OCR engine for web, mobile, and desktop; talks to dots.ocr/vLLM or any service returning text boxes. |
 | [`pdf_test_fixtures`](packages/pdf_test_fixtures) | [![pub package](https://img.shields.io/pub/v/pdf_test_fixtures.svg)](https://pub.dev/packages/pdf_test_fixtures) | Programmatic, structurally-correct PDF builders for tests. |
+
+## Quick Start
+
+For a Flutter app, add the editor package:
+
+```sh
+flutter pub add dart_pdf_editor
+```
+
+Then give the drop-in shell PDF bytes and bounded space:
+
+```dart
+import 'package:dart_pdf_editor/dart_pdf_editor.dart';
+
+PdfEditorView(
+  bytes: pdfBytes,
+  onSave: (bytes) => saveBytesSomewhere(bytes),
+)
+
+PdfReader(bytes: pdfBytes)
+```
+
+For OCR, add one engine package and call `PdfEditor.applyOcr` before opening
+or replacing the document in your viewer:
+
+```sh
+flutter pub add pdf_ocr_ondevice   # native offline OCR
+# or
+flutter pub add pdf_ocr_vlm        # HTTP OCR, including Flutter web
+```
+
+`pdf_ocr_ondevice` is the simplest native path: it downloads the default model
+once, caches it in app support storage, then runs offline. `pdf_ocr_vlm` is the
+simplest web/server path: point it at a CORS-enabled OCR service. Both write the
+same invisible text layer, so scanned pages become selectable, searchable, and
+copyable without changing how the PDF looks.
 
 ## Roadmap
 
@@ -184,6 +222,19 @@ JPX subsampling/PCRL-CPRL progressions.
 - Field administration (add, rename, retype, delete, flatten) is
   available both as an API and in the UI via drag-out creation and a
   right-click menu.
+
+### OCR
+
+- `PdfEditor.injectTextLayer` writes already-recognized `PdfOcrSpan`s as an
+  invisible PDF text layer. The original scan remains visually unchanged, but
+  selection, search, copy, and text extraction start working.
+- `PdfEditor.applyOcr(pageIndex, engine)` renders the page, calls a pluggable
+  `PdfOcrEngine`, maps raster boxes back through crop boxes and `/Rotate`, and
+  injects the layer for you.
+- `pdf_ocr_ondevice` supplies a native offline engine backed by ONNX Runtime
+  and a downloadable PP-OCR model. `pdf_ocr_vlm` supplies an HTTP engine for
+  dots.ocr/vLLM, cloud VLMs, or a small adapter around Tesseract/PaddleOCR.
+  Hosts can also implement `PdfOcrEngine` directly.
 
 ### Panels and navigation chrome
 

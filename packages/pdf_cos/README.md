@@ -52,3 +52,5 @@ final info = doc.trailer['Info'];
 | [`pdf_document`](https://pub.dev/packages/pdf_document) | pages, annotations, forms, signatures, editing |
 | [`pdf_graphics`](https://pub.dev/packages/pdf_graphics) | content interpreter, fonts, text extraction |
 | [`dart_pdf_editor`](https://pub.dev/packages/dart_pdf_editor) | Flutter viewer + editing UI |
+| [`pdf_ocr_ondevice`](https://pub.dev/packages/pdf_ocr_ondevice) | optional native offline OCR engine |
+| [`pdf_ocr_vlm`](https://pub.dev/packages/pdf_ocr_vlm) | optional HTTP/VLM OCR engine |

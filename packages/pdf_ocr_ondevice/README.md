@@ -34,30 +34,58 @@ binaries. **Not the web** (no local model store / native runtime): on the web,
 `PdfOcrModelManager.isSupported` is `false`; use `pdf_ocr_vlm` against an HTTP
 service there.
 
+## Install
+
+```sh
+flutter pub add dart_pdf_editor pdf_ocr_ondevice
+```
+
+No model files need to be bundled in your app. The default bundle downloads
+from the `ocr-models-v1` GitHub release on first use, verifies each file by
+SHA-256, and then runs from the device cache.
+
 ## Usage
 
 ```dart
+import 'dart:typed_data';
+
+import 'package:dart_pdf_editor/dart_pdf_editor.dart';
+import 'package:pdf_document/pdf_document.dart';
 import 'package:pdf_ocr_ondevice/pdf_ocr_ondevice.dart';
 
-final manager = PdfOcrModelManager();
-final model = PdfOcrModels.ppOcrV5Mobile;
+Future<Uint8List> addSearchableTextLayer(Uint8List bytes) async {
+  if (!PdfOcrModelManager.isSupported) return bytes; // web/fuchsia fallback
 
-// 1. Download the model once (cached afterwards).
-if (PdfOcrModelManager.isSupported && !await manager.isDownloaded(model)) {
-  await manager.download(model, onProgress: (p) {
-    print('Downloading ${p.fileName}: ${((p.fraction ?? 0) * 100).round()}%');
-  });
-}
+  final manager = PdfOcrModelManager();
+  final model = PdfOcrModels.ppOcrV5Mobile;
+  OnDeviceOcrEngine? engine;
+  try {
+    // 1. Download the model once (cached afterwards).
+    if (!await manager.isDownloaded(model)) {
+      await manager.download(model, onProgress: (p) {
+        final pct = ((p.fraction ?? 0) * 100).round();
+        print('Downloading ${p.fileName}: $pct%');
+      });
+    }
 
-// 2. Build an engine from the downloaded files and run it over a page.
-final engine = await OnDeviceOcrEngine.fromDownloadedModel(manager, model);
-final editor = PdfEditor(PdfDocument.open(bytes));
-for (var i = 0; i < editor.document.pageCount; i++) {
-  await editor.applyOcr(i, engine, pixelRatio: 2);
+    // 2. Build an engine from the downloaded files and run it over each page.
+    engine = await OnDeviceOcrEngine.fromDownloadedModel(manager, model);
+    final editor = PdfEditor(PdfDocument.open(bytes));
+    for (var page = 0; page < editor.document.pageCount; page++) {
+      await editor.applyOcr(page, engine, pixelRatio: 2);
+    }
+    return editor.save(); // selectable/searchable text layer added
+  } finally {
+    await engine?.dispose();
+    manager.close();
+  }
 }
-final result = editor.save(); // selectable/searchable text layer added
-await engine.dispose();
 ```
+
+Open the returned bytes, or replace the bytes in `PdfReader` /
+`PdfEditorView`, after the function returns. Long documents should run this
+from your app flow with progress and cancellation; the DartPDF app's
+`app/lib/ocr_native.dart` is the reference orchestration.
 
 ## The default model bundle
 
@@ -164,3 +192,8 @@ in raster pixels and the engine does the rest.
 ONNX Runtime is pulled in by the `onnxruntime` package; follow its platform
 notes (it bundles the runtime for mobile/desktop). No extra steps are needed
 for the Dart API.
+
+For web apps, use `pdf_ocr_vlm` or your own browser/JavaScript
+`PdfOcrEngine`. The product app demonstrates a browser-local bridge in
+`app/lib/ocr_web.dart`, but this package intentionally stays native because
+ONNX Runtime is FFI-backed.

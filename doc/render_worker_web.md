@@ -43,14 +43,16 @@ performance upgrade. Skip this whole document and everything still works.
 
 ## Opt in (host web app)
 
-1. **Build the worker** from your app root — one command, no hand-written entry:
+1. **Build the worker** from your app root — one command, no hand-written
+   entry. Run it after `flutter pub get`, from the same directory that has your
+   app's `pubspec.yaml` and `web/` folder:
 
    ```sh
    dart run dart_pdf_editor:build_web_worker
    ```
 
-   This generates the worker entry (under `.dart_tool/`, so it never clutters
-   your sources) and compiles it to `web/pdf_render_worker.dart.js`, which
+   This generates the worker entry under `.dart_tool/`, so it never clutters
+   your sources, and compiles it to `web/pdf_render_worker.dart.js`, which
    `flutter build web` and `flutter run` serve next to `index.html`.
 
 2. **Point the app at it** once, in `main()` (web only):
@@ -92,7 +94,7 @@ The backend is wired end to end. `render_worker_web.dart` (main-side worker) and
 priority queue and protocol, and the app is wired up:
 
 - `dart run dart_pdf_editor:build_web_worker` builds the worker; both
-  `app/lib/main.dart` and the example app set `pdfRenderWorkerScriptUrl` on
+  `app/lib/app.dart` and the example app set `pdfRenderWorkerScriptUrl` on
   web. The live web deploys (the demo at `dart-pdf-demo.web.app` and the app at
   `dartpdf-app.web.app`) build the worker and ship the `--wasm` renderer with
   COOP/COEP headers — see `deploy-demo-web.yml` and the firebase configs.

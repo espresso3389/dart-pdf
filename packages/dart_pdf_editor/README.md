@@ -14,6 +14,12 @@ Android, macOS, Windows, Linux, and the web.
 
 ![The example app: PdfEditorView showing the feature showcase document](https://raw.githubusercontent.com/ben-milanko/dart-pdf/main/doc/dart_pdf_editor_example.jpg)
 
+## Install
+
+```sh
+flutter pub add dart_pdf_editor
+```
+
 Two drop-in widgets carry the whole UI — give them bytes and bounded
 space, and everything in the screenshot above (search, page navigation,
 panels, tools, undo/redo, save) is wired up:
@@ -110,6 +116,10 @@ are byte prefixes of one buffer.
   images, and administer fields (add, rename, retype, delete, flatten).
   Fields are highlighted with a translucent wash by default
   (`PdfViewer.highlightFormFields`).
+- OCR seam: `PdfOcrEngine` plus `PdfEditor.applyOcr` rasterizes a page,
+  runs any recognizer you provide, and injects an invisible selectable text
+  layer. Use `pdf_ocr_ondevice` for native offline OCR, or `pdf_ocr_vlm` for
+  HTTP OCR services and Flutter web.
 - Panels: thumbnail sidebar with drag-reorder, annotation sidebar with
   search and multi-select, properties panel, and search results panel,
   all resizable and persisted.
@@ -159,12 +169,92 @@ toggle that swaps in `PdfReader`) plus the app-side concerns: file
 open/save dialogs, theme mode, and Flutter overlays pinned onto PDF
 pages. It runs on all six platforms.
 
+## OCR
+
+`dart_pdf_editor` owns the PDF side of OCR: it renders a page image,
+hands it to a `PdfOcrEngine`, and writes the returned text boxes back as
+invisible text. It deliberately does not bundle a recognizer in the core
+viewer package.
+
+For native offline OCR:
+
+```sh
+flutter pub add pdf_ocr_ondevice
+```
+
+```dart
+import 'dart:typed_data';
+
+import 'package:dart_pdf_editor/dart_pdf_editor.dart';
+import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_ocr_ondevice/pdf_ocr_ondevice.dart';
+
+Future<Uint8List> addOcrNative(Uint8List bytes) async {
+  if (!PdfOcrModelManager.isSupported) return bytes;
+
+  final manager = PdfOcrModelManager();
+  final model = PdfOcrModels.ppOcrV5Mobile;
+
+  if (!await manager.isDownloaded(model)) {
+    await manager.download(model);
+  }
+
+  final engine = await OnDeviceOcrEngine.fromDownloadedModel(manager, model);
+  try {
+    final editor = PdfEditor(PdfDocument.open(bytes));
+    for (var page = 0; page < editor.document.pageCount; page++) {
+      await editor.applyOcr(page, engine, pixelRatio: 2);
+    }
+    return editor.save();
+  } finally {
+    await engine.dispose();
+    manager.close();
+  }
+}
+```
+
+For web or server-backed OCR:
+
+```sh
+flutter pub add pdf_ocr_vlm
+```
+
+```dart
+import 'dart:typed_data';
+
+import 'package:dart_pdf_editor/dart_pdf_editor.dart';
+import 'package:pdf_document/pdf_document.dart';
+import 'package:pdf_ocr_vlm/pdf_ocr_vlm.dart';
+
+Future<Uint8List> addOcrViaHttp(Uint8List bytes) async {
+  final engine = VlmOcrEngine(
+    endpoint: Uri.parse('https://ocr.example.com/ocr'),
+    minConfidence: 0.3,
+  );
+  try {
+    final editor = PdfEditor(PdfDocument.open(bytes));
+    for (var page = 0; page < editor.document.pageCount; page++) {
+      await editor.applyOcr(page, engine, pixelRatio: 2.5);
+    }
+    return editor.save();
+  } finally {
+    engine.close();
+  }
+}
+```
+
+After saving, reopen or replace the document bytes in `PdfReader` /
+`PdfEditorView`. The layer is invisible by default, so the scan looks the
+same, but text selection, search, copy, and extraction work. Pass
+`visible: true` to `applyOcr` while debugging box alignment.
+
 ## Web rendering
 
 On the web the viewer renders on the main thread by default — nothing to
 configure. For heavy/CAD documents you can move page interpretation and
 image decode onto a **Web Worker** (the web counterpart of the native
-background isolate): build the worker bundle, then point the app at it.
+background isolate): build the worker bundle from your app root, then
+point the app at it.
 
 ```sh
 dart run dart_pdf_editor:build_web_worker   # writes web/pdf_render_worker.dart.js
@@ -181,10 +271,12 @@ void main() {
 
 `PdfReader`/`PdfEditorView` pick it up automatically, and if the script is
 missing it degrades to main-thread rendering — it's a pure opt-in upgrade.
-For multithreaded WebAssembly raster, build with `flutter build web --wasm`
-and serve the cross-origin-isolation headers (`Cross-Origin-Opener-Policy:
-same-origin`, `Cross-Origin-Embedder-Policy: require-corp`). Full setup, the
-dart2wasm-host notes, and the worker protocol are in
+You can commit `web/pdf_render_worker.dart.js` and rebuild it only when you
+upgrade `dart_pdf_editor`, or generate it in CI before `flutter build web`.
+The worker itself does not require COOP/COEP headers; only Flutter's
+multithreaded Wasm renderer (`flutter build web --wasm`) needs
+cross-origin isolation. Full setup, dart2wasm-host notes, and the worker
+protocol are in
 [doc/render_worker_web.md](https://github.com/ben-milanko/dart-pdf/blob/main/doc/render_worker_web.md).
 
 ## Under the hood

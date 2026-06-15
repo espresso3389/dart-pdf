@@ -14,6 +14,11 @@ This is the **product app**. The SDK's feature showcase lives separately in
   (desktop + web), recent files, or a launch argument.
 - The full editing UI from the SDK: annotations, ink, shapes, free text,
   stamps, forms, redaction, page management, search, text selection.
+- OCR for scanned PDFs: native builds use `pdf_ocr_ondevice` with a
+  downloadable PP-OCR model that runs offline after the first download; the web
+  build uses a browser-local Florence-2 bridge through Transformers.js/WebGPU
+  or WASM. OCR adds an invisible selectable/searchable text layer and opens the
+  result in a new tab.
 - Tabs, light/dark theme, read-only mode, document compare.
 - Dirty-state tracking with a save indicator; **Save** overwrites the original
   file in place (desktop), **Save as** / share / download elsewhere.
@@ -32,6 +37,18 @@ fvm flutter run -d macos      # or -d chrome, -d windows, -d linux, or a device
 
 Open a specific file on startup: `fvm flutter run -d macos path/to/file.pdf`
 (desktop), or use the in-app Open button anywhere.
+
+For web performance testing, build the optional page-render worker before
+running or building the web app:
+
+```sh
+cd app
+dart run dart_pdf_editor:build_web_worker
+fvm flutter run -d chrome
+```
+
+`lib/app.dart` points web builds at `web/pdf_render_worker.dart.js`. If the
+file is missing, rendering falls back to the browser main thread.
 
 ## Test & analyze
 
@@ -56,6 +73,7 @@ native OS-integration paths still want on-device confirmation:
 | Receive a shared PDF | ☐ | ☐ | — | — | — | — |
 | Drag-and-drop onto window | — | — | ☐ | ☐ | ☐ | ☐ |
 | Edit → Save overwrites the original | n/a* | n/a* | ☐ | ☐ | ☐ | n/a* |
+| OCR a scanned PDF | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | Reopen restores viewport | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 
 \* In-place save is desktop-only today; mobile/web fall back to share/download

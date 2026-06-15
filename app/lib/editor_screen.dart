@@ -696,6 +696,15 @@ class _EditorScreenState extends State<EditorScreen>
         tooltip: 'Open PDF in a new tab',
         onPressed: _pickAndOpen,
       ),
+      if (tab?.session != null && OnDeviceOcr.isSupported)
+        IconButton(
+          key: const ValueKey('ocr-action'),
+          visualDensity: VisualDensity.compact,
+          icon: const Icon(Icons.document_scanner_outlined),
+          tooltip:
+              kIsWeb ? 'Add AI OCR text layer' : 'Add on-device OCR text layer',
+          onPressed: () => unawaited(_runOcr()),
+        ),
       PopupMenuButton<VoidCallback>(
         icon: const Icon(Icons.more_vert),
         tooltip: 'More',
@@ -723,10 +732,12 @@ class _EditorScreenState extends State<EditorScreen>
             PopupMenuItem(
               key: const ValueKey('menu-ocr'),
               value: () => unawaited(_runOcr()),
-              child: const ListTile(
-                leading: Icon(Icons.document_scanner_outlined),
-                title: Text('Add OCR text layer…'),
-                subtitle: Text('On-device · selectable text over scans'),
+              child: ListTile(
+                leading: const Icon(Icons.document_scanner_outlined),
+                title: const Text('Add OCR text layer…'),
+                subtitle: Text(kIsWeb
+                    ? 'AI in-browser · selectable text over scans'
+                    : 'On-device · selectable text over scans'),
                 contentPadding: EdgeInsets.zero,
               ),
             ),

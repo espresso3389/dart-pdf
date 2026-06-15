@@ -538,31 +538,8 @@ class _EditorScreenState extends State<EditorScreen>
       ));
   }
 
-  void _cycleTheme() {
-    _prefs.themeMode = switch (_prefs.themeMode) {
-      ThemeMode.system => ThemeMode.light,
-      ThemeMode.light => ThemeMode.dark,
-      ThemeMode.dark => ThemeMode.system,
-    };
-  }
-
-  String get _nextThemeLabel => switch (_prefs.themeMode) {
-        ThemeMode.system => 'Theme: system — switch to light',
-        ThemeMode.light => 'Theme: light — switch to dark',
-        ThemeMode.dark => 'Theme: dark — switch to system',
-      };
-
   List<PopupMenuEntry<VoidCallback>> _appMenuItems(DocumentTab? tab) => [
-        PopupMenuItem(
-          value: _pickAndOpen,
-          child: const ListTile(
-            leading: Icon(Icons.folder_open),
-            title: Text('Open PDF in a new tab'),
-            contentPadding: EdgeInsets.zero,
-          ),
-        ),
-        const PopupMenuDivider(),
-        if (tab?.session != null)
+        if (tab?.session != null) ...[
           PopupMenuItem(
             value: () => _save(tab!, saveAs: true),
             child: const ListTile(
@@ -571,7 +548,6 @@ class _EditorScreenState extends State<EditorScreen>
               contentPadding: EdgeInsets.zero,
             ),
           ),
-        if (tab?.session != null)
           PopupMenuItem(
             value: _compareWith,
             child: const ListTile(
@@ -580,28 +556,27 @@ class _EditorScreenState extends State<EditorScreen>
               contentPadding: EdgeInsets.zero,
             ),
           ),
-        if (tab?.session != null && OnDeviceOcr.isSupported)
           PopupMenuItem(
-            key: const ValueKey('menu-ocr'),
-            value: () => unawaited(_runOcr()),
+            value: () => setState(() => _readOnly = !_readOnly),
             child: ListTile(
-              leading: const Icon(Icons.document_scanner_outlined),
-              title: const Text('Add OCR text layer…'),
-              subtitle: Text(kIsWeb
-                  ? 'AI in-browser · selectable text over scans'
-                  : 'On-device · selectable text over scans'),
+              leading: Icon(_readOnly ? Icons.edit : Icons.edit_off),
+              title: Text(
+                  _readOnly ? 'Switch to edit mode' : 'Switch to read-only'),
               contentPadding: EdgeInsets.zero,
             ),
           ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          value: _cycleTheme,
-          child: ListTile(
-            leading: const Icon(Icons.dark_mode),
-            title: Text(_nextThemeLabel),
-            contentPadding: EdgeInsets.zero,
-          ),
-        ),
+          if (OnDeviceOcr.isSupported)
+            PopupMenuItem(
+              key: const ValueKey('menu-ocr'),
+              value: () => unawaited(_runOcr()),
+              child: const ListTile(
+                leading: Icon(Icons.document_scanner_outlined),
+                title: Text('OCR…'),
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          const PopupMenuDivider(),
+        ],
         PopupMenuItem(
           value: () =>
               showAppSettings(context, prefs: _prefs, recents: _recents),
@@ -620,13 +595,9 @@ class _EditorScreenState extends State<EditorScreen>
     final tab = _active;
     return Scaffold(
       appBar: AppBar(
-        title: _buildTitle(tab),
-        bottom: _tabs.isEmpty
-            ? null
-            : PreferredSize(
-                preferredSize: const Size.fromHeight(_tabStripHeight),
-                child: _buildTabStrip(),
-              ),
+        leading: _buildAppMenu(tab),
+        title: _tabs.isEmpty ? const Text('DartPDF') : _buildTabStrip(),
+        titleSpacing: _tabs.isEmpty ? null : 8,
         actions: _buildActions(tab),
       ),
       body: DropTarget(
@@ -693,21 +664,6 @@ class _EditorScreenState extends State<EditorScreen>
     );
   }
 
-  Widget _buildTitle(DocumentTab? tab) {
-    if (tab == null || tab.title.isEmpty) return const Text('DartPDF');
-    final session = tab.session;
-    if (session == null) {
-      return Text(tab.title, overflow: TextOverflow.ellipsis);
-    }
-    return ListenableBuilder(
-      listenable: session,
-      builder: (context, _) => Text(
-        '${tab.isDirty ? '• ' : ''}${tab.title}',
-        overflow: TextOverflow.ellipsis,
-      ),
-    );
-  }
-
   List<Widget> _buildActions(DocumentTab? tab) {
     return [
       // Background OCR progress (when a job is running) — non-blocking, so the
@@ -733,33 +689,16 @@ class _EditorScreenState extends State<EditorScreen>
                   },
                 ),
         ),
-      if (tab?.session != null && !_readOnly)
-        ListenableBuilder(
-          listenable: tab!.session!,
-          builder: (context, _) => IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.save_outlined),
-            tooltip: 'Save (⌘S)',
-            onPressed: tab.isDirty ? () => _save(tab) : null,
-          ),
-        ),
-      IconButton(
-        visualDensity: VisualDensity.compact,
-        icon: Icon(_readOnly ? Icons.edit_off : Icons.edit),
-        tooltip: _readOnly
-            ? 'Read-only — tap to edit'
-            : 'Editing — tap for read-only',
-        onPressed: () => setState(() => _readOnly = !_readOnly),
-      ),
-      PopupMenuButton<VoidCallback>(
+    ];
+  }
+
+  Widget _buildAppMenu(DocumentTab? tab) => PopupMenuButton<VoidCallback>(
         key: const ValueKey('dartpdf-app-menu'),
         icon: const Icon(Icons.apps),
         tooltip: 'DartPDF menu',
         onSelected: (action) => action(),
         itemBuilder: (context) => _appMenuItems(tab),
-      ),
-    ];
-  }
+      );
 
   /// Moves the tab at [oldIndex] to [newIndex] (drag-reorder), keeping the
   /// currently active document active wherever it lands. [newIndex] is already
@@ -774,36 +713,75 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   Widget _buildTabStrip() {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surface,
-      child: SizedBox(
-        height: _tabStripHeight,
-        child: Row(
-          children: [
-            Expanded(
-              child: ReorderableListView.builder(
-                key: const ValueKey('tab-strip'),
-                scrollDirection: Axis.horizontal,
-                // The whole tab is the drag handle (see _buildTab); the stock
-                // trailing handles don't fit a horizontal tab strip.
-                buildDefaultDragHandles: false,
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                itemCount: _tabs.length,
-                onReorderItem: _reorderTabs,
-                itemBuilder: (context, i) => _buildTab(i),
+    return SizedBox(
+      height: _tabStripHeight,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const buttonWidth = 40.0;
+          final maxTabsWidth = (constraints.maxWidth - buttonWidth)
+              .clamp(0.0, double.infinity)
+              .toDouble();
+          final desiredTabsWidth = _estimatedTabStripWidth(context);
+          final tabsWidth =
+              desiredTabsWidth < maxTabsWidth ? desiredTabsWidth : maxTabsWidth;
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (tabsWidth > 0)
+                SizedBox(
+                  width: tabsWidth,
+                  child: ReorderableListView.builder(
+                    key: const ValueKey('tab-strip'),
+                    scrollDirection: Axis.horizontal,
+                    // The whole tab is the drag handle (see _buildTab); the stock
+                    // trailing handles don't fit a horizontal tab strip.
+                    buildDefaultDragHandles: false,
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    itemCount: _tabs.length,
+                    onReorderItem: _reorderTabs,
+                    itemBuilder: (context, i) => _buildTab(i),
+                  ),
+                ),
+              SizedBox(
+                width: buttonWidth,
+                height: _tabStripHeight,
+                child: IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints.tightFor(width: buttonWidth),
+                  icon: const Icon(Icons.add),
+                  tooltip: 'Open PDF in a new tab',
+                  onPressed: _pickAndOpen,
+                ),
               ),
-            ),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.add),
-              tooltip: 'Open PDF in a new tab',
-              onPressed: _pickAndOpen,
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
+  }
+
+  double _estimatedTabStripWidth(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
+    final direction = Directionality.of(context);
+    var width = 8.0; // Horizontal list padding.
+    for (final tab in _tabs) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: tab.title.isEmpty ? 'Untitled' : tab.title,
+          style: style,
+        ),
+        maxLines: 1,
+        textDirection: direction,
+      )..layout(maxWidth: 160);
+      final dirtyWidth = tab.isDirty ? 14.0 : 0.0;
+      width += 4 +
+          12 +
+          (painter.width + dirtyWidth).clamp(40.0, 160.0).toDouble() +
+          30;
+    }
+    return width;
   }
 
   Widget _buildTab(int index) {

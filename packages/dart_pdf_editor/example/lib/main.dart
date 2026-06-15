@@ -217,14 +217,6 @@ class _ViewerScreenState extends State<ViewerScreen> {
 
   List<PopupMenuEntry<VoidCallback>> _appMenuItems(_DocumentTab? tab) => [
         PopupMenuItem(
-          value: _pickFile,
-          child: const ListTile(
-            leading: Icon(Icons.folder_open),
-            title: Text('Open PDF in a new tab'),
-            contentPadding: EdgeInsets.zero,
-          ),
-        ),
-        PopupMenuItem(
           value: _openDemo,
           child: const ListTile(
             leading: Icon(Icons.auto_awesome),
@@ -238,7 +230,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
           enabled: tab?.session != null,
           child: const ListTile(
             leading: Icon(Icons.document_scanner_outlined),
-            title: Text('Add OCR text layer…'),
+            title: Text('OCR…'),
             contentPadding: EdgeInsets.zero,
           ),
         ),
@@ -248,6 +240,16 @@ class _ViewerScreenState extends State<ViewerScreen> {
           child: const ListTile(
             leading: Icon(Icons.compare_arrows),
             title: Text('Compare with another PDF…'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        PopupMenuItem(
+          value: () => setState(() => _readOnly = !_readOnly),
+          enabled: tab?.session != null,
+          child: ListTile(
+            leading: Icon(_readOnly ? Icons.edit : Icons.edit_off),
+            title:
+                Text(_readOnly ? 'Switch to edit mode' : 'Switch to read-only'),
             contentPadding: EdgeInsets.zero,
           ),
         ),
@@ -691,17 +693,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
     final tab = _active;
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-            tab == null || tab.title.isEmpty ? 'dart-pdf viewer' : tab.title,
-            overflow: TextOverflow.ellipsis),
-        // a browser-style tab strip under the title; hidden until the
-        // first document is open
-        bottom: _tabs.isEmpty
-            ? null
-            : PreferredSize(
-                preferredSize: const Size.fromHeight(_tabStripHeight),
-                child: _buildTabStrip(),
-              ),
+        leading: _buildAppMenu(tab),
+        title: _tabs.isEmpty ? const Text('dart-pdf viewer') : _buildTabStrip(),
+        titleSpacing: _tabs.isEmpty ? null : 8,
         actions: [
           if (tab?.viewer != null)
             ListenableBuilder(
@@ -718,23 +712,6 @@ class _ViewerScreenState extends State<ViewerScreen> {
                       },
                     ),
             ),
-          // every plain action is compact: the row overflows an 800px
-          // window (the widget-test viewport included) at full density
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: Icon(_readOnly ? Icons.edit_off : Icons.edit),
-            tooltip: _readOnly
-                ? 'Read-only (PdfReader) — tap to edit'
-                : 'Editing (PdfEditorView) — tap for read-only',
-            onPressed: () => setState(() => _readOnly = !_readOnly),
-          ),
-          PopupMenuButton<VoidCallback>(
-            key: const ValueKey('dartpdf-app-menu'),
-            icon: const Icon(Icons.apps),
-            tooltip: 'DartPDF menu',
-            onSelected: (action) => action(),
-            itemBuilder: (context) => _appMenuItems(tab),
-          ),
         ],
       ),
       // each tab is keyed so switching rebuilds against its own
@@ -809,31 +786,78 @@ class _ViewerScreenState extends State<ViewerScreen> {
     );
   }
 
-  /// The horizontally scrolling row of open-document tabs plus the
+  Widget _buildAppMenu(_DocumentTab? tab) => PopupMenuButton<VoidCallback>(
+        key: const ValueKey('dartpdf-app-menu'),
+        icon: const Icon(Icons.apps),
+        tooltip: 'DartPDF menu',
+        onSelected: (action) => action(),
+        itemBuilder: (context) => _appMenuItems(tab),
+      );
+
+  /// The horizontally scrolling row of open-document tabs plus the sticky
   /// new-tab button.
   Widget _buildTabStrip() {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surface,
-      child: SizedBox(
-        height: _tabStripHeight,
-        // the new-tab button is the last item in the scrolling row, so it
-        // always rides immediately after the final tab
-        child: ListView.builder(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          itemCount: _tabs.length + 1,
-          itemBuilder: (context, i) => i < _tabs.length
-              ? _buildTab(i)
-              : IconButton(
+    return SizedBox(
+      height: _tabStripHeight,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const buttonWidth = 40.0;
+          final maxTabsWidth = (constraints.maxWidth - buttonWidth)
+              .clamp(0.0, double.infinity)
+              .toDouble();
+          final desiredTabsWidth = _estimatedTabStripWidth(context);
+          final tabsWidth =
+              desiredTabsWidth < maxTabsWidth ? desiredTabsWidth : maxTabsWidth;
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (tabsWidth > 0)
+                SizedBox(
+                  width: tabsWidth,
+                  child: ListView.builder(
+                    key: const ValueKey('tab-strip'),
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    itemCount: _tabs.length,
+                    itemBuilder: (context, i) => _buildTab(i),
+                  ),
+                ),
+              SizedBox(
+                width: buttonWidth,
+                height: _tabStripHeight,
+                child: IconButton(
                   visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints.tightFor(width: buttonWidth),
                   icon: const Icon(Icons.add),
                   tooltip: 'Open PDF in a new tab',
                   onPressed: _pickFile,
                 ),
-        ),
+              ),
+            ],
+          );
+        },
       ),
     );
+  }
+
+  double _estimatedTabStripWidth(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
+    final direction = Directionality.of(context);
+    var width = 8.0; // Horizontal list padding.
+    for (final tab in _tabs) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: tab.title.isEmpty ? 'Untitled' : tab.title,
+          style: style,
+        ),
+        maxLines: 1,
+        textDirection: direction,
+      )..layout(maxWidth: 160);
+      width += 4 + 12 + painter.width.clamp(40.0, 160.0).toDouble() + 30;
+    }
+    return width;
   }
 
   Widget _buildTab(int index) {

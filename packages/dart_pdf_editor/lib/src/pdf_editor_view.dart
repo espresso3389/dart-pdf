@@ -14,6 +14,7 @@ import 'editing/editing_thumbnails.dart';
 import 'editing/editing_toolbar.dart';
 import 'editing/text_prompt.dart';
 import 'page_number_field.dart';
+import 'pdf_reflow_view.dart';
 import 'pdf_viewer.dart';
 import 'raster_cache.dart';
 import 'render_worker.dart';
@@ -32,6 +33,7 @@ class PdfEditorFeatures {
     this.author = true,
     this.authorEditable = true,
     this.viewOptions = true,
+    this.reflowView = true,
     this.pageColorEditable = true,
     this.thumbnails = true,
     this.pageEditing = true,
@@ -73,8 +75,14 @@ class PdfEditorFeatures {
   final bool authorEditable;
 
   /// The view-options menu: annotation visibility, form-field
-  /// highlight, and page (paper) color — display settings only.
+  /// highlight, text reflow, and page (paper) color — display settings only.
   final bool viewOptions;
+
+  /// Whether the view-options menu offers "Reflow text". Reflow is a
+  /// display-only reading view over the current document revision; while it
+  /// is active, canvas-bound editing panels and the editing toolbar are
+  /// hidden because there is no page canvas to manipulate.
+  final bool reflowView;
 
   /// Whether the view-options menu offers "Page color…". With it false
   /// the paper color can't be changed from the UI — for hosts that set
@@ -536,14 +544,19 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                 bottomSheet: bottomSheet,
               );
 
-          final showThumbnailsPanel = features.thumbnails && showThumbnails;
+          final reflowActive = features.reflowView && prefs.showReflowView;
+          final showThumbnailsPanel =
+              features.thumbnails && showThumbnails && !reflowActive;
           final showSearchPanel = features.search &&
               features.searchResultsPanel &&
-              prefs.showSearchResultsPanel;
-          final showAnnotationsPanel =
-              features.annotationSidebar && prefs.showAnnotationSidebar;
-          final showPropertiesPanel =
-              features.propertiesPanel && prefs.showPropertiesPanel;
+              prefs.showSearchResultsPanel &&
+              !reflowActive;
+          final showAnnotationsPanel = features.annotationSidebar &&
+              prefs.showAnnotationSidebar &&
+              !reflowActive;
+          final showPropertiesPanel = features.propertiesPanel &&
+              prefs.showPropertiesPanel &&
+              !reflowActive;
 
           final sheets = !useSheets
               ? const <Widget>[]
@@ -590,7 +603,8 @@ class _PdfEditorViewState extends State<PdfEditorView> {
           // below the viewer instead, where it takes its own layout space.
           // Above the breakpoint it stays a set of transparent floating
           // cards with the page showing through the gaps.
-          final showToolbar = features.toolbar && sheets.isEmpty;
+          final showToolbar =
+              features.toolbar && sheets.isEmpty && !reflowActive;
           final dockToolbar = showToolbar &&
               constraints.maxWidth < PdfEditingToolbar.mobileBreakpoint;
           final toolbar = !showToolbar
@@ -615,12 +629,12 @@ class _PdfEditorViewState extends State<PdfEditorView> {
             if (features.headerBar)
               PdfShellBar(
                 leading: [
-                  if (features.pageNumber)
+                  if (features.pageNumber && !reflowActive)
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       child: PdfPageNumberField(controller: _viewer),
                     ),
-                  if (features.search) ...[
+                  if (features.search && !reflowActive) ...[
                     PdfSearchField(
                       controller: _viewer,
                       searchController: _searchField,
@@ -645,6 +659,7 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                   if (features.viewOptions)
                     PdfShellViewOptionsButton(
                         preferences: prefs,
+                        reflow: features.reflowView,
                         pageColor: features.pageColorEditable,
                         author: features.author,
                         authorName: session.author,
@@ -708,27 +723,33 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                       searchResults(bottomSheet: false),
                     Expanded(
                       key: const ValueKey('pdf-shell-viewer'),
-                      child: PdfViewer(
-                        document: session.document,
-                        controller: _viewer,
-                        editing: session,
-                        onAction: widget.onAction,
-                        pageOverlayBuilder: widget.pageOverlayBuilder,
-                        annotationMenuBuilder: widget.annotationMenuBuilder,
-                        formImagePicker: widget.formImagePicker,
-                        imagePicker: widget.imagePicker,
-                        onSnapshot: widget.onSnapshot,
-                        editingTextPrompt: widget.textPrompt,
-                        initialFit: widget.initialFit,
-                        backgroundColor: widget.backgroundColor,
-                        pageColor: pageColor,
-                        showAnnotations: prefs.showAnnotations,
-                        highlightFormFields: prefs.highlightFormFields,
-                        renderWorker: _worker,
-                        rasterCache: widget.rasterCache,
-                        textCache: widget.textCache,
-                        documentId: _documentKey,
-                      ),
+                      child: reflowActive
+                          ? PdfReflowView(
+                              document: session.document,
+                              backgroundColor: widget.backgroundColor,
+                            )
+                          : PdfViewer(
+                              document: session.document,
+                              controller: _viewer,
+                              editing: session,
+                              onAction: widget.onAction,
+                              pageOverlayBuilder: widget.pageOverlayBuilder,
+                              annotationMenuBuilder:
+                                  widget.annotationMenuBuilder,
+                              formImagePicker: widget.formImagePicker,
+                              imagePicker: widget.imagePicker,
+                              onSnapshot: widget.onSnapshot,
+                              editingTextPrompt: widget.textPrompt,
+                              initialFit: widget.initialFit,
+                              backgroundColor: widget.backgroundColor,
+                              pageColor: pageColor,
+                              showAnnotations: prefs.showAnnotations,
+                              highlightFormFields: prefs.highlightFormFields,
+                              renderWorker: _worker,
+                              rasterCache: widget.rasterCache,
+                              textCache: widget.textCache,
+                              documentId: _documentKey,
+                            ),
                     ),
                     if (showAnnotationsPanel && !useSheets)
                       annotations(bottomSheet: false),

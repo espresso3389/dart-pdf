@@ -205,6 +205,51 @@ void main() {
           kind: PointerDeviceKind.mouse);
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('pdf-shell-author')), findsOneWidget);
+      expect(
+          find.byKey(const ValueKey('pdf-shell-reflow-view')), findsOneWidget);
+    });
+
+    testWidgets('view options can switch the editor to reflow text',
+        (tester) async {
+      final prefs = PdfEditingPreferences();
+      addTearDown(prefs.dispose);
+      await pump(
+          tester, PdfEditorView(bytes: buildClassicPdf(), preferences: prefs));
+      expect(find.byType(PdfViewer), findsOneWidget);
+      expect(find.byType(PdfReflowView), findsNothing);
+      expect(find.byType(PdfEditingToolbar), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('pdf-shell-view-options')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('pdf-shell-reflow-view')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+
+      expect(prefs.showReflowView, isTrue);
+      expect(find.byType(PdfViewer), findsNothing);
+      expect(find.byType(PdfReflowView), findsOneWidget);
+      expect(find.byType(PdfEditingToolbar), findsNothing);
+      expect(find.byKey(const ValueKey('pdf-search-field')), findsNothing);
+      expect(find.byKey(const ValueKey('pdf-page-number-field')), findsNothing);
+      expect(find.text('Hello, world!'), findsOneWidget);
+    });
+
+    testWidgets('reflowView: false hides editor reflow option', (tester) async {
+      final prefs = PdfEditingPreferences();
+      addTearDown(prefs.dispose);
+      await pump(
+          tester,
+          PdfEditorView(
+              bytes: buildClassicPdf(),
+              preferences: prefs,
+              features: const PdfEditorFeatures(reflowView: false)));
+      await tester.tap(find.byKey(const ValueKey('pdf-shell-view-options')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('pdf-shell-show-annotations')),
+          findsOneWidget);
+      expect(find.byKey(const ValueKey('pdf-shell-reflow-view')), findsNothing);
     });
 
     testWidgets('compact layout honors an explicit thumbnail preference',

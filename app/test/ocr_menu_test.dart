@@ -31,7 +31,7 @@ void main() {
   }
 
   testWidgets(
-      'the DartPDF menu offers "Add OCR text layer…" with a document open',
+      'the DartPDF menu offers OCR with a document open',
       (tester) async {
     await pumpWithDoc(tester);
 
@@ -39,7 +39,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('menu-ocr')), findsOneWidget);
-    expect(find.text('Add OCR text layer…'), findsOneWidget);
+    expect(find.text('OCR…'), findsOneWidget);
   });
 
   testWidgets('no OCR entry without a document open', (tester) async {

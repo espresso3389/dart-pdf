@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0
+
+- OCR text-layer injection is now used by the standalone app's downloadable
+  on-device OCR flow.
+- Version bump to keep the dart-pdf package suite aligned at 1.2.0.
+
 ## 1.1.0
 
 - Page rotation: `PdfEditor.rotatePages(indices, degrees)` turns the named

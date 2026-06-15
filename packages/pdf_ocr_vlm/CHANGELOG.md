@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.0
+
+- Version bump to align with `dart_pdf_editor` 1.2.0.
+
 ## 0.1.0
 
 - Initial release. `VlmOcrEngine` implements `dart_pdf_editor`'s

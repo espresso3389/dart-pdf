@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0
+
+- Downloadable on-device OCR package for the DartPDF app, with model-manager
+  integration and native-platform OCR engine wiring.
+- Version bump to align with `dart_pdf_editor` 1.2.0.
+
 ## 0.1.0
 
 - Initial release. On-device, downloadable OCR for `dart_pdf_editor`.

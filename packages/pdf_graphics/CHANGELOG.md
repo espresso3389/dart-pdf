@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0
+
+- Search and text-extraction plumbing used by the standalone app's OCR and
+  responsive viewer updates.
+- Version bump to keep the dart-pdf package suite aligned at 1.2.0.
+
 ## 1.1.0
 
 - Performance: a substantially faster interpreter — font-info caching,

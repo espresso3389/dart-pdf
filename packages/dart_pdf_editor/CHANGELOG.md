@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0
+
+- Responsive shell and mobile editing chrome improvements, including compact
+  tab switching, mobile header controls, bottom-sheet shell options, and
+  cleaner menu layout.
+- Standalone-app integration polish: browser-local OCR wiring, loading state
+  while opening PDFs, trackpad momentum when edit tools are active, Apple
+  Pencil double-tap eraser toggle, and clearer markup text-selection labels.
+- Web startup and branded splash/icon updates for the app and example.
+
 ## 1.1.0
 
 - Rotate pages from the thumbnail strip: a per-tile rotate-right button,

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1
+
+- Add a package example and shorten the pubspec description for pub.dev
+  scoring.
+
 ## 1.2.0
 
 - Downloadable on-device OCR package for the DartPDF app, with model-manager

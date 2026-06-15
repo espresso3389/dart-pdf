@@ -30,7 +30,7 @@ live under that project:
 
 | Site | `.web.app` | Custom domain | Serves |
 |---|---|---|---|
-| `dart-pdf-demo` | `dart-pdf-demo.web.app` | none | the SDK showcase demo (`packages/dart_pdf_editor/example`) |
+| `dart-pdf-demo` | `dart-pdf-demo.web.app` | none | the SDK demo (`packages/dart_pdf_editor/example`) |
 | `dartpdf` | `dartpdf.web.app` | `dart-pdf.com`, `www.dart-pdf.com` | this landing page (`site/`) |
 | `dartpdf-app` | `dartpdf-app.web.app` | `app.dart-pdf.com` | the DartPDF web app (`app/`, `flutter build web`) |
 

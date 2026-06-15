@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- Add a package example for pub.dev scoring.
+
 ## 1.2.0
 
 - Version bump to keep the dart-pdf package suite aligned at 1.2.0. No

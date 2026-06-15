@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- Shorten the package description so pub.dev awards the full pubspec score.
+
 ## 1.2.0
 
 - Responsive shell and mobile editing chrome improvements, including compact

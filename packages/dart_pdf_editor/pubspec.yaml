@@ -1,9 +1,8 @@
 name: dart_pdf_editor
 description: >-
-  Flutter PDF viewer and editor rendered natively in Dart — zooming viewer,
-  text selection and search, annotation authoring, form filling, signatures,
-  and page management. No platform plugins.
-version: 1.2.0
+  Flutter PDF viewer and editor for Dart: native rendering, text selection,
+  search, annotations, forms, signatures, page editing, and document comparison.
+version: 1.2.1
 repository: https://github.com/ben-milanko/dart-pdf/tree/main/packages/dart_pdf_editor
 issue_tracker: https://github.com/ben-milanko/dart-pdf/issues
 topics:

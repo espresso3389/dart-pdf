@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- Add a package example for pub.dev scoring.
+
 ## 1.2.0
 
 - Search and text-extraction plumbing used by the standalone app's OCR and

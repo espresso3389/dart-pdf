@@ -324,6 +324,31 @@ class _PdfReaderState extends State<PdfReader> {
                       ),
                   ]),
                 ],
+                compactControls: [
+                  if (features.viewOptions)
+                    PdfShellControlItem(
+                      key: const ValueKey('pdf-shell-view-options'),
+                      icon: Icons.display_settings_outlined,
+                      label: 'View',
+                      onPressed: () {
+                        showPdfShellViewOptionsSheet(
+                          context,
+                          preferences: prefs,
+                          reflow: true,
+                          pageColor: features.pageColorEditable,
+                        );
+                      },
+                    ),
+                  if (features.thumbnails)
+                    PdfShellControlItem(
+                      key: const ValueKey('pdf-shell-thumbnails-toggle'),
+                      icon: Icons.grid_view,
+                      label: 'Pages',
+                      selected: showThumbnails,
+                      onPressed: () =>
+                          prefs.showThumbnailSidebar = !showThumbnails,
+                    ),
+                ],
               ),
             Expanded(
               // keyed so a panel appearing never recreates the viewer

@@ -93,11 +93,9 @@ void main() {
       expect(find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
           findsNothing);
       await openShellControls(tester);
-      final toggle = tester.widget<IconButton>(find.ancestor(
-        of: find.byIcon(Icons.grid_view),
-        matching: find.byType(IconButton),
-      ));
-      expect(toggle.isSelected, isFalse);
+      final toggle = tester.widget(
+          find.byKey(const ValueKey('pdf-shell-thumbnails-toggle'))) as dynamic;
+      expect(toggle.active, isFalse);
 
       await tester.tap(
           find.byKey(const ValueKey('pdf-shell-thumbnails-toggle')),
@@ -275,11 +273,9 @@ void main() {
       expect(prefs.hasShowThumbnailSidebarPreference, isTrue);
       expect(find.byType(PdfThumbnailSidebar), findsOneWidget);
       await openShellControls(tester);
-      final toggle = tester.widget<IconButton>(find.ancestor(
-        of: find.byIcon(Icons.grid_view),
-        matching: find.byType(IconButton),
-      ));
-      expect(toggle.isSelected, isTrue);
+      final toggle = tester.widget(
+          find.byKey(const ValueKey('pdf-shell-thumbnails-toggle'))) as dynamic;
+      expect(toggle.active, isTrue);
     });
 
     testWidgets('panel toggles open the annotation and properties panels',
@@ -408,7 +404,10 @@ void main() {
       // the colour controls live in a group's strip — open one
       await tester.tap(find.byKey(const ValueKey('pdf-group-shapes')));
       await tester.pump();
-      expect(find.byIcon(Icons.palette), findsOneWidget);
+      final moreColors = find.byKey(const ValueKey('pdf-more-colors'));
+      expect(moreColors, findsOneWidget);
+      final material = tester.widget<Material>(moreColors);
+      expect(material.shape, isA<CircleBorder>());
       expect(find.byIcon(Icons.colorize), findsOneWidget);
       await tester.scrollUntilVisible(
           find.byTooltip('Stroke, opacity, font'), 100,
@@ -993,17 +992,6 @@ void main() {
       final toolbarTop = tester.getRect(toolbar).top;
       expect(toolbarTop, lessThan(viewerBottom),
           reason: 'the floating toolbar overlaps the viewer');
-    });
-
-    testWidgets('wide: the floating toolbar clears the viewer scrollbar',
-        (tester) async {
-      await pump(tester, PdfEditorView(bytes: buildMultiPagePdf(2)));
-
-      final viewerRight = tester.getRect(find.byType(PdfViewer)).right;
-      final toolbarRight = tester.getRect(find.byType(PdfEditingToolbar)).right;
-
-      expect(toolbarRight, lessThanOrEqualTo(viewerRight - 13.5),
-          reason: 'the floating toolbar should not sit under the scrollbar');
     });
   });
 

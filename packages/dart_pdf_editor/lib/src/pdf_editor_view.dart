@@ -18,7 +18,6 @@ import 'pdf_reflow_view.dart';
 import 'pdf_viewer.dart';
 import 'raster_cache.dart';
 import 'render_worker.dart';
-import 'scrollbar.dart';
 import 'search_panel.dart';
 import 'shell_chrome.dart';
 import 'theme.dart';
@@ -626,6 +625,66 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                   leading: widget.toolbarLeading,
                   trailing: widget.toolbarTrailing,
                 );
+          final viewOptionsControl = PdfShellControlItem(
+            key: const ValueKey('pdf-shell-view-options'),
+            icon: Icons.display_settings_outlined,
+            label: 'View',
+            onPressed: () {
+              showPdfShellViewOptionsSheet(
+                context,
+                preferences: prefs,
+                reflow: features.reflowView,
+                pageColor: features.pageColorEditable,
+                author: features.author,
+                authorName: session.author,
+                onAuthorPressed: _promptAuthor,
+              );
+            },
+          );
+          final searchResultsControl = PdfShellToggleButton(
+            key: const ValueKey('pdf-shell-search-results-toggle'),
+            icon: Icons.manage_search,
+            tooltip: 'Search results',
+            selected: prefs.showSearchResultsPanel,
+            onPressed: () =>
+                prefs.showSearchResultsPanel = !prefs.showSearchResultsPanel,
+          );
+          final searchResultsControlItem = PdfShellControlItem(
+            key: const ValueKey('pdf-shell-search-results-toggle'),
+            icon: Icons.manage_search,
+            label: 'Results',
+            selected: prefs.showSearchResultsPanel,
+            onPressed: () =>
+                prefs.showSearchResultsPanel = !prefs.showSearchResultsPanel,
+          );
+          final panelItems = [
+            if (features.thumbnails)
+              PdfShellPanelItem(
+                key: const ValueKey('pdf-shell-thumbnails-toggle'),
+                icon: Icons.grid_view,
+                tooltip: 'Pages',
+                selected: showThumbnails,
+                onPressed: () => prefs.showThumbnailSidebar = !showThumbnails,
+              ),
+            if (features.annotationSidebar)
+              PdfShellPanelItem(
+                key: const ValueKey('pdf-shell-annotations-toggle'),
+                icon: Icons.list_alt,
+                tooltip: 'Annotations',
+                selected: prefs.showAnnotationSidebar,
+                onPressed: () =>
+                    prefs.showAnnotationSidebar = !prefs.showAnnotationSidebar,
+              ),
+            if (features.propertiesPanel)
+              PdfShellPanelItem(
+                key: const ValueKey('pdf-shell-properties-toggle'),
+                icon: Icons.tune,
+                tooltip: 'Properties',
+                selected: prefs.showPropertiesPanel,
+                onPressed: () =>
+                    prefs.showPropertiesPanel = !prefs.showPropertiesPanel,
+              ),
+          ];
           return Column(children: [
             if (features.headerBar)
               PdfShellBar(
@@ -645,18 +704,10 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                       // the results panel here, keeping the header compact
                       showOptions: !features.searchResultsPanel,
                     ),
-                    if (features.searchResultsPanel)
-                      PdfShellToggleButton(
-                        key: const ValueKey('pdf-shell-search-results-toggle'),
-                        icon: Icons.manage_search,
-                        tooltip: 'Search results',
-                        selected: prefs.showSearchResultsPanel,
-                        onPressed: () => prefs.showSearchResultsPanel =
-                            !prefs.showSearchResultsPanel,
-                      ),
                   ],
                 ],
                 trailing: [
+                  if (features.searchResultsPanel) searchResultsControl,
                   if (features.viewOptions)
                     PdfShellViewOptionsButton(
                         preferences: prefs,
@@ -665,35 +716,7 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                         author: features.author,
                         authorName: session.author,
                         onAuthorPressed: _promptAuthor),
-                  PdfShellPanelSwitch(items: [
-                    if (features.thumbnails)
-                      PdfShellPanelItem(
-                        key: const ValueKey('pdf-shell-thumbnails-toggle'),
-                        icon: Icons.grid_view,
-                        tooltip: 'Pages',
-                        selected: showThumbnails,
-                        onPressed: () =>
-                            prefs.showThumbnailSidebar = !showThumbnails,
-                      ),
-                    if (features.annotationSidebar)
-                      PdfShellPanelItem(
-                        key: const ValueKey('pdf-shell-annotations-toggle'),
-                        icon: Icons.list_alt,
-                        tooltip: 'Annotations',
-                        selected: prefs.showAnnotationSidebar,
-                        onPressed: () => prefs.showAnnotationSidebar =
-                            !prefs.showAnnotationSidebar,
-                      ),
-                    if (features.propertiesPanel)
-                      PdfShellPanelItem(
-                        key: const ValueKey('pdf-shell-properties-toggle'),
-                        icon: Icons.tune,
-                        tooltip: 'Properties',
-                        selected: prefs.showPropertiesPanel,
-                        onPressed: () => prefs.showPropertiesPanel =
-                            !prefs.showPropertiesPanel,
-                      ),
-                  ]),
+                  PdfShellPanelSwitch(items: panelItems),
                   // Save sits in the header, not in the floating toolbar —
                   // ⌘S/Ctrl+S takes the same path.
                   if (widget.onSave != null)
@@ -705,6 +728,25 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                       ),
                       icon: const Icon(Icons.save_alt, size: 18),
                       label: const Text('Save'),
+                      onPressed: _save,
+                    ),
+                ],
+                compactControls: [
+                  if (features.searchResultsPanel) searchResultsControlItem,
+                  if (features.viewOptions) viewOptionsControl,
+                  for (final item in panelItems)
+                    PdfShellControlItem(
+                      key: item.key,
+                      icon: item.icon,
+                      label: item.tooltip,
+                      selected: item.selected,
+                      onPressed: item.onPressed,
+                    ),
+                  if (widget.onSave != null)
+                    PdfShellControlItem(
+                      key: const ValueKey('pdf-shell-save'),
+                      icon: Icons.save_alt,
+                      label: 'Save',
                       onPressed: _save,
                     ),
                 ],
@@ -761,10 +803,7 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                 if (toolbar != null && !dockToolbar)
                   Positioned(
                     left: 0,
-                    // The viewer scrollbar is an overlay control; keep the
-                    // floating toolbar clear of its hit zone so the transparent
-                    // toolbar gutter doesn't make the card look clipped.
-                    right: PdfScrollbar.hitExtent,
+                    right: 0,
                     bottom: 0,
                     child: toolbar,
                   ),

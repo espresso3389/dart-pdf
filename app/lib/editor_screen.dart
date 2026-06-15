@@ -694,7 +694,12 @@ class _EditorScreenState extends State<EditorScreen>
 
   Widget _buildAppMenu(DocumentTab? tab) => PopupMenuButton<VoidCallback>(
         key: const ValueKey('dartpdf-app-menu'),
-        icon: const Icon(Icons.apps),
+        icon: Image.asset(
+          'web/favicon.png',
+          width: 28,
+          height: 28,
+          semanticLabel: 'DartPDF',
+        ),
         tooltip: 'DartPDF menu',
         onSelected: (action) => action(),
         itemBuilder: (context) => _appMenuItems(tab),

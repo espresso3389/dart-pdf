@@ -295,26 +295,53 @@ bool pdfShellShowThumbnailSidebar(
       (!compact || preferences.hasShowThumbnailSidebarPreference);
 }
 
+/// A right-side shell control that collapses into the mobile Controls sheet.
+class PdfShellControlItem {
+  const PdfShellControlItem({
+    required this.key,
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.selected = false,
+    this.enabled = true,
+  });
+
+  final Key key;
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+  final bool selected;
+  final bool enabled;
+}
+
 /// The shells' slim header bar: a leading group (search, page number)
-/// and a trailing group (panel toggles), pushed apart when there is
-/// room and scrolling horizontally when there isn't.
+/// and a trailing group (panel toggles), pushed apart when there is room.
+/// On compact screens the trailing group becomes a single Controls button
+/// that opens a large-button bottom sheet.
 class PdfShellBar extends StatelessWidget {
-  const PdfShellBar({super.key, required this.leading, required this.trailing});
+  const PdfShellBar({
+    super.key,
+    required this.leading,
+    required this.trailing,
+    this.compactControls = const [],
+  });
 
   final List<Widget> leading;
   final List<Widget> trailing;
+  final List<PdfShellControlItem> compactControls;
 
   Future<void> _showControls(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final controls = compactControls;
     return showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (context) => _ShellControlsSheetScope(
         close: () => Navigator.of(context).maybePop(),
         child: SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -325,30 +352,32 @@ class PdfShellBar extends StatelessWidget {
                       child: Text('Controls',
                           style: Theme.of(context).textTheme.titleMedium),
                     ),
-                    IconButton(
-                      key: const ValueKey('pdf-shell-controls-close'),
-                      icon: const Icon(Icons.close),
-                      tooltip: 'Close',
-                      onPressed: () => Navigator.of(context).maybePop(),
-                    ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerLow,
-                    border: Border.all(color: scheme.outlineVariant),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: trailing,
-                    ),
-                  ),
+                const SizedBox(height: 14),
+                const _ShellSheetSectionLabel('Shell'),
+                const SizedBox(height: 10),
+                GridView.count(
+                  crossAxisCount: 4,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  childAspectRatio: 1.15,
+                  mainAxisSpacing: 6,
+                  crossAxisSpacing: 6,
+                  children: [
+                    for (final control in controls)
+                      _ShellControlTile(
+                        key: control.key,
+                        icon: control.icon,
+                        label: control.label,
+                        active: control.selected,
+                        enabled: control.enabled,
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          control.onPressed();
+                        },
+                      ),
+                  ],
                 ),
               ],
             ),
@@ -391,7 +420,7 @@ class PdfShellBar extends StatelessWidget {
                         ]),
                       ),
                     ),
-                    if (trailing.isNotEmpty)
+                    if (compactControls.isNotEmpty)
                       IconButton(
                         key: const ValueKey('pdf-shell-controls'),
                         visualDensity: VisualDensity.compact,
@@ -428,6 +457,97 @@ class PdfShellBar extends StatelessWidget {
   }
 }
 
+class _ShellSheetSectionLabel extends StatelessWidget {
+  const _ShellSheetSectionLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text.toUpperCase(),
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.5,
+          color: Theme.of(context)
+              .colorScheme
+              .onSurfaceVariant
+              .withValues(alpha: 0.72),
+        ),
+      );
+}
+
+class _ShellControlTile extends StatelessWidget {
+  const _ShellControlTile({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fg = !enabled
+        ? scheme.onSurfaceVariant.withValues(alpha: 0.55)
+        : active
+            ? scheme.primary
+            : scheme.onSurfaceVariant;
+    return Semantics(
+      button: true,
+      selected: active,
+      enabled: enabled,
+      label: label,
+      child: Material(
+        color: active
+            ? scheme.primary.withValues(alpha: 0.14)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: enabled ? onTap : null,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: active
+                    ? scheme.primary.withValues(alpha: 0.4)
+                    : Colors.transparent,
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 22, color: fg),
+                  const SizedBox(height: 6),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 11, color: fg),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ShellControlsSheetScope extends InheritedWidget {
   const _ShellControlsSheetScope({required this.close, required super.child});
 
@@ -447,6 +567,168 @@ void _maybeCloseShellControls(BuildContext context) {
 }
 
 enum _ViewOption { annotations, formHighlight, reflow, pageColor, author }
+
+Future<void> _selectViewOption(
+  BuildContext context,
+  _ViewOption option, {
+  required PdfEditingPreferences preferences,
+  required bool pageColor,
+  required VoidCallback? onAuthorPressed,
+}) async {
+  switch (option) {
+    case _ViewOption.annotations:
+      preferences.showAnnotations = !preferences.showAnnotations;
+    case _ViewOption.formHighlight:
+      preferences.highlightFormFields = !preferences.highlightFormFields;
+    case _ViewOption.reflow:
+      preferences.showReflowView = !preferences.showReflowView;
+    case _ViewOption.pageColor:
+      if (!pageColor) return;
+      final color = await showPdfColorPicker(
+        context,
+        initial: preferences.pageColor,
+        initialFormat: preferences.colorPickerFormat,
+        onFormatChanged: (format) => preferences.colorPickerFormat = format,
+      );
+      if (color != null) preferences.pageColor = color;
+    case _ViewOption.author:
+      onAuthorPressed?.call();
+  }
+}
+
+Future<void> showPdfShellViewOptionsSheet(
+  BuildContext context, {
+  required PdfEditingPreferences preferences,
+  bool reflow = false,
+  bool pageColor = true,
+  bool author = false,
+  String? authorName,
+  VoidCallback? onAuthorPressed,
+}) {
+  String hex(Color color) {
+    final value = color.toARGB32() & 0x00ffffff;
+    return '#${value.toRadixString(16).padLeft(6, '0').toUpperCase()}';
+  }
+
+  return showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setSheetState) => SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('View options',
+                        style: Theme.of(context).textTheme.titleMedium),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                ],
+              ),
+              SwitchListTile(
+                key: const ValueKey('pdf-shell-show-annotations'),
+                secondary: const Icon(Icons.comment_outlined),
+                title: const Text('Show annotations'),
+                value: preferences.showAnnotations,
+                onChanged: (_) async {
+                  await _selectViewOption(
+                    context,
+                    _ViewOption.annotations,
+                    preferences: preferences,
+                    pageColor: pageColor,
+                    onAuthorPressed: onAuthorPressed,
+                  );
+                  setSheetState(() {});
+                },
+              ),
+              SwitchListTile(
+                key: const ValueKey('pdf-shell-highlight-forms'),
+                secondary: const Icon(Icons.dynamic_form_outlined),
+                title: const Text('Highlight form fields'),
+                value: preferences.highlightFormFields,
+                onChanged: (_) async {
+                  await _selectViewOption(
+                    context,
+                    _ViewOption.formHighlight,
+                    preferences: preferences,
+                    pageColor: pageColor,
+                    onAuthorPressed: onAuthorPressed,
+                  );
+                  setSheetState(() {});
+                },
+              ),
+              if (reflow)
+                SwitchListTile(
+                  key: const ValueKey('pdf-shell-reflow-view'),
+                  secondary: const Icon(Icons.article_outlined),
+                  title: const Text('Reflow text'),
+                  value: preferences.showReflowView,
+                  onChanged: (_) async {
+                    await _selectViewOption(
+                      context,
+                      _ViewOption.reflow,
+                      preferences: preferences,
+                      pageColor: pageColor,
+                      onAuthorPressed: onAuthorPressed,
+                    );
+                    setSheetState(() {});
+                  },
+                ),
+              if (pageColor)
+                ListTile(
+                  key: const ValueKey('pdf-shell-page-color'),
+                  leading: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: preferences.pageColor,
+                      border: Border.all(
+                          color: Theme.of(context).colorScheme.outline),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                  title: const Text('Page color…'),
+                  trailing: Text(hex(preferences.pageColor)),
+                  onTap: () async {
+                    await _selectViewOption(
+                      context,
+                      _ViewOption.pageColor,
+                      preferences: preferences,
+                      pageColor: pageColor,
+                      onAuthorPressed: onAuthorPressed,
+                    );
+                    setSheetState(() {});
+                  },
+                ),
+              if (author)
+                ListTile(
+                  key: const ValueKey('pdf-shell-author'),
+                  leading: const Icon(Icons.person_outline),
+                  title: const Text('Default author…'),
+                  subtitle: Text(
+                    authorName == null || authorName.trim().isEmpty
+                        ? 'Not set'
+                        : authorName,
+                  ),
+                  onTap: onAuthorPressed,
+                ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
 
 /// The "view options" popup both shells offer: display-only settings
 /// (annotation visibility, form-field highlight, paper color) that live
@@ -497,25 +779,13 @@ class PdfShellViewOptionsButton extends StatelessWidget {
       iconColor: Theme.of(context).colorScheme.onSurfaceVariant,
       style: const ButtonStyle(visualDensity: VisualDensity.compact),
       onSelected: (option) async {
-        switch (option) {
-          case _ViewOption.annotations:
-            preferences.showAnnotations = !preferences.showAnnotations;
-          case _ViewOption.formHighlight:
-            preferences.highlightFormFields = !preferences.highlightFormFields;
-          case _ViewOption.reflow:
-            preferences.showReflowView = !preferences.showReflowView;
-          case _ViewOption.pageColor:
-            final color = await showPdfColorPicker(
-              context,
-              initial: preferences.pageColor,
-              initialFormat: preferences.colorPickerFormat,
-              onFormatChanged: (format) =>
-                  preferences.colorPickerFormat = format,
-            );
-            if (color != null) preferences.pageColor = color;
-          case _ViewOption.author:
-            onAuthorPressed?.call();
-        }
+        await _selectViewOption(
+          context,
+          option,
+          preferences: preferences,
+          pageColor: pageColor,
+          onAuthorPressed: onAuthorPressed,
+        );
       },
       itemBuilder: (context) => [
         CheckedPopupMenuItem(

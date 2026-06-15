@@ -11,6 +11,7 @@ import 'package:pdf_ocr_vlm/pdf_ocr_vlm.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'demo_brand_assets.dart';
 import 'demo_document.dart';
 import 'persistent_cache.dart';
 
@@ -788,7 +789,12 @@ class _ViewerScreenState extends State<ViewerScreen> {
 
   Widget _buildAppMenu(_DocumentTab? tab) => PopupMenuButton<VoidCallback>(
         key: const ValueKey('dartpdf-app-menu'),
-        icon: const Icon(Icons.apps),
+        icon: Image.memory(
+          demoLogoPng(),
+          width: 32,
+          height: 32,
+          semanticLabel: 'DartPDF',
+        ),
         tooltip: 'DartPDF menu',
         onSelected: (action) => action(),
         itemBuilder: (context) => _appMenuItems(tab),

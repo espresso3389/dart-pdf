@@ -2386,6 +2386,59 @@ an image across two sessions, empty-key no-op, loadFromDisk leaves a fresh
 in-session preview alone). GOTCHA: tests must capture page objects ONCE
 (like the viewer's `_pages`) — repeated `document.page(i)` calls can return
 fresh wrappers, defeating the preview cache's identity-based `isFresh`.
+
+Apple Pencil double-tap → eraser (Ben: "double tap on apple pencil to
+switch to eraser and back"): the pencil's hardware double-tap (and Pencil
+Pro squeeze) is an iOS `UIPencilInteraction` — Flutter exposes NO framework
+event for it, so the gesture is bridged natively. Three layers. (1) Core
+pairing: `PdfEditingController.togglePencilEraser()` (editing_controller.dart)
+arms `PdfEditTool.eraser` remembering whatever tool was active and restores
+it exactly on the next call (reader mode/null included, via `_eraserToggledOn`
++ `_toolBeforeEraserToggle`); a hand-armed eraser (never paired through this)
+falls back to ink so the gesture always returns to drawing. The `tool` setter
+clears `_eraserToggledOn` whenever it's armed to anything but the eraser, so
+manually switching tools breaks the pairing cleanly (the toggle re-remembers
+on its next eraser arm). Pure Dart, fully tested. (2) Channel binding:
+`PdfPencilInteraction` (editing_pencil.dart, exported) owns
+`MethodChannel('dart_pdf_editor/pencil')`; `attach(controller)` sets the
+method-call handler so an incoming `pencilDoubleTap` calls
+`togglePencilEraser` (or a custom `onDoubleTap`), `dispose()` clears it. Only
+one handler per channel, so one editor at a time (documented). The package
+stays plugin-free — it only LISTENS; the host's native runner provides the
+gesture. (3) Shell wiring: `PdfEditorView` attaches a `PdfPencilInteraction`
+to its session in `_openSession`/`_closeSession`, gated to
+`defaultTargetPlatform == iOS` (`PdfEditorFeatures.pencilEraserToggle`,
+default true) so the channel handler isn't claimed needlessly on other
+platforms — which also keeps it OUT of widget tests (flutter_test's default
+platform is android), so existing shell/eraser tests are untouched. Native:
+both iOS runners (`app/ios` + `example/ios`) are SCENE-BASED
+(`UIApplicationSceneManifest` + `FlutterSceneDelegate`), so the interaction
+is installed from `SceneDelegate.scene(_:willConnectTo:)` — NOT the
+AppDelegate. `AppDelegate.applicationDidBecomeActive` is never called under
+the scene lifecycle (the original PR wired it there and the gesture silently
+never reached Dart on device — that was the bug); the file-open channel was
+already correctly in the SceneDelegate for the same reason.
+`setupPencilInteraction()` registers a `UIPencilInteraction` on
+`window?.rootViewController`'s Flutter view (once `pencilInteraction == nil`)
+and the SceneDelegate's `pencilInteractionDidTap` forwards over the channel.
+The native side does NOT decide the action: it reads
+`UIPencilInteraction.preferredTapAction` (the user's Settings → Apple Pencil
+choice) and forwards it as `{'preferredAction': name}`, so the Dart policy
+honors it — `PdfPencilTapAction` {ignore, switchEraser, switchPrevious,
+showColorPalette, showInkAttributes, runSystemShortcut, unspecified};
+`togglesEraser` is true only for the tool-switch actions (+ unspecified, the
+out-of-the-box default / legacy action-less call), so "Off" (ignore) and the
+palette/shortcut choices are left alone rather than hijacked into an eraser
+toggle. A custom `onDoubleTap` (now `PdfPencilTapHandler` = receives the
+action) fully overrides the policy. Putting the decision in testable Dart
+(the Swift can't compile in the review env) is deliberate. Tests:
+editing_pencil_test.dart (14 — all toggle branches incl. reader-mode
+restore + hand-armed-eraser→ink + pairing-break; channel switchEraser/
+action-less toggles, ignore + showColorPalette no-op, custom handler gets the
+action + overrides, dispose clears the handler, unknown method ignored, plus
+PdfPencilTapAction.fromName/togglesEraser; the binding tests deliver the call
+via `defaultBinaryMessenger.handlePlatformMessage` the way iOS does). macOS/
+Android/web get no pencil interaction (the gesture doesn't exist there).
 Search options (Ben: "the search panel should allow for additional
 controls, match case, full word, etc."): match-case / whole-word / regex
 toggles for document search. pdf_graphics `PdfPageText.findAll` grew

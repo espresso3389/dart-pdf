@@ -422,6 +422,34 @@ void main() {
       expect(find.byKey(const ValueKey('pdf-shape-fill-none')), findsOneWidget);
     });
 
+    testWidgets('compact markup tools explain that text must be selected',
+        (tester) async {
+      tester.view.physicalSize = const Size(560, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await pump(tester, PdfEditorView(bytes: buildClassicPdf()));
+
+      await tester.tap(find.byKey(const ValueKey('pdf-tools-handle')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('pdf-group-tab-markup')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Select text to use markup'), findsOneWidget);
+    });
+
+    testWidgets('desktop markup tools explain that text must be selected',
+        (tester) async {
+      await pump(tester, PdfEditorView(bytes: buildClassicPdf()));
+
+      await tester.tap(find.byKey(const ValueKey('pdf-group-markup')),
+          kind: PointerDeviceKind.mouse);
+      await tester.pump();
+
+      expect(find.text('Select text to use markup'), findsOneWidget);
+    });
+
     testWidgets('toolbar buttons drive the owned session', (tester) async {
       await pump(tester, PdfEditorView(bytes: buildMultiPagePdf(1)));
       await tester.tap(find.byIcon(Icons.draw), kind: PointerDeviceKind.mouse);

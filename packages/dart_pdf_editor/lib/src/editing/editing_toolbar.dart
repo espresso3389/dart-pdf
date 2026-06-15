@@ -759,7 +759,12 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 7, 10, 7),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              _StripLabel(group.label),
+              _StripLabel(
+                group.label,
+                hint: group.id == 'markup' && !hasTextSelection
+                    ? 'Select text to use markup'
+                    : null,
+              ),
               ...toolButtons,
             ]),
           ),
@@ -1310,7 +1315,6 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
   Widget _buildMobile(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final tool = controller.tool;
-    final group = _groupForTool(tool);
     return Container(
       decoration: BoxDecoration(
         color: scheme.surface,
@@ -1341,21 +1345,13 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
               Icon(_activeToolIcon(tool), size: 22, color: scheme.primary),
               const SizedBox(width: 8),
               Flexible(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      _activeToolLabel(tool),
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 14),
-                    ),
-                    if (group != null)
-                      Text('${group.label} tool',
-                          style: TextStyle(
-                              fontSize: 11, color: scheme.onSurfaceFaintOr)),
-                  ],
+                child: Text(
+                  _activeToolLabel(tool),
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
                 ),
               ),
             ]),
@@ -1508,7 +1504,13 @@ class _PdfEditingToolbarState extends State<PdfEditingToolbar> {
                       ]),
                     ),
                     const SizedBox(height: 14),
-                    _SheetSectionLabel(group.label),
+                    _SheetSectionLabel(
+                      group.label,
+                      hint:
+                          group.id == 'markup' && !viewerController.hasSelection
+                              ? 'Select text to use markup'
+                              : null,
+                    ),
                     const SizedBox(height: 10),
                     _sheetToolGrid(sheetContext, group),
                     ..._sheetSettings(sheetContext, group),
@@ -1630,41 +1632,85 @@ class _MiniDivider extends StatelessWidget {
 
 /// The uppercase group/context label at the left of a contextual strip.
 class _StripLabel extends StatelessWidget {
-  const _StripLabel(this.text);
+  const _StripLabel(this.text, {this.hint});
 
   final String text;
+  final String? hint;
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(right: 8, left: 2),
-        child: Text(
-          text.toUpperCase(),
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.4,
-            color: Theme.of(context).colorScheme.onSurfaceFaintOr,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8, left: 2),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            text.toUpperCase(),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.4,
+              color: scheme.onSurfaceFaintOr,
+            ),
           ),
-        ),
-      );
+          if (hint != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                hint!,
+                style: TextStyle(
+                  fontSize: 9,
+                  letterSpacing: 0,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 /// The section label above the mobile sheet's tool grid.
 class _SheetSectionLabel extends StatelessWidget {
-  const _SheetSectionLabel(this.text);
+  const _SheetSectionLabel(this.text, {this.hint});
 
   final String text;
+  final String? hint;
 
   @override
-  Widget build(BuildContext context) => Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.5,
-          color: Theme.of(context).colorScheme.onSurfaceFaintOr,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          text.toUpperCase(),
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.5,
+            color: scheme.onSurfaceFaintOr,
+          ),
         ),
-      );
+        if (hint != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              hint!,
+              style: TextStyle(
+                fontSize: 10,
+                letterSpacing: 0,
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 /// A pill-shaped dock group chip (icon + label), or the mobile "Tools"

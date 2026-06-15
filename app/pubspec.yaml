@@ -56,3 +56,4 @@ flutter:
   uses-material-design: true
   assets:
     - web/favicon.png
+    - web/icons/Icon-512.png

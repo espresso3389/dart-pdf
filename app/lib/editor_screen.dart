@@ -22,8 +22,8 @@ import 'welcome_screen.dart';
 /// Height of the AppBar's browser-style tab strip.
 const double _tabStripHeight = 42;
 const double _mobileTabsBreakpoint = 700;
-const double _appMenuLeadingWidth = 68;
-const double _appMenuIconSize = 40;
+const double _appMenuLeadingWidth = 60;
+const double _appMenuIconSize = 24;
 
 /// The editor's main screen: a strip of open-document tabs over the drop-in
 /// [PdfEditorView] / [PdfReader] shells, which carry all the PDF chrome
@@ -718,7 +718,7 @@ class _EditorScreenState extends State<EditorScreen>
         key: const ValueKey('dartpdf-app-menu'),
         iconSize: _appMenuIconSize,
         icon: Image.asset(
-          'web/favicon.png',
+          'web/icons/Icon-512.png',
           width: _appMenuIconSize,
           height: _appMenuIconSize,
           semanticLabel: 'DartPDF',

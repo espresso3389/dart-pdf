@@ -2344,7 +2344,58 @@ an image across two sessions, empty-key no-op, loadFromDisk leaves a fresh
 in-session preview alone). GOTCHA: tests must capture page objects ONCE
 (like the viewer's `_pages`) — repeated `document.page(i)` calls can return
 fresh wrappers, defeating the preview cache's identity-based `isFresh`.
-
+Search options (Ben: "the search panel should allow for additional
+controls, match case, full word, etc."): match-case / whole-word / regex
+toggles for document search. pdf_graphics `PdfPageText.findAll` grew
+`wholeWord` (matches bounded by non-word chars — `_isWholeWord`/
+`_isWordChar`, [0-9A-Za-z_]) and `regex` (Dart RegExp; an invalid pattern
+yields no matches rather than throwing; zero-width hits skipped) beside
+the existing `caseSensitive`; the literal path still advances by needle
+length and the shared `_matchAt` builds quads from start/end so snippets/
+highlights are mode-agnostic. `PdfSearchOptions` (pdf_viewer.dart,
+exported — matchCase/wholeWord/regex, const default, copyWith + value ==)
+rides `PdfViewerController.searchOptions`; `search(query, {options})`
+captures the options and guards supersession on BOTH query and options;
+`setSearchOptions(opts)` re-runs the active search live (or just stores
+them with no query). `_searchAllPages` threads them into findAll; the
+extracted-text cache is option-independent so it's reused. UI
+(search_panel.dart): shared private `_SearchOptionsBar` — three toggle
+IconButtons (glyphs 'Aa'/'W'/'.*', tooltips, selected = secondaryContainer
+fill, keys 'pdf-search-match-case'/'-whole-word'/'-regex') driving
+setSearchOptions. `PdfSearchField` shows it inline (flag `showOptions`,
+default true); `PdfSearchResultsPanel` shows it in a header bar above the
+results (flag `showOptions`, default true) — the panel build now wraps the
+state body (`_body`, extracted) under the options bar + a Divider, scrollbar
+scoped to the body. Options persist across clearSearch (VS Code style).
+Shell wiring: the editor shell (`PdfEditorView`) passes
+`showOptions: !features.searchResultsPanel` to its header field — the
+results panel carries the controls, keeping the compact (≤600px) header
+from pushing the annotation/properties toggles off-screen (the
+pdf-shell-annotations-toggle tap-misses otherwise); the reader (no results
+panel) keeps the inline field toggles. Persistence (Ben follow-up: "the
+three toggles aren't persisted like sibling search prefs"):
+`PdfEditingPreferences.searchMatchCase/searchWholeWord/searchRegex` (three
+bool keys — NOT a `PdfSearchOptions` field, since editing_preferences sits
+below pdf_viewer and importing it would cycle pdf_viewer→editing_controller
+→editing_preferences→pdf_viewer); the now-stateful `_SearchOptionsBar`
+takes `preferences` and bridges: seeds the controller from the stored
+flags via `prefs.ready.then` in initState (after the frame, so
+setSearchOptions never fires during build; the prefs' _modified guard keeps
+a programmatic pre-load change winning) and write-throughs on every toggle.
+`PdfSearchField` gained a `preferences` param; both shells pass `prefs` to
+their field (and the panel already had it). Regex caveat documented (Ben:
+"runs synchronously with no ReDoS/timeout guard, undocumented"): dartdoc on
+`PdfSearchOptions.regex` and `findAll`'s regex param notes matching is
+synchronous on the calling thread with no timeout — fine for local desktop,
+a host exposing it to untrusted input should guard it (no isolate/timeout
+added; Ben called the desktop behaviour acceptable). Tests: pdf_graphics
+text_extraction_test (+2: whole-word boundaries, regex incl. invalid →
+empty); dart_pdf_editor search_navigation_test (+6: controller re-run per
+option, no-query store, field toggles re-search, showOptions:false hides
+them, panel toggles, persist+seed via tester.runAsync for the async prefs
+load — a bare `await prefs.ready` hangs under widget-test FakeAsync) and
+editing_preferences_test (+3 assertions: round-trip + defaults for the
+three flags).
 Rotate pages from the thumbnail strip (Ben: "add a tool to rotate
 selected pages from the thumbnail strip"): `PdfEditor.rotatePages(indices,
 degrees)` (page_editor.dart) writes each page's /Rotate = current display

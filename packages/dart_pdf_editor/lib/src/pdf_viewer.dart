@@ -55,6 +55,51 @@ class PdfSearchResult {
   int get pageIndex => match.pageIndex;
 }
 
+/// How a document search matches text: case sensitivity, whole-word
+/// boundaries, and regular-expression mode. Held by
+/// [PdfViewerController.searchOptions]; the search field and results panel
+/// expose them as toggle controls.
+class PdfSearchOptions {
+  const PdfSearchOptions({
+    this.matchCase = false,
+    this.wholeWord = false,
+    this.regex = false,
+  });
+
+  /// When true, an upper/lower-case difference fails the match.
+  final bool matchCase;
+
+  /// When true, only matches bounded by non-word characters count
+  /// (letters, digits, and underscore are word characters).
+  final bool wholeWord;
+
+  /// When true, the query is a regular expression rather than literal text.
+  /// An invalid pattern simply yields no matches.
+  ///
+  /// Matching runs synchronously on the calling (UI) thread with no
+  /// timeout, so a catastrophically backtracking pattern over a very large
+  /// page can briefly stall the frame — acceptable for local desktop use,
+  /// but a host exposing this to untrusted input should guard it.
+  final bool regex;
+
+  PdfSearchOptions copyWith({bool? matchCase, bool? wholeWord, bool? regex}) =>
+      PdfSearchOptions(
+        matchCase: matchCase ?? this.matchCase,
+        wholeWord: wholeWord ?? this.wholeWord,
+        regex: regex ?? this.regex,
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      other is PdfSearchOptions &&
+      other.matchCase == matchCase &&
+      other.wholeWord == wholeWord &&
+      other.regex == regex;
+
+  @override
+  int get hashCode => Object.hash(matchCase, wholeWord, regex);
+}
+
 /// A snapshot of a viewer's scroll position and zoom, for mirroring one
 /// [PdfViewer] onto another — the comparison view's synchronized panes.
 /// Read [PdfViewerController.viewSync], hand it to another controller's
@@ -85,6 +130,7 @@ class PdfViewerController extends ChangeNotifier {
   int _currentPage = 0;
   bool _searching = false;
   String _query = '';
+  PdfSearchOptions _searchOptions = const PdfSearchOptions();
   List<PdfSearchResult> _results = const [];
   List<PdfTextMatch> _matches = const [];
   int _currentMatch = -1;
@@ -101,6 +147,10 @@ class PdfViewerController extends ChangeNotifier {
   bool get isSearching => _searching;
   String get query => _query;
   int get matchCount => _matches.length;
+
+  /// How [search] matches text (case, whole word, regex). Change it with
+  /// [setSearchOptions], which re-runs the active search.
+  PdfSearchOptions get searchOptions => _searchOptions;
 
   /// Every hit of the current [query] in document order, with context
   /// snippets — what a search results panel lists.
@@ -219,10 +269,14 @@ class PdfViewerController extends ChangeNotifier {
     super.dispose();
   }
 
-  /// Searches the whole document and jumps to the first hit.
-  Future<void> search(String query) async {
+  /// Searches the whole document and jumps to the first hit. Pass [options]
+  /// to change how matching works (case, whole word, regex) for this and
+  /// subsequent searches; omit it to keep the current [searchOptions].
+  Future<void> search(String query, {PdfSearchOptions? options}) async {
     final state = _state;
     if (state == null) return;
+    if (options != null) _searchOptions = options;
+    final opts = _searchOptions;
     _query = query;
     _results = const [];
     _matches = const [];
@@ -230,14 +284,28 @@ class PdfViewerController extends ChangeNotifier {
     _searching = query.isNotEmpty;
     notifyListeners();
     if (query.isEmpty) return;
-    final results = await state._searchAllPages(query);
-    if (_query != query) return; // superseded by a newer search
+    final results = await state._searchAllPages(query, opts);
+    // superseded by a newer search (changed query or options)
+    if (_query != query || _searchOptions != opts) return;
     _results = results;
     _matches = [for (final result in results) result.match];
     _searching = false;
     _currentMatch = results.isEmpty ? -1 : 0;
     notifyListeners();
     if (_matches.isNotEmpty) state._showMatch(_matches[0]);
+  }
+
+  /// Sets the matching [options] and re-runs the current search with them,
+  /// landing on the first hit. With no active query it just stores the
+  /// options for the next [search].
+  void setSearchOptions(PdfSearchOptions options) {
+    if (options == _searchOptions) return;
+    _searchOptions = options;
+    if (_query.isNotEmpty) {
+      unawaited(search(_query, options: options));
+    } else {
+      notifyListeners();
+    }
   }
 
   void nextMatch() => _stepMatch(1);
@@ -1540,11 +1608,18 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
     return _textCache[index] ??= PdfTextExtractor.extract(widget.document, index);
   }
 
-  Future<List<PdfSearchResult>> _searchAllPages(String query) async {
+  Future<List<PdfSearchResult>> _searchAllPages(
+      String query, PdfSearchOptions options) async {
     final results = <PdfSearchResult>[];
     for (var i = 0; i < _pages.length; i++) {
       final text = await _extractText(i);
-      for (final match in text.findAll(query)) {
+      final matches = text.findAll(
+        query,
+        caseSensitive: options.matchCase,
+        wholeWord: options.wholeWord,
+        regex: options.regex,
+      );
+      for (final match in matches) {
         results.add(_snippetFor(text, match));
       }
       // yield between pages so long documents don't freeze the UI

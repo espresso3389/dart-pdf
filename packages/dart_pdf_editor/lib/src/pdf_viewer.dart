@@ -2227,8 +2227,12 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
   }
 
   /// Escape backs out of editing state layer by layer before it clears
-  /// the text selection: annotation or element selection → pending ink →
-  /// armed tool.
+  /// the text selection: annotation or element selection → armed tool →
+  /// pending ink.
+  ///
+  /// Leaving the ink tool commits any pending stroke through the
+  /// controller's tool setter. Escape must not throw away a fresh drawing;
+  /// the toolbar's explicit discard action is the destructive path.
   void _onEscape() {
     final editing = widget.editing;
     if (editing != null) {
@@ -2244,12 +2248,12 @@ class _PdfViewerState extends State<PdfViewer> with TickerProviderStateMixin {
         editing.clearElementSelection();
         return;
       }
-      if (editing.hasPendingInk) {
-        editing.discardInk();
-        return;
-      }
       if (editing.tool != null) {
         editing.tool = null;
+        return;
+      }
+      if (editing.hasPendingInk) {
+        editing.finishInk();
         return;
       }
     }
@@ -3726,7 +3730,9 @@ class _PdfViewerPageState extends State<_PdfViewerPage> {
                   builder: (context, _) => editing.tool == null &&
                           !editing.isPickingColor &&
                           !editing.hasAnnotationSelection &&
-                          editing.pendingFlash == null
+                          editing.pendingFlash == null &&
+                          (_rastered ||
+                              editing.committedInkOn(widget.index) == null)
                       ? const SizedBox.shrink()
                       : Positioned.fill(
                           child: ValueListenableBuilder<double>(

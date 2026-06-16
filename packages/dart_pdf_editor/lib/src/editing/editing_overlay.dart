@@ -183,6 +183,18 @@ typedef _InkPaint = ({
   double strokeWidth,
 });
 
+typedef _AfterGhost = ({
+  ui.Picture picture,
+  Rect from,
+  Rect to,
+  Rect? source,
+  ui.Picture? sourceClean,
+  double rotation,
+  double localAngle,
+  bool flipX,
+  bool flipY,
+});
+
 /// A Square/Circle drawn for a resize preview (or its committed
 /// afterimage). The editor *regenerates* a shape's appearance at the new
 /// rect with a constant stroke width rather than stretching the old one,
@@ -393,6 +405,12 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   ui.Picture? _resizeCleanPicture;
   Object? _resizeCleanFor;
 
+  // Clean page for a selected annotation's original footprint. Move commits
+  // clip this into the source rect so the annotation disappears without
+  // covering underlying page content with a paper-colored box.
+  ui.Picture? _sourceCleanPicture;
+  Object? _sourceCleanFor;
+
   // rubber-band selection (mouse drags on empty page area)
   Offset? _marqueeStart;
   Offset? _marqueeCurrent;
@@ -422,6 +440,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   Rect? _afterGhostFrom;
   Rect? _afterGhostTo;
   Rect? _afterGhostSourceRect;
+  ui.Picture? _afterGhostSourceClean;
   double _afterGhostRotation = 0;
   double _afterGhostLocalAngle = 0;
   bool _afterGhostFlipX = false;
@@ -964,6 +983,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterGhostFrom = null;
     _afterGhostTo = null;
     _afterGhostSourceRect = null;
+    _afterGhostSourceClean?.dispose();
+    _afterGhostSourceClean = null;
     _afterGhostRotation = 0;
     _afterGhostLocalAngle = 0;
     _afterGhostFlipX = false;
@@ -993,14 +1014,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   /// annotation stays inverted while the page re-renders.
   ///
   /// [washSource] paints the old on-raster footprint over with paper before
-  /// the new raster lands, so a resize/rotate's larger/spun old appearance
-  /// doesn't poke out behind the afterimage. A pure *move* leaves it false:
-  /// its source and destination are disjoint, so an opaque paper wash there
-  /// covers nothing the afterimage redraws — it just blanks the page content
-  /// under the old spot (most visibly *through* a translucent markup) until
-  /// the re-render lands, which reads as the content flashing back in. The
-  /// stale annotation lingering at the old spot instead is continuous with
-  /// the drag (it was painted there the whole time) and far less jarring.
+  /// the new raster lands, so the stale raster does not keep showing the
+  /// annotation at its previous position during the commit gap.
   void _commitWithGhost(VoidCallback commit,
       {Rect? to,
       double rotation = 0,
@@ -1022,6 +1037,11 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _afterGhostFrom = from;
     _afterGhostTo = to;
     _afterGhostSourceRect = washSource ? source : null;
+    if (washSource && _sourceCleanPicture != null) {
+      _afterGhostSourceClean = _sourceCleanPicture;
+      _sourceCleanPicture = null;
+      _sourceCleanFor = null;
+    }
     _afterGhostRotation = rotation;
     _afterGhostLocalAngle = localAngle;
     _afterGhostFlipX = flipX;
@@ -1221,11 +1241,64 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     }
   }
 
+  /// Keeps a clean page (without the selected annotation) ready for move
+  /// commits, so the old location can be erased by restoring the real page
+  /// content instead of painting a white/paper rectangle over it.
+  Future<void> _ensureSourceClean() async {
+    final slots = _controller.selectedAnnotationSlots;
+    if (slots.length != 1 || slots.single.$1 != widget.pageIndex) {
+      _sourceCleanPicture?.dispose();
+      _sourceCleanPicture = null;
+      _sourceCleanFor = null;
+      return;
+    }
+    final annotation =
+        _controller.annotationAt(widget.pageIndex, slots.single.$2);
+    if (annotation == null) return;
+    final key = (
+      document: _controller.document,
+      page: widget.pageIndex,
+      annotation: annotation.dict,
+      color: widget.pageColor,
+      showAnnotations: widget.showAnnotations,
+    );
+    if (_sourceCleanFor == key) return;
+    _sourceCleanFor = key;
+    final name = annotation.name;
+    try {
+      final picture = await PdfPageRenderer.renderPicture(
+        _controller.pageAt(widget.pageIndex),
+        pageColor: widget.pageColor,
+        annotations: widget.showAnnotations,
+        skipAnnotation: (a) =>
+            identical(a.dict, annotation.dict) ||
+            (name != null && a.name == name),
+      );
+      if (!mounted || _sourceCleanFor != key) {
+        picture.dispose();
+        return;
+      }
+      setState(() {
+        _sourceCleanPicture?.dispose();
+        _sourceCleanPicture = picture;
+      });
+    } catch (_) {
+      // If the clean render fails, leave the stale raster alone rather than
+      // painting an opaque box over the page content.
+    }
+  }
+
   /// Drops the lifted clean-page picture once a resize drag ends.
   void _clearResizeClean() {
     _resizeCleanPicture?.dispose();
     _resizeCleanPicture = null;
     _resizeCleanFor = null;
+  }
+
+  void _clearSourceClean() {
+    _sourceCleanPicture?.dispose();
+    _sourceCleanPicture = null;
+    _sourceCleanFor = null;
   }
 
   @override
@@ -1241,8 +1314,9 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       ..dispose();
     _textEditText.dispose();
     _ghost?.dispose();
-    _afterGhost?.dispose();
+    _clearAfterimage();
     _resizeCleanPicture?.dispose();
+    _clearSourceClean();
     _flashController.dispose();
     _activeStrokeRepaint.dispose();
     super.dispose();
@@ -1808,6 +1882,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
           _moveCurrent = position;
           _cursor = SystemMouseCursors.move; // 4-arrow while dragging
         });
+        _ensureSourceClean();
         return;
       }
     }
@@ -1820,6 +1895,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         _moveCurrent = position;
         _cursor = SystemMouseCursors.move;
       });
+      _ensureSourceClean();
       return;
     }
     final mouseLike = details.kind == null ||
@@ -2109,12 +2185,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
         }
       }
       final (x1, y1) = _geometry.toPagePoint(moveCurrent);
-      // a move's source and destination are disjoint, so don't wash the old
-      // spot — the opaque paper wash would blank the page content there
-      // until the re-render lands and then flash it back (see _commitWithGhost)
+      // Wash the old spot so the stale raster does not leave a second copy
+      // behind while the committed revision re-renders.
       _commitWithGhost(() => _controller.moveSelected(x1 - x0, y1 - y0),
-          to: _selectedViewRect?.shift(moveCurrent - moveStart),
-          washSource: false);
+          to: _selectedViewRect?.shift(moveCurrent - moveStart));
     } else if (stroke != null && stroke.isNotEmpty) {
       _controller.addInkStroke(widget.pageIndex, stroke,
           pressures: strokePressures);
@@ -2951,6 +3025,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   @override
   Widget build(BuildContext context) {
     _ensureGhost();
+    _ensureSourceClean();
     // the afterimage has served once the committed revision's raster is
     // on screen — or is stale once the document moved past that revision
     if (_afterDocument != null &&
@@ -3002,7 +3077,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     // paint that same picture at rest so vector paste feedback is immediate
     // instead of waiting for the full-page raster. Dragging keeps using the
     // normal ghost path, and explicit commit afterimages take precedence.
-    final restGhost = !widget.rasterCurrent &&
+    final _AfterGhost? restGhost = !widget.rasterCurrent &&
             !dragging &&
             _afterGhost == null &&
             _ghost != null &&
@@ -3011,13 +3086,27 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
             picture: _ghost!,
             from: selected,
             to: selected,
-            source: null as Rect?,
+            source: null,
+            sourceClean: null,
             rotation: 0.0,
             localAngle: 0.0,
             flipX: false,
             flipY: false,
           )
         : null;
+    final _AfterGhost? afterGhost = _afterGhost != null
+        ? (
+            picture: _afterGhost!,
+            from: _afterGhostFrom!,
+            to: _afterGhostTo!,
+            source: _afterGhostSourceRect,
+            sourceClean: _afterGhostSourceClean,
+            rotation: _afterGhostRotation,
+            localAngle: _afterGhostLocalAngle,
+            flipX: _afterGhostFlipX,
+            flipY: _afterGhostFlipY,
+          )
+        : restGhost;
     // a free-text resize re-wraps at constant font size — preview the
     // wrapping live instead of the ghost's stretched glyphs
     final wrapResize =
@@ -3248,18 +3337,7 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                         : null,
                     penOpacity: _controller.opacity,
                     rotateCursor: _rotateCursor,
-                    afterGhost: _afterGhost != null
-                        ? (
-                            picture: _afterGhost!,
-                            from: _afterGhostFrom!,
-                            to: _afterGhostTo!,
-                            source: _afterGhostSourceRect,
-                            rotation: _afterGhostRotation,
-                            localAngle: _afterGhostLocalAngle,
-                            flipX: _afterGhostFlipX,
-                            flipY: _afterGhostFlipY,
-                          )
-                        : restGhost,
+                    afterGhost: afterGhost,
                     afterShape: _afterShape,
                     afterPath: _afterPath,
                     showHandles: selected != null &&
@@ -3805,18 +3883,9 @@ class _EditingPreviewPainter extends CustomPainter {
 
   /// A just-committed move/resize/rotate, kept painted at full strength
   /// until the new revision's raster lands. [source] is the old
-  /// on-raster position, washed out first so a slow page rerender
-  /// doesn't leave a visible duplicate behind the afterimage.
-  final ({
-    ui.Picture picture,
-    Rect from,
-    Rect to,
-    Rect? source,
-    double rotation,
-    double localAngle,
-    bool flipX,
-    bool flipY,
-  })? afterGhost;
+  /// on-raster position; when [sourceClean] is ready, that rect is restored
+  /// from a clean page render so no duplicate or paper-colored box remains.
+  final _AfterGhost? afterGhost;
 
   /// A just-committed shape's drag preview, same deal.
   final ({
@@ -4131,11 +4200,13 @@ class _EditingPreviewPainter extends CustomPainter {
     final committed = afterGhost;
     if (committed != null) {
       final source = committed.source;
-      if (source != null) {
-        canvas.drawRect(
-          source.inflate(2),
-          Paint()..color = fadeColor.withValues(alpha: 0.92),
-        );
+      final sourceClean = committed.sourceClean;
+      if (source != null && sourceClean != null) {
+        canvas.save();
+        canvas.clipRect(source.inflate(2));
+        canvas.scale(geometry.scale);
+        canvas.drawPicture(sourceClean);
+        canvas.restore();
       }
       // full strength: this *is* the committed result, standing in for
       // the raster that hasn't landed yet

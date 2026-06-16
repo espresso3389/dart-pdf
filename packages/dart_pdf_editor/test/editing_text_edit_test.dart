@@ -3,6 +3,7 @@ import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pdf_cos/pdf_cos.dart';
 import 'package:pdf_document/pdf_document.dart';
 import 'package:dart_pdf_editor/dart_pdf_editor.dart';
 import 'package:dart_pdf_editor/src/editing/editing_overlay.dart';
@@ -300,6 +301,35 @@ void main() {
 
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
+      await settle(tester);
+    });
+
+    testWidgets('the inline editor follows RTL text while typing',
+        (tester) async {
+      const rtl = 'ڕێباز';
+      final (editing, _) = await pumpEditor(tester);
+      editing.tool = PdfEditTool.freeText;
+      await tester.pump();
+
+      await drag(tester, view(100, 700), view(300, 640));
+      expect(find.byKey(editorKey), findsOneWidget);
+
+      await tester.enterText(find.byKey(editorKey), rtl);
+      await tester.pump();
+
+      final field = tester.widget<TextField>(find.byKey(editorKey));
+      expect(field.textDirection, TextDirection.rtl);
+      expect(field.textAlign, TextAlign.start);
+      expect(Directionality.of(tester.element(find.byKey(editorKey))),
+          TextDirection.rtl);
+
+      await tap(tester, view(450, 400)); // outside the box: commit
+      final annotation = editing.document.page(0).annotations.single;
+      expect(annotation.contents, rtl);
+      expect(
+          (editing.document.cos.resolve(annotation.dict['Q']) as CosInteger)
+              .value,
+          2);
       await settle(tester);
     });
 

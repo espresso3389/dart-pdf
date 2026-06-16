@@ -2986,29 +2986,28 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     required Color? background,
     required double rotation,
   }) {
+    final direction = _flutterTextDirection(text);
     final box = Container(
       key: key,
       color: background,
       padding: EdgeInsets.all(3 * _geometry.scale),
-      alignment: _flutterTextDirection(text) == TextDirection.rtl
-          ? Alignment.topRight
-          : Alignment.topLeft,
-      child: Text(
-        text,
-        textDirection: _flutterTextDirection(text),
-        textAlign: _flutterTextDirection(text) == TextDirection.rtl
-            ? TextAlign.right
-            : TextAlign.left,
-        textHeightBehavior: const TextHeightBehavior(
-          applyHeightToFirstAscent: false,
-        ),
-        style: TextStyle(
-          color: color,
-          fontSize: size * _geometry.scale,
-          height: 1.2,
-          fontFamily: _uiFamily(font),
-          fontWeight: font.isBold ? FontWeight.bold : FontWeight.normal,
-          fontStyle: font.isItalic ? FontStyle.italic : FontStyle.normal,
+      alignment: AlignmentDirectional.topStart.resolve(direction),
+      child: Directionality(
+        textDirection: direction,
+        child: Text(
+          text,
+          textAlign: TextAlign.start,
+          textHeightBehavior: const TextHeightBehavior(
+            applyHeightToFirstAscent: false,
+          ),
+          style: TextStyle(
+            color: color,
+            fontSize: size * _geometry.scale,
+            height: 1.2,
+            fontFamily: _uiFamily(font),
+            fontWeight: font.isBold ? FontWeight.bold : FontWeight.normal,
+            fontStyle: font.isItalic ? FontStyle.italic : FontStyle.normal,
+          ),
         ),
       ),
     );
@@ -3457,68 +3456,74 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                                   const Color(0xFF1E88E5),
                               width: 1.5 * _chromeScale),
                         ),
-                        child: TextField(
-                          key: ValueKey(_textEditFieldName == null
-                              ? 'pdf-freetext-editor'
-                              : 'pdf-form-text-editor'),
-                          controller: _textEditText,
-                          focusNode: _textEditFocus,
-                          autofocus: true,
-                          // single-line form fields edit single-line: Enter
-                          // commits instead of inserting a newline
-                          maxLines:
-                              _textEditFieldName == null || _textEditMultiline
-                                  ? null
-                                  : 1,
-                          expands:
-                              _textEditFieldName == null || _textEditMultiline,
-                          onSubmitted: (_) => _commitTextEdit(),
-                          textDirection:
-                              _flutterTextDirection(_textEditText.text),
-                          textAlign:
-                              _flutterTextDirection(_textEditText.text) ==
-                                      TextDirection.rtl
-                                  ? TextAlign.right
-                                  : TextAlign.left,
-                          textAlignVertical:
-                              _textEditFieldName == null || _textEditMultiline
-                                  ? TextAlignVertical.top
-                                  : TextAlignVertical.center,
-                          cursorColor: _textEditColor,
-                          // mirrors the committed appearance: same size in view
-                          // pixels, same 1.2 leading, matching family and color
-                          style: TextStyle(
-                            color: _textEditColor,
-                            fontSize: _textEditSize * _geometry.scale,
-                            height: 1.2,
-                            fontFamily: _uiFamily(_textEditFont),
-                            fontWeight: _textEditFont.isBold
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                            fontStyle: _textEditFont.isItalic
-                                ? FontStyle.italic
-                                : FontStyle.normal,
-                          ),
-                          decoration: InputDecoration(
-                            isCollapsed: true,
-                            border: InputBorder.none,
-                            // PDF free-text appearances put the first baseline
-                            // exactly one ascent below the top padding. Flutter
-                            // splits the extra 1.2 line-height leading above
-                            // and below editable text, so trim that half-leading
-                            // from the top padding to avoid a small edit-time
-                            // layout jump.
-                            contentPadding: EdgeInsets.fromLTRB(
-                              3 * _geometry.scale,
-                              math.max(
-                                0,
-                                3 * _geometry.scale -
-                                    0.1 * _textEditSize * _geometry.scale,
+                        child: ValueListenableBuilder<TextEditingValue>(
+                          valueListenable: _textEditText,
+                          builder: (context, value, _) {
+                            final direction = _flutterTextDirection(value.text);
+                            return Directionality(
+                              textDirection: direction,
+                              child: TextField(
+                                key: ValueKey(_textEditFieldName == null
+                                    ? 'pdf-freetext-editor'
+                                    : 'pdf-form-text-editor'),
+                                controller: _textEditText,
+                                focusNode: _textEditFocus,
+                                autofocus: true,
+                                // single-line form fields edit single-line:
+                                // Enter commits instead of inserting a newline
+                                maxLines: _textEditFieldName == null ||
+                                        _textEditMultiline
+                                    ? null
+                                    : 1,
+                                expands: _textEditFieldName == null ||
+                                    _textEditMultiline,
+                                onSubmitted: (_) => _commitTextEdit(),
+                                textDirection: direction,
+                                textAlign: TextAlign.start,
+                                textAlignVertical: _textEditFieldName == null ||
+                                        _textEditMultiline
+                                    ? TextAlignVertical.top
+                                    : TextAlignVertical.center,
+                                cursorColor: _textEditColor,
+                                // mirrors the committed appearance: same size
+                                // in view pixels, same 1.2 leading, matching
+                                // family and color
+                                style: TextStyle(
+                                  color: _textEditColor,
+                                  fontSize: _textEditSize * _geometry.scale,
+                                  height: 1.2,
+                                  fontFamily: _uiFamily(_textEditFont),
+                                  fontWeight: _textEditFont.isBold
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                  fontStyle: _textEditFont.isItalic
+                                      ? FontStyle.italic
+                                      : FontStyle.normal,
+                                ),
+                                decoration: InputDecoration(
+                                  isCollapsed: true,
+                                  border: InputBorder.none,
+                                  // PDF free-text appearances put the first
+                                  // baseline exactly one ascent below the top
+                                  // padding. Flutter splits the extra 1.2
+                                  // line-height leading above and below
+                                  // editable text, so trim that half-leading
+                                  // from the top padding to avoid a small
+                                  // edit-time layout jump.
+                                  contentPadding: EdgeInsets.fromLTRB(
+                                    3 * _geometry.scale,
+                                    math.max(
+                                      0,
+                                      3 * _geometry.scale -
+                                          0.1 * _textEditSize * _geometry.scale,
+                                    ),
+                                    3 * _geometry.scale,
+                                    3 * _geometry.scale,
+                                  ),
+                                ),
                               ),
-                              3 * _geometry.scale,
-                              3 * _geometry.scale,
-                            ),
-                          ),
+                            );
+                          },
                         ),
                       ),
                     ),

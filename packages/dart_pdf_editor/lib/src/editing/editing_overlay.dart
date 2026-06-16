@@ -16,6 +16,9 @@ import 'editing_controller.dart';
 import 'stroke_prediction.dart';
 import 'text_prompt.dart';
 
+TextDirection _flutterTextDirection(String text) =>
+    pdfTextLooksRtl(text) ? TextDirection.rtl : TextDirection.ltr;
+
 /// A single-selection move drag's floating preview: the dragged
 /// annotation's appearance, reported up to [PdfViewer] so it paints above
 /// every page.
@@ -339,7 +342,8 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
   PdfRect? _textEditPageRect;
   bool _textEditExisting = false;
   PdfEditTool? _textEditTool;
-  late final TextEditingController _textEditText = TextEditingController();
+  late final TextEditingController _textEditText = TextEditingController()
+    ..addListener(_onTextEditChanged);
   late final FocusNode _textEditFocus = FocusNode()
     ..addListener(_onTextEditFocus);
   PdfStandardFont _textEditFont = PdfStandardFont.helvetica;
@@ -1242,6 +1246,10 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
     _flashController.dispose();
     _activeStrokeRepaint.dispose();
     super.dispose();
+  }
+
+  void _onTextEditChanged() {
+    if (_textEditRect != null && mounted) setState(() {});
   }
 
   Offset _handleCenter(Rect rect, _Handle handle) => Offset(
@@ -2901,9 +2909,15 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
       key: key,
       color: background,
       padding: EdgeInsets.all(3 * _geometry.scale),
-      alignment: Alignment.topLeft,
+      alignment: _flutterTextDirection(text) == TextDirection.rtl
+          ? Alignment.topRight
+          : Alignment.topLeft,
       child: Text(
         text,
+        textDirection: _flutterTextDirection(text),
+        textAlign: _flutterTextDirection(text) == TextDirection.rtl
+            ? TextAlign.right
+            : TextAlign.left,
         textHeightBehavior: const TextHeightBehavior(
           applyHeightToFirstAscent: false,
         ),
@@ -3374,6 +3388,13 @@ class _EditingPageOverlayState extends State<EditingPageOverlay>
                           expands:
                               _textEditFieldName == null || _textEditMultiline,
                           onSubmitted: (_) => _commitTextEdit(),
+                          textDirection:
+                              _flutterTextDirection(_textEditText.text),
+                          textAlign:
+                              _flutterTextDirection(_textEditText.text) ==
+                                      TextDirection.rtl
+                                  ? TextAlign.right
+                                  : TextAlign.left,
                           textAlignVertical:
                               _textEditFieldName == null || _textEditMultiline
                                   ? TextAlignVertical.top

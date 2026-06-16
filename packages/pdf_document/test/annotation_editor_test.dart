@@ -218,7 +218,7 @@ void main() {
     expect(content, contains('BT'));
     expect(content, contains('/Helv 12 Tf'));
     // 62 chars at 12pt Helvetica cannot fit one 168pt-wide line
-    expect('T*'.allMatches(content).length, greaterThanOrEqualTo(2));
+    expect(' Tj'.allMatches(content).length, greaterThanOrEqualTo(2));
     expect(content, contains('W')); // clipped to the rect
 
     final form = ft.normalAppearance!;
@@ -228,6 +228,24 @@ void main() {
     final helv = doc.cos.resolve(fonts['Helv']) as CosDictionary;
     expect((doc.cos.resolve(helv['BaseFont']) as CosName).value, 'Helvetica');
     expect((doc.cos.resolve(helv['Widths']) as CosArray).length, 95);
+  });
+
+  test('free text can lay out RTL visual order and right alignment', () {
+    expect(pdfTextLooksRtl('שלום 123'), isTrue);
+    expect(pdfVisualText('שלום 123', PdfTextDirection.rtl), '123 םולש');
+
+    final doc = roundTrip((e) => e.addFreeText(
+          0,
+          const PdfRect(100, 600, 300, 640),
+          'abc 123 def',
+          textDirection: PdfTextDirection.rtl,
+        ));
+    final ft = doc.page(0).annotations.single;
+    expect((doc.cos.resolve(ft.dict['Q']) as CosInteger).value, 2);
+
+    final content = appearanceText(doc, ft);
+    expect(content, contains('(def 123 abc) Tj'));
+    expect(content, isNot(contains('(abc 123 def) Tj')));
   });
 
   test('free text takes a standard serif or monospace font', () {
@@ -302,8 +320,8 @@ void main() {
         PdfStandardFont.helveticaBold);
     expect(PdfStandardFont.fromName('Helvetica-BoldOblique'),
         PdfStandardFont.helveticaBoldOblique);
-    expect(PdfStandardFont.fromName('Times-Italic'),
-        PdfStandardFont.timesItalic);
+    expect(
+        PdfStandardFont.fromName('Times-Italic'), PdfStandardFont.timesItalic);
     expect(PdfStandardFont.fromName('Times-BoldItalic'),
         PdfStandardFont.timesBoldItalic);
     expect(PdfStandardFont.fromName('Courier-Oblique'),
@@ -321,7 +339,8 @@ void main() {
 
     // bold metrics differ from the regular face (AFM Times widths)
     expect(measureStandardText('M', 1000, font: PdfStandardFont.times), 889);
-    expect(measureStandardText('M', 1000, font: PdfStandardFont.timesBold), 944);
+    expect(
+        measureStandardText('M', 1000, font: PdfStandardFont.timesBold), 944);
     expect(
         measureStandardText('M', 1000, font: PdfStandardFont.timesItalic), 833);
   });
@@ -624,8 +643,7 @@ void main() {
 
   test('a dashed shape regenerates on resize, keeping its dash', () {
     final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
-      ..addSquare(0, const PdfRect(100, 100, 200, 150),
-          dashPattern: const [3]);
+      ..addSquare(0, const PdfRect(100, 100, 200, 150), dashPattern: const [3]);
     final doc = PdfDocument.open(first.save());
 
     final square = doc.page(0).annotations.single;
@@ -760,8 +778,8 @@ void main() {
 
     final wide = appearanceText(reopened, reopened.page(0).annotations.single);
     expect(wide, contains('/Helv 12 Tf')); // font size unchanged
-    int lines(String s) => 'T*'.allMatches(s).length;
-    expect(lines(narrow), greaterThan(0));
+    int lines(String s) => ' Tj'.allMatches(s).length;
+    expect(lines(narrow), greaterThan(1));
     expect(lines(wide), lessThan(lines(narrow))); // fewer wrapped lines
     expect(reopened.page(0).annotations.single.rect,
         const PdfRect(100, 100, 450, 200));
@@ -819,8 +837,7 @@ void main() {
         throwsArgumentError);
   });
 
-  test('resizeAnnotation flipX mirrors stretched artwork and point arrays',
-      () {
+  test('resizeAnnotation flipX mirrors stretched artwork and point arrays', () {
     final first = PdfEditor(PdfDocument.open(buildClassicPdf()))
       ..addInk(0, [
         [(100, 100), (200, 150)],

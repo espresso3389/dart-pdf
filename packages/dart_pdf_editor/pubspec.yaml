@@ -34,3 +34,21 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   flutter_test:
     sdk: flutter
+
+flutter:
+  # Bundled full-Unicode fonts offered by the font menu (DejaVu, a
+  # permissive Bitstream Vera / Arev licence — see assets/fonts/).
+  assets:
+    - assets/fonts/DejaVuSans.ttf
+    - assets/fonts/DejaVuSerif.ttf
+    - assets/fonts/DejaVuSansMono.ttf
+  fonts:
+    - family: DejaVu Sans
+      fonts:
+        - asset: assets/fonts/DejaVuSans.ttf
+    - family: DejaVu Serif
+      fonts:
+        - asset: assets/fonts/DejaVuSerif.ttf
+    - family: DejaVu Sans Mono
+      fonts:
+        - asset: assets/fonts/DejaVuSansMono.ttf

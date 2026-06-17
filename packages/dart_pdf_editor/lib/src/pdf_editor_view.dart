@@ -193,6 +193,7 @@ class PdfEditorView extends StatefulWidget {
     this.annotationMenuBuilder,
     this.formImagePicker,
     this.imagePicker,
+    this.fontPicker,
     this.onSnapshot,
     this.textPrompt,
     this.palette = PdfEditingToolbar.defaultPalette,
@@ -292,6 +293,11 @@ class PdfEditorView extends StatefulWidget {
 
   /// See [PdfViewer.imagePicker].
   final PdfImagePicker? imagePicker;
+
+  /// How the font menu's "Load font…" entry loads a custom `.ttf`/`.otf`
+  /// font to embed for new text. When null, only the standard families
+  /// and bundled fonts are offered.
+  final PdfFontPicker? fontPicker;
 
   /// See [PdfViewer.onSnapshot]. The snapshot tool always keeps a vector
   /// copy on the clipboard for in-app paste; this callback additionally
@@ -557,6 +563,7 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                 controller: session,
                 showAuthor: features.authorEditable,
                 bottomSheet: bottomSheet,
+                fontPicker: widget.fontPicker,
               );
 
           final reflowActive = features.reflowView && prefs.showReflowView;
@@ -629,6 +636,7 @@ class _PdfEditorViewState extends State<PdfEditorView> {
                   viewerController: _viewer,
                   // save lives in the header now, not the dock
                   textPrompt: widget.textPrompt ?? showPdfTextPrompt,
+                  fontPicker: widget.fontPicker,
                   palette: widget.palette,
                   tools: features.tools,
                   groups: features.toolGroups,

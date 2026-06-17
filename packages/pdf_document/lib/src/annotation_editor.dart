@@ -38,6 +38,45 @@ List<((double, double), (double, double))> pdfInkCurveControls(
 /// /Polygon area (shoelace).
 enum PdfMeasurementKind { distance, perimeter, area }
 
+/// One styled run inside a rich free-text annotation.
+///
+/// A normal FreeText annotation has one `/DA` default appearance. Runs let
+/// this package generate an appearance stream with several fonts, sizes, or
+/// text colors inside the same annotation while keeping `/Contents` as the
+/// plain concatenated text.
+class PdfFreeTextRun {
+  const PdfFreeTextRun(
+    this.text, {
+    this.font = PdfStandardFont.helvetica,
+    this.fontSize = 12,
+    this.color = 0x000000,
+  });
+
+  final String text;
+  final PdfTextFont font;
+  final double fontSize;
+  final int color;
+}
+
+class _RichTextPiece {
+  const _RichTextPiece(this.text, this.style);
+
+  final String text;
+  final PdfFreeTextRun style;
+
+  bool sameStyle(PdfFreeTextRun other) =>
+      style.font.resourceName == other.font.resourceName &&
+      style.fontSize == other.fontSize &&
+      style.color == other.color;
+}
+
+class _RichTextLine {
+  const _RichTextLine(this.runs, this.width);
+
+  final List<_RichTextPiece> runs;
+  final double width;
+}
+
 /// Line ending styles (§12.5.6.7, Table 176) drawn at a /Line or
 /// /PolyLine endpoint by [PdfEditor.addLine] / [PdfEditor.addPolyLine].
 ///
@@ -1213,7 +1252,7 @@ extension PdfAnnotationEditing on PdfEditor {
     PdfRect rect,
     String text, {
     double fontSize = 12,
-    PdfStandardFont font = PdfStandardFont.helvetica,
+    PdfTextFont font = PdfStandardFont.helvetica,
     PdfTextDirection textDirection = PdfTextDirection.auto,
     int color = 0x000000,
     int? fillColor,
@@ -1222,6 +1261,9 @@ extension PdfAnnotationEditing on PdfEditor {
     String? author,
     String? name,
   }) {
+    // The font accumulates which glyphs the appearance shows (so an
+    // embedded font's /W and /ToUnicode cover exactly them); start fresh.
+    if (font is PdfEmbeddedFont) font.resetUsage();
     final w = _freeTextContent(rect, text,
         fontSize: fontSize,
         font: font,
@@ -1243,10 +1285,68 @@ extension PdfAnnotationEditing on PdfEditor {
     if (borderColor != null && borderWidth > 0) {
       dict['BS'] = _borderStyle(borderWidth);
     }
+    final fontResource = font is PdfEmbeddedFont
+        ? font.buildResource(_updater.addObject)
+        : _standardFont(font as PdfStandardFont);
     _addAnnotation(
       pageIndex,
       dict,
-      _form(rect, w, resources: _resources(font: _standardFont(font))),
+      _form(rect, w, resources: _resources(font: fontResource)),
+      name: name,
+    );
+  }
+
+  /// Adds a rich free-text annotation whose appearance can switch font,
+  /// size, and text color between [runs].
+  ///
+  /// `/Contents` remains the plain concatenation of the run text so comment
+  /// lists, sync payloads, and search-friendly metadata still see ordinary
+  /// text. `/DA` records the first run as the fallback style for other
+  /// viewers; the generated `/AP /N` appearance carries the per-run styling.
+  void addFreeTextRich(
+    int pageIndex,
+    PdfRect rect,
+    List<PdfFreeTextRun> runs, {
+    PdfTextDirection textDirection = PdfTextDirection.auto,
+    int? fillColor,
+    int? borderColor,
+    double borderWidth = 1,
+    String? author,
+    String? name,
+  }) {
+    final nonEmpty = [
+      for (final run in runs)
+        if (run.text.isNotEmpty) run
+    ];
+    if (nonEmpty.isEmpty) return;
+    final text = nonEmpty.map((run) => run.text).join();
+    for (final font in _richFonts(nonEmpty)) {
+      if (font is PdfEmbeddedFont) font.resetUsage();
+    }
+    final w = _freeTextRichContent(rect, nonEmpty,
+        textDirection: textDirection,
+        fillColor: fillColor,
+        borderColor: borderColor,
+        borderWidth: borderWidth);
+
+    final first = nonEmpty.first;
+    String rgb(int c) =>
+        ContentWriter.rgbComponents(c).map(ContentWriter.fmt).join(' ');
+    final da = '${rgb(first.color)} rg '
+        '${borderColor != null ? '${rgb(borderColor)} RG ' : ''}'
+        '/${first.font.resourceName} ${ContentWriter.fmt(first.fontSize)} Tf';
+    final dict =
+        _markupDict('FreeText', rect, fillColor ?? first.color, text, author)
+          ..['DA'] = CosString.fromText(da)
+          ..['Q'] = CosInteger(
+              textDirection.resolve(text) == PdfTextDirection.rtl ? 2 : 0);
+    if (borderColor != null && borderWidth > 0) {
+      dict['BS'] = _borderStyle(borderWidth);
+    }
+    _addAnnotation(
+      pageIndex,
+      dict,
+      _form(rect, w, resources: _resources(font: _richFontResources(nonEmpty))),
       name: name,
     );
   }
@@ -1257,7 +1357,7 @@ extension PdfAnnotationEditing on PdfEditor {
     PdfRect rect,
     String text, {
     required double fontSize,
-    required PdfStandardFont font,
+    required PdfTextFont font,
     required PdfTextDirection textDirection,
     required int color,
     required int? fillColor,
@@ -1296,14 +1396,18 @@ extension PdfAnnotationEditing on PdfEditor {
     var prevY = 0.0;
     for (var i = 0; i < lines.length; i++) {
       final line = lines[i];
-      final width = measureStandardText(line, fontSize, font: font);
+      final width = font.measure(line, fontSize);
       final x = resolvedDirection == PdfTextDirection.rtl
           ? rect.right - pad - width
           : rect.left + pad;
       final y = firstY - i * fontSize * 1.2;
-      w
-        ..textAt(x - prevX, y - prevY)
-        ..showText(pdfVisualText(line, resolvedDirection));
+      w.textAt(x - prevX, y - prevY);
+      final visual = pdfVisualText(line, resolvedDirection);
+      if (font is PdfEmbeddedFont) {
+        w.showGlyphHex(font.encodeHex(visual));
+      } else {
+        w.showText(visual);
+      }
       prevX = x;
       prevY = y;
     }
@@ -1311,6 +1415,140 @@ extension PdfAnnotationEditing on PdfEditor {
       ..endText()
       ..restore();
     return w;
+  }
+
+  ContentWriter _freeTextRichContent(
+    PdfRect rect,
+    List<PdfFreeTextRun> runs, {
+    required PdfTextDirection textDirection,
+    required int? fillColor,
+    required int? borderColor,
+    required double borderWidth,
+  }) {
+    const pad = 3.0;
+    final w = ContentWriter();
+    if (fillColor != null) {
+      w
+        ..fillColor(fillColor)
+        ..rect(rect.left, rect.bottom, rect.width, rect.height)
+        ..fill();
+    }
+    if (borderColor != null && borderWidth > 0) {
+      w
+        ..strokeColor(borderColor)
+        ..lineWidth(borderWidth)
+        ..rect(rect.left + borderWidth / 2, rect.bottom + borderWidth / 2,
+            rect.width - borderWidth, rect.height - borderWidth)
+        ..stroke();
+    }
+    final plain = runs.map((run) => run.text).join();
+    final resolvedDirection = textDirection.resolve(plain);
+    final lines = _wrapRich(runs, rect.width - 2 * pad);
+    var top = rect.top - pad;
+    var prevX = 0.0;
+    var prevY = 0.0;
+    w
+      ..save()
+      ..rect(rect.left, rect.bottom, rect.width, rect.height)
+      ..clip()
+      ..beginText();
+    for (final line in lines) {
+      if (line.runs.isEmpty) {
+        top -= 12 * 1.2;
+        continue;
+      }
+      final ascent = line.runs.fold<double>(
+          0,
+          (max, run) =>
+              math.max(max, run.style.fontSize * run.style.font.ascent / 1000));
+      final lineHeight = line.runs.fold<double>(
+          0, (max, run) => math.max(max, run.style.fontSize * 1.2));
+      var x = resolvedDirection == PdfTextDirection.rtl
+          ? rect.right - pad - line.width
+          : rect.left + pad;
+      final y = top - ascent;
+      final drawRuns = resolvedDirection == PdfTextDirection.rtl
+          ? line.runs.reversed
+          : line.runs;
+      for (final run in drawRuns) {
+        final style = run.style;
+        final visual = pdfVisualText(run.text, resolvedDirection);
+        final width = style.font.measure(visual, style.fontSize);
+        w
+          ..font(style.font.resourceName, style.fontSize)
+          ..fillColor(style.color)
+          ..textAt(x - prevX, y - prevY);
+        if (style.font is PdfEmbeddedFont) {
+          w.showGlyphHex((style.font as PdfEmbeddedFont).encodeHex(visual));
+        } else {
+          w.showText(visual);
+        }
+        prevX = x;
+        prevY = y;
+        x += width;
+      }
+      top -= lineHeight;
+    }
+    w
+      ..endText()
+      ..restore();
+    return w;
+  }
+
+  Iterable<PdfTextFont> _richFonts(List<PdfFreeTextRun> runs) sync* {
+    final seen = <String>{};
+    for (final run in runs) {
+      if (seen.add(run.font.resourceName)) yield run.font;
+    }
+  }
+
+  CosDictionary _richFontResources(List<PdfFreeTextRun> runs) {
+    final dict = CosDictionary();
+    for (final font in _richFonts(runs)) {
+      final resource = font is PdfEmbeddedFont
+          ? font.buildResource(_updater.addObject)
+          : _standardFont(font as PdfStandardFont);
+      dict.entries.addAll(resource.entries);
+    }
+    return dict;
+  }
+
+  List<_RichTextLine> _wrapRich(List<PdfFreeTextRun> runs, double maxWidth) {
+    final lines = <_RichTextLine>[];
+    var current = <_RichTextPiece>[];
+    var width = 0.0;
+
+    void flushLine() {
+      lines.add(_RichTextLine(current, width));
+      current = <_RichTextPiece>[];
+      width = 0;
+    }
+
+    void addText(PdfFreeTextRun style, String text) {
+      if (text.isEmpty) return;
+      if (current.isNotEmpty && current.last.sameStyle(style)) {
+        current[current.length - 1] =
+            _RichTextPiece(current.last.text + text, current.last.style);
+      } else {
+        current.add(_RichTextPiece(text, style));
+      }
+      width += style.font.measure(text, style.fontSize);
+    }
+
+    for (final run in runs) {
+      for (final rune in run.text.runes) {
+        if (rune == 0x0A) {
+          flushLine();
+          continue;
+        }
+        final text = String.fromCharCode(rune);
+        final w = run.font.measure(text, run.fontSize);
+        if (width > 0 && width + w > maxWidth) flushLine();
+        addText(run, text);
+      }
+    }
+    if (current.isNotEmpty || lines.isEmpty) flushLine();
+    return lines;
   }
 
   /// Adds a sticky-note (/Text) annotation with its top-left corner at
@@ -3167,14 +3405,13 @@ extension PdfAnnotationEditing on PdfEditor {
   /// Greedy word wrap with [font]'s metrics; a single word longer than
   /// [maxWidth] overflows (and is clipped by the appearance).
   List<String> _wrap(String text, double fontSize, double maxWidth,
-      {PdfStandardFont font = PdfStandardFont.helvetica}) {
+      {PdfTextFont font = PdfStandardFont.helvetica}) {
     final lines = <String>[];
     for (final paragraph in text.split('\n')) {
       var line = '';
       for (final word in paragraph.split(' ')) {
         final candidate = line.isEmpty ? word : '$line $word';
-        if (line.isNotEmpty &&
-            measureStandardText(candidate, fontSize, font: font) > maxWidth) {
+        if (line.isNotEmpty && font.measure(candidate, fontSize) > maxWidth) {
           lines.add(line);
           line = word;
         } else {

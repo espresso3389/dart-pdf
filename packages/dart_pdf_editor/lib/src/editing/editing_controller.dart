@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/painting.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf_document/pdf_document.dart';
 
 import '../renderer.dart';
@@ -615,10 +615,52 @@ class PdfEditingController extends ChangeNotifier {
   set fontSize(double value) => preferences.fontSize = value;
 
   /// Font family for free-text annotations — one of the standard PDF
-  /// text fonts (sans-serif, serif, monospace). Persisted.
+  /// text fonts (sans-serif, serif, monospace). Persisted. Selecting a
+  /// standard family also clears any [activeFont] (back to base-14).
   PdfStandardFont get fontFamily => preferences.fontFamily;
 
-  set fontFamily(PdfStandardFont value) => preferences.fontFamily = value;
+  set fontFamily(PdfStandardFont value) {
+    if (_activeFont != null) {
+      _activeFont = null;
+      notifyListeners();
+    }
+    preferences.fontFamily = value;
+  }
+
+  PdfEmbeddedFont? _activeFont;
+
+  /// An embedded TrueType/OpenType font selected for new free text, taking
+  /// precedence over [fontFamily] so authored text can use any font (not
+  /// just the base-14 faces). Null means a standard family.
+  ///
+  /// Not persisted — the font program is large, and recovering it from a
+  /// box's own appearance keeps editing lossless regardless. A session
+  /// starts on the standard fonts; reselect a bundled or custom font to
+  /// use it again.
+  PdfEmbeddedFont? get activeFont => _activeFont;
+
+  set activeFont(PdfEmbeddedFont? value) {
+    if (value == _activeFont) return;
+    _activeFont = value;
+    notifyListeners();
+  }
+
+  /// A human label for the font new free text will be written in — the
+  /// embedded font's family, or the standard family name.
+  String get activeFontLabel =>
+      _activeFont?.familyName ?? preferences.fontFamily.family.label;
+
+  /// Parses [bytes] as a TrueType (.ttf) or OpenType (.otf) font and
+  /// selects it for new free text via [activeFont]. Returns false when the
+  /// bytes aren't a usable font (and leaves the selection unchanged).
+  bool setCustomFont(Uint8List bytes) {
+    try {
+      activeFont = PdfEmbeddedFont.parse(bytes);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// Opacity (0–1] new ink, shape, markup, and stamp annotations are
   /// created with. Free text and notes are always opaque. Persisted.
@@ -691,17 +733,85 @@ class PdfEditingController extends ChangeNotifier {
   // in-place text editing
 
   bool _editingText = false;
+  TextSelection? _editingTextSelection;
+  int _editingTextStyleRevision = 0;
+  ({PdfTextFont? font, double? size, int? color})? _editingTextStyleRequest;
+  int _editSelectedTextRevision = 0;
+  int _editingTextFocusHoldCount = 0;
+  int _editingTextFocusHoldRevision = 0;
 
   /// Whether an in-place text editor (the free-text tool's box) is open
   /// on a page. While it is, the viewer releases its keyboard shortcuts —
   /// backspace must delete characters, not the annotation.
   bool get isEditingText => _editingText;
 
+  bool get hasEditingTextSelection =>
+      _editingText &&
+      _editingTextSelection != null &&
+      _editingTextSelection!.isValid &&
+      !_editingTextSelection!.isCollapsed;
+
+  int get editingTextStyleRevision => _editingTextStyleRevision;
+
+  ({PdfTextFont? font, double? size, int? color})?
+      get editingTextStyleRequest => _editingTextStyleRequest;
+
+  int get editSelectedTextRevision => _editSelectedTextRevision;
+
+  bool get isEditingTextFocusCommitHeld => _editingTextFocusHoldCount > 0;
+
+  int get editingTextFocusHoldRevision => _editingTextFocusHoldRevision;
+
   /// Marks an in-place text editor open/closed. Called by the page
   /// overlay that owns the editor.
   void setEditingText(bool value) {
     if (value == _editingText) return;
     _editingText = value;
+    if (!value) {
+      _editingTextSelection = null;
+      _editingTextStyleRequest = null;
+    }
+    notifyListeners();
+  }
+
+  void setEditingTextSelection(TextSelection selection) {
+    if (!_editingText) return;
+    if (_editingTextSelection == selection) return;
+    final hadSelection = hasEditingTextSelection;
+    _editingTextSelection = selection;
+    if (hadSelection != hasEditingTextSelection) notifyListeners();
+  }
+
+  bool restyleEditingTextSelection(
+      {PdfTextFont? font, double? size, int? color}) {
+    if (!hasEditingTextSelection) return false;
+    _editingTextStyleRequest = (font: font, size: size, color: color);
+    _editingTextStyleRevision++;
+    notifyListeners();
+    return true;
+  }
+
+  bool requestEditSelectedTextInline() {
+    if (_selected.length != 1 ||
+        selectedAnnotation?.subtype != 'FreeText' ||
+        selectedAnnotation?.isLockedContents == true) {
+      return false;
+    }
+    _editSelectedTextRevision++;
+    notifyListeners();
+    return true;
+  }
+
+  void beginEditingTextFocusHold() {
+    _editingTextFocusHoldCount++;
+    _editingTextFocusHoldRevision++;
+    notifyListeners();
+  }
+
+  void endEditingTextFocusHold() {
+    if (_editingTextFocusHoldCount == 0) return;
+    _editingTextFocusHoldCount--;
+    _editingTextFocusHoldRevision++;
     notifyListeners();
   }
 
@@ -1169,13 +1279,23 @@ class PdfEditingController extends ChangeNotifier {
   void addFreeText(int pageIndex, PdfRect rect, String text) => apply(
       (e) => e.addFreeText(pageIndex, rect, text,
           fontSize: preferences.fontSize,
-          font: preferences.fontFamily,
+          font: _activeFont ?? preferences.fontFamily,
           color: _colorValue,
           fillColor: _rgbOf(preferences.textFillColor),
           borderColor: _rgbOf(preferences.textBorderColor),
           borderWidth: preferences.strokeWidth,
           author: author),
       pages: [pageIndex]);
+
+  void addFreeTextRich(
+          int pageIndex, PdfRect rect, List<PdfFreeTextRun> runs) =>
+      apply(
+          (e) => e.addFreeTextRich(pageIndex, rect, runs,
+              fillColor: _rgbOf(preferences.textFillColor),
+              borderColor: _rgbOf(preferences.textBorderColor),
+              borderWidth: preferences.strokeWidth,
+              author: author),
+          pages: [pageIndex]);
 
   /// Places [text] as a default-sized FreeText annotation centered on
   /// ([x], [y]) in page space. This is used by keyboard paste from the
@@ -1199,7 +1319,7 @@ class PdfEditingController extends ChangeNotifier {
     final pasted = apply(
         (e) => e.addFreeText(pageIndex, rect, value,
             fontSize: fontSize,
-            font: preferences.fontFamily,
+            font: _activeFont ?? preferences.fontFamily,
             color: _colorValue,
             fillColor: _rgbOf(preferences.textFillColor),
             borderColor: _rgbOf(preferences.textBorderColor),
@@ -2817,6 +2937,16 @@ class PdfEditingController extends ChangeNotifier {
     );
   }
 
+  /// The font a free-text annotation should be re-created with on a text
+  /// or size edit: its embedded font recovered from the appearance when
+  /// present (so editing an embedded-font box keeps its font rather than
+  /// reverting to Helvetica), else the base-14 face parsed from /DA.
+  ({PdfTextFont font, double size}) _freeTextFontOf(PdfAnnotation annotation) {
+    final standard = _freeTextStyleOf(annotation);
+    final embedded = PdfEmbeddedFont.fromFreeText(annotation);
+    return (font: embedded ?? standard.font, size: standard.size);
+  }
+
   /// Whether the selection is a single free-text annotation whose font
   /// and size [restyleSelectedText] can change.
   bool get canRestyleSelectedText =>
@@ -2881,13 +3011,60 @@ class PdfEditingController extends ChangeNotifier {
       double? borderWidth}) {
     final annotation = selectedAnnotation;
     if (annotation == null || !canRestyleSelectedText) return;
-    final style = _freeTextStyleOf(annotation);
+    // Default to the box's own (possibly embedded) font, so changing only
+    // the size never silently converts an embedded font to Helvetica; an
+    // explicit [font] (the family picker) still wins.
+    final style = _freeTextFontOf(annotation);
     _rewriteSelected(annotation, annotation.contents ?? '',
         font: font ?? style.font,
         size: size ?? style.size,
         fill: fill,
         border: border,
         borderWidth: borderWidth);
+  }
+
+  /// Rewrites the selected free-text annotation in [font] — a base-14
+  /// face or an embedded TrueType/OpenType font — keeping its text, size,
+  /// place, color, and author. Unlike [restyleSelectedText] (which only
+  /// takes the standard families) this can switch a box to any embedded
+  /// font.
+  void restyleSelectedFont(PdfTextFont font) {
+    final annotation = selectedAnnotation;
+    if (annotation == null || !canRestyleSelectedText) return;
+    final style = _freeTextFontOf(annotation);
+    _rewriteSelected(annotation, annotation.contents ?? '',
+        font: font, size: style.size);
+  }
+
+  /// Applies font, size, and/or text color to a substring of the selected
+  /// FreeText annotation, leaving the rest of the annotation in its current
+  /// style. [start] and [end] are UTF-16 string offsets, matching Flutter's
+  /// [TextSelection] offsets.
+  bool restyleSelectedTextRange(int start, int end,
+      {PdfTextFont? font, double? size, int? color}) {
+    final annotation = selectedAnnotation;
+    if (annotation == null || !canRestyleSelectedText) return false;
+    final text = annotation.contents ?? '';
+    final from = math.max(0, math.min(start, end)).clamp(0, text.length);
+    final to = math.min(text.length, math.max(start, end));
+    if (from == to) return false;
+    final base = _freeTextFontOf(annotation);
+    final parsed = annotation.freeTextStyle;
+    final baseColor = parsed?.color ?? annotation.color ?? _colorValue;
+    final target = PdfFreeTextRun(text.substring(from, to),
+        font: font ?? base.font,
+        fontSize: size ?? base.size,
+        color: color ?? baseColor);
+    final runs = <PdfFreeTextRun>[
+      if (from > 0)
+        PdfFreeTextRun(text.substring(0, from),
+            font: base.font, fontSize: base.size, color: baseColor),
+      target,
+      if (to < text.length)
+        PdfFreeTextRun(text.substring(to),
+            font: base.font, fontSize: base.size, color: baseColor),
+    ];
+    return _rewriteSelectedRich(annotation, runs);
   }
 
   /// Rewrites the selected annotation's text: same place, same style, new
@@ -2897,6 +3074,12 @@ class PdfEditingController extends ChangeNotifier {
     final annotation = selectedAnnotation;
     if (annotation == null || !canEditSelectedText) return;
     _rewriteSelected(annotation, text);
+  }
+
+  bool setSelectedRichText(List<PdfFreeTextRun> runs) {
+    final annotation = selectedAnnotation;
+    if (annotation == null || !canEditSelectedText) return false;
+    return _rewriteSelectedRich(annotation, runs);
   }
 
   /// Sets the (single) selected annotation's /Contents. For subtypes
@@ -2938,7 +3121,7 @@ class PdfEditingController extends ChangeNotifier {
   }
 
   void _rewriteSelected(PdfAnnotation annotation, String text,
-      {PdfStandardFont? font,
+      {PdfTextFont? font,
       double? size,
       (int?,)? fill,
       (int?,)? border,
@@ -2959,7 +3142,7 @@ class PdfEditingController extends ChangeNotifier {
       e.removeAnnotation(page, annotation);
       switch (annotation.subtype) {
         case 'FreeText':
-          final style = _freeTextStyleOf(annotation);
+          final style = _freeTextFontOf(annotation);
           // the parsed style carries what /C alone can't: the text color
           // (from /DA) plus any background fill and border; a wrapped
           // [fill]/[border] overrides it (see restyleSelectedText)
@@ -2999,6 +3182,41 @@ class PdfEditingController extends ChangeNotifier {
         ..add((page, annotations.length - 1));
       notifyListeners();
     }
+  }
+
+  bool _rewriteSelectedRich(
+      PdfAnnotation annotation, List<PdfFreeTextRun> runs) {
+    if (_selected.isEmpty || annotation.subtype != 'FreeText') return false;
+    final page = _selected.last.$1;
+    final rotation = _appearanceRotationOf(annotation);
+    final rect = rotation == 0 ? annotation.rect : _localFrameOf(annotation);
+    final by = annotation.author;
+    final nm = annotation.name;
+    final parsed = annotation.freeTextStyle;
+    _selected.clear();
+    final changed = apply((e) {
+      e.removeAnnotation(page, annotation);
+      e.addFreeTextRich(page, rect, runs,
+          fillColor: parsed?.fillColor,
+          borderColor: parsed?.borderColor,
+          borderWidth: (parsed?.borderWidth ?? 0) > 0 ? parsed!.borderWidth : 1,
+          author: by,
+          name: nm);
+      if (rotation != 0) {
+        final added = _document.page(page).annotations;
+        if (added.isNotEmpty) {
+          e.rotateAnnotation(page, added.last, rotation * 180 / math.pi);
+        }
+      }
+    }, pages: [page]);
+    final annotations = _page(page).annotations;
+    if (annotations.isNotEmpty) {
+      _selected
+        ..clear()
+        ..add((page, annotations.length - 1));
+      notifyListeners();
+    }
+    return changed;
   }
 
   /// The page-space rotation baked into [annotation]'s appearance (radians

@@ -240,10 +240,9 @@ _DctCmykImage? _decodeDctCmyk(Uint8List jpegBytes) {
         final cr = yy - 128;
         final cb = m - 128;
         final yScaled = c << 8;
-        c = _shiftR(yScaled + 359 * cr, 8).clamp(0, 255);
-        m = _shiftR(yScaled - 88 * cb - 183 * cr, 8).clamp(0, 255);
-        yy = _shiftR(yScaled + 454 * cb, 8).clamp(0, 255);
-        k = 255 - k;
+        c = 255 - _shiftR(yScaled + 359 * cr, 8).clamp(0, 255);
+        m = 255 - _shiftR(yScaled - 88 * cb - 183 * cr, 8).clamp(0, 255);
+        yy = 255 - _shiftR(yScaled + 454 * cb, 8).clamp(0, 255);
       }
 
       final i = (y * width + x) * 4;
